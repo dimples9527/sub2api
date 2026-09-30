@@ -503,6 +503,13 @@ export interface SupplierGroupElectionDecisionDetail {
   count_weight?: number
   latency_weight?: number
   priority_weight?: number
+  /**
+   * true 表示该组本轮把「账号优先级」计入了综合分（分组级开关的最终判定结果）。
+   * 需要它是因为 priority_score 为 0 有两种含义：本组不计优先级，或计了但这个账号就是最低的 0 分；
+   * priority_weight 两种情况都是配置值，也分不出来。
+   * 旧运行记录没有这个字段（undefined），此时不做判断、按「计了」显示。
+   */
+  priority_enabled?: boolean
   /** 次数分的封顶值：连续成功次数超过它之后不再加分。 */
   count_score_cap?: number
   /** 真正参与评分的延迟（含成功率惩罚与在任者迟滞折算），与日志里显示的「测试用时」不是同一个数。 */

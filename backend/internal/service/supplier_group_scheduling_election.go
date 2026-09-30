@@ -319,6 +319,12 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	CountWeight    float64 `json:"count_weight"`
 	LatencyWeight  float64 `json:"latency_weight"`
 	PriorityWeight float64 `json:"priority_weight"`
+	// PriorityEnabled 表示该组本轮是否把「账号优先级」计入综合分（分组级开关的最终判定结果）。
+	// 必须单独给出来：PriorityScore 为 0 时只看分数分不清「本组压根不计优先级」还是
+	// 「计了、但这个账号算出来就是最低的 0 分」；PriorityWeight 两种情况都是配置值，同样分不出来。
+	// 与上面那组评分字段同理，刻意不带 omitempty —— false 是合法取值，
+	// 省略后前端只能把它读成「没有这个数据」。
+	PriorityEnabled bool `json:"priority_enabled"`
 	// CountScoreCap 是次数分的封顶值：连续成功次数超过它之后，次数分不再增长。
 	CountScoreCap int `json:"count_score_cap"`
 	// EffectiveLatencyMs 是参与评分的延迟（含成功率惩罚与在任者迟滞折算），
@@ -870,6 +876,9 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				decision.CountWeight = config.CountWeight
 				decision.LatencyWeight = config.LatencyWeight
 				decision.PriorityWeight = config.PriorityWeight
+				// 分组级开关的判定结果：本组不计优先级时 PriorityScore 会被置 0，
+				// 光看分数和权重都还原不出「是没计还是算出来就是 0」，所以在这里显式记一笔。
+				decision.PriorityEnabled = priorityEnabledForGroup(groupID)
 				decision.CountScoreCap = config.CountScoreCap
 				decision.EffectiveLatencyMs = score.EffectiveLatencyMs
 				decision.LatencyFallback = score.LatencyFallback

@@ -160,6 +160,8 @@
                       <span class="sp-election-log-batch-time">{{ formatDateTime(batch.changedAt) }}</span>
                       <span class="sp-election-log-batch-status" :class="runStatusClass(batch.runStatus)">{{ runStatusText(batch.runStatus) }}</span>
                       <small class="sp-election-log-batch-count">本批次 {{ batch.rows.length }} 条</small>
+                      <!-- 批次口径：取前 N 名、入选线、权重、封顶等组级固定参数，同批次同组每行都一样，只在标题写一次。 -->
+                      <small v-if="batchCalibration(section, batch)" class="sp-election-log-batch-calibration">{{ batchCalibration(section, batch) }}</small>
                     </td>
                   </tr>
                   <tr v-for="log in batch.rows" :key="`${batch.key}-${rowKey(log)}`" class="sp-election-log-row">
@@ -192,20 +194,41 @@
                       <span v-else-if="column.key === 'healthy_count'">{{ log.healthy_count }}</span>
                       <span v-else-if="column.key === 'latency_ms'" class="sp-election-log-latency" :class="{ 'is-empty': !log.latency_ms }">{{ latencyText(log.latency_ms) }}</span>
                       <template v-else-if="column.key === 'reason'">
-                        <!-- 用本组结论而不是 log.reason：后者是账号级的（union 语义），
-                             照抄到别的分组分节下会把「本组落选」写成「分组内最优」。
-                             旧记录没有依据，groupReasonText 返回空串时降级回账号级原因。 -->
-                        <small class="sp-election-log-reason">{{ groupReasonText(section, log) || log.reason || '—' }}</small>
+                        <!-- 结论按本组那条依据分类上色（reasonView），扫一列色块就能分堆，不必逐句读散文。
+                             用本组结论而不是账号级 log.reason：后者是 union 语义，
+                             照抄到别的分组分节下会把「本组落选」写成「分组内最优」。 -->
+                        <template v-if="reasonView(section, log).badge">
+                          <div class="sp-election-log-reason-head">
+                            <span class="sp-election-log-reason-badge" :class="reasonBadgeClass(reasonView(section, log).badge)">{{ reasonView(section, log).badge?.label }}</span>
+                            <!-- 名次/综合分：对比时最常看的两个数，从折叠的「依据」里提到行内。 -->
+                            <span v-if="reasonView(section, log).rank" class="sp-election-log-reason-rank">{{ reasonView(section, log).rank }}</span>
+                          </div>
+                          <small v-if="reasonView(section, log).note" class="sp-election-log-reason-note">{{ reasonView(section, log).note }}</small>
+                          <!-- 评分贡献条：次数/用时/优先三段按加权贡献上色，上下对齐扫一列就看出谁靠哪项赢的。
+                               段宽 = 加权贡献 / 综合分；段首的「次/时/级」小字就是图例，不再单画一行。
+                               0 贡献的段（如本组不计优先级）不画，只对 scored 行显示。 -->
+                          <div v-if="scoreBreakdown(section, log)" class="sp-election-log-score-breakdown">
+                            <div v-if="scoreBreakdown(section, log)!.segments.length > 0" class="sp-election-log-score-bar">
+                              <span
+                                v-for="segment in scoreBreakdown(section, log)!.segments"
+                                :key="segment.label"
+                                class="sp-election-log-score-segment"
+                                :class="`is-${segment.kind}`"
+                                :style="{ width: `${segment.widthPercent}%` }"
+                                :title="`${segment.label} ${segment.value}`"
+                              >
+                                <small class="sp-election-log-score-segment-label">{{ segment.shortLabel }}</small>
+                              </span>
+                            </div>
+                            <!-- 单行旗标：只跟这一行相关的标记（封顶命中、用时中性）才显示，不命中就不出现。 -->
+                            <small v-if="scoreBreakdown(section, log)!.flags.length > 0" class="sp-election-log-score-flags">
+                              {{ scoreBreakdown(section, log)!.flags.join(' · ') }}
+                            </small>
+                          </div>
+                        </template>
+                        <!-- 没归到分类的行（旧记录无依据、账号级跳过原因）降级回原文。 -->
+                        <small v-else class="sp-election-log-reason">{{ reasonView(section, log).fallback }}</small>
                         <small v-if="log.error_message" class="sp-election-log-error">{{ log.error_message }}</small>
-                        <!-- 一句话结论说不清「为什么是它」：评分构成、组内名次、入选线、
-                             必需模型补选、在任者锁定这些都摊在这里，省得管理员回头翻配置和源码。
-                             旧运行记录里没有 group_decisions，此时整块不渲染（自动降级回原来的一行原因）。 -->
-                        <details v-if="whyFacts(section, log).length > 0" class="sp-election-log-why">
-                          <summary>依据</summary>
-                          <ul class="sp-election-log-why-list">
-                            <li v-for="(fact, index) in whyFacts(section, log)" :key="index">{{ fact }}</li>
-                          </ul>
-                        </details>
                       </template>
                     </td>
                   </tr>
@@ -238,6 +261,7 @@ import { getAllIncludingInactive } from '@/api/admin/groups'
 import {
   listGroupElectionChangeLogs,
   type SupplierGroupElectionChangeLog,
+  type SupplierGroupElectionDecisionDetail,
   type SupplierGroupElectionRecentRun,
 } from '@/api/admin/supplierAutomation'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -547,6 +571,86 @@ interface LogSection {
 // 分组名缺失时的兜底桶（分组已被删除，或历史数据没记名字）。
 const NO_GROUP_KEY = '__no_group__'
 
+// 批次口径：取前 N 名、入选线、权重、封顶等组级固定参数，同批次同组每行都一样，只在标题写一次。
+// 只对有 scored 行的批次显示（没人参与评分就没有口径可言）。
+function batchCalibration(section: LogSection, batch: LogBatchBlock): string {
+  // 从本批次任一 scored 行拿口径（同批次同组口径一致）。
+  const anyScored = batch.rows.map(log => decisionFor(section, log)).find(d => d?.scored)
+  if (!anyScored) return ''
+  const parts: string[] = []
+  if (anyScored.top_n) {
+    parts.push(`取前 ${anyScored.top_n} 名`)
+  }
+  if (typeof anyScored.winner_cutoff === 'number') {
+    parts.push(`入选线 ${anyScored.winner_cutoff.toFixed(3)}`)
+  }
+  const weights: string[] = []
+  if (typeof anyScored.count_weight === 'number') weights.push(`次${anyScored.count_weight.toFixed(1)}`)
+  if (typeof anyScored.latency_weight === 'number') weights.push(`时${anyScored.latency_weight.toFixed(1)}`)
+  // 级只在「本组真的计优先级」时才列进权重：priority_weight 恒为配置值（本组禁用时也是 0.5），
+  // 无条件列出来会把「不计」写成「计了 0.5」。旧记录没有 priority_enabled（undefined），保持原样。
+  if (anyScored.priority_enabled !== false && typeof anyScored.priority_weight === 'number') {
+    weights.push(`级${anyScored.priority_weight.toFixed(1)}`)
+  }
+  if (weights.length > 0) parts.push(`权重 ${weights.join('/')}`)
+  if (anyScored.count_score_cap) parts.push(`次数封顶 ${anyScored.count_score_cap}`)
+  // 不计优先级是一句「有或没有」的口径，放在权重后面单列，比在权重里塞个 0 更好读。
+  if (anyScored.priority_enabled === false) parts.push('本组不计优先级')
+  return parts.join(' · ')
+}
+
+// 评分贡献条：次数/用时/优先三段按加权贡献上色，上下对齐扫一列就看出谁靠哪项赢的。
+// 只对 scored 行显示（没参与评分就没有构成可言）。
+interface ScoreSegment {
+  kind: 'count' | 'latency' | 'priority'
+  label: string
+  shortLabel: string
+  value: string
+  widthPercent: number
+}
+interface ScoreBreakdown {
+  segments: ScoreSegment[]
+  flags: string[]
+}
+function scoreBreakdown(section: LogSection, log: SupplierGroupElectionChangeLog): ScoreBreakdown | null {
+  const decision = decisionFor(section, log)
+  if (!decision || !decision.scored) return null
+  const segments: ScoreSegment[] = []
+  const flags: string[] = []
+  const score = (value?: number) => (typeof value === 'number' ? value.toFixed(3) : '—')
+
+  // 加权贡献 = 分项得分 × 权重；段宽 = 加权贡献 / 综合分。
+  const total = decision.score ?? 0
+  const pushSegment = (kind: ScoreSegment['kind'], label: string, shortLabel: string, scoreValue?: number, weight?: number) => {
+    if (typeof scoreValue !== 'number' || typeof weight !== 'number') return
+    const widthPercent = total > 0 ? ((scoreValue * weight) / total) * 100 : 0
+    // 段宽为 0 的项在这一行上没有任何贡献：画出来只剩一个 1px 空条加一个被裁掉的标签，
+    // 反而会被读成「这项有值、只是很小」。0 贡献的段一律不画。
+    if (widthPercent <= 0) return
+    segments.push({ kind, label, shortLabel, value: score(scoreValue), widthPercent })
+  }
+
+  pushSegment('count', '次数', '次', decision.count_score, decision.count_weight)
+  pushSegment('latency', '用时', '时', decision.latency_score, decision.latency_weight)
+  // 本组不计优先级时这一项必然 0 贡献（后端已把 priority_score 置 0），直接不参与画条；
+  // 旧运行记录没有 priority_enabled，由上面「0 贡献不画」兜住。
+  if (decision.priority_enabled !== false) {
+    pushSegment('priority', '优先级', '级', decision.priority_score, decision.priority_weight)
+  }
+
+  // 单行旗标：只跟这一行相关的标记才显示，不命中就不出现。
+  if (decision.count_score_cap && (decision.count_score ?? 0) >= 1.0) {
+    flags.push('次数封顶命中')
+  }
+  if (decision.latency_fallback) {
+    flags.push('用时中性')
+  }
+
+  // 既没构成也没旗标就整块不渲染，别留一条空条。
+  if (segments.length === 0 && flags.length === 0) return null
+  return { segments, flags }
+}
+
 // 取「本行在本分节这个分组下」的那条裁决依据。
 // 依据是按分组存的（一个账号跨多个分组时各组结论可能不同），所以必须按当前分节挑一条，
 // 不能把该行的所有依据堆在一起 —— 那会把 A 组的评分解释到 B 组的行上。
@@ -559,93 +663,60 @@ function decisionFor(section: LogSection, log: SupplierGroupElectionChangeLog) {
   return matched || (decisions.length === 1 ? decisions[0] : undefined)
 }
 
-// 把一条依据摊成可读的短句。判定逻辑全在这里，模板只负责渲染。
-function whyFacts(section: LogSection, log: SupplierGroupElectionChangeLog): string[] {
-  const decision = decisionFor(section, log)
-  if (!decision) return []
-  const facts: string[] = []
-  const fixed = (value?: number) => (typeof value === 'number' ? value.toFixed(2) : '—')
-  const score = (value?: number) => (typeof value === 'number' ? value.toFixed(3) : '—')
-  const requiredModels = decision.required_models || []
-
-  if (decision.locked && !decision.over_capacity) {
-    facts.push('本组走在任者健康锁定：在任账号测试都正常，本轮不做择优换人（名次仅供参考）')
-  }
-  if (decision.no_alternative) {
-    facts.push('本组没有任何测试成功的账号，为避免关成空组，失败账号保持原状待人工确认')
-  }
-
-  if (decision.scored) {
-    const hasPriority = typeof decision.priority_weight === 'number'
-    let breakdown = `综合分 ${score(decision.score)} = 次数分 ${score(decision.count_score)} × 权重 ${fixed(decision.count_weight)}`
-      + ` + 用时分 ${score(decision.latency_score)} × 权重 ${fixed(decision.latency_weight)}`
-    if (hasPriority) {
-      breakdown += ` + 优先级分 ${score(decision.priority_score)} × 权重 ${fixed(decision.priority_weight)}`
-    }
-    facts.push(breakdown)
-    if (decision.count_score_cap) {
-      facts.push(`次数分按封顶 ${decision.count_score_cap} 归一：连续成功次数超过该值后不再加分`)
-    }
-    if (decision.latency_fallback) {
-      facts.push('用时项取中性值 0.5：同平台可比样本不足 2 个，或各账号耗时完全相同，比不出高下')
-    } else if (decision.effective_latency_ms) {
-      facts.push(`评分用时 ${latencyText(decision.effective_latency_ms)}（已含成功率惩罚，在任者另按迟滞系数折算）`)
-    }
-    if (hasPriority) {
-      facts.push(
-        decision.priority_score === 0
-          ? '该分组未开启「优先级计分」：优先级没有影响本组排序'
-          : '优先级项已在同组内 min-max 归一（数值越小优先级越高，最高者得满 1 分）'
-      )
-    }
-    if (decision.rank && decision.rank_total) {
-      const cutoff = typeof decision.winner_cutoff === 'number' ? score(decision.winner_cutoff) : '—'
-      facts.push(`组内名次 ${decision.rank} / ${decision.rank_total}，入选线 ${cutoff}（取前 ${decision.top_n ?? '—'} 名）`)
-    }
-  } else {
-    facts.push(decision.test_failed ? '该组当前测试失败，未参与择优' : '该组当前不是测试成功状态，未参与择优')
-  }
-
-  if (requiredModels.length > 0) {
-    facts.push(`因分组必需模型 ${requiredModels.join('、')} 在赢家中无人支持，被按综合分补选开启（不要求名次进前 N）`)
-  } else if (decision.over_capacity) {
-    // 被容量收敛掉的账号必须与「在任者健康锁定」区分开：后者是保留，这里是关闭。
-    // 也不说「名次不在前 N」——它可能就是本组 top1，只是本组已经开够了账号。
-    facts.push('本组已开启账号数达到上限，本轮不再新开：该在任账号让位关闭（被其它分组共用的账号会由那些分组保住）')
-  } else if (decision.elected) {
-    facts.push('本组择优入选：综合分在前 N 名内')
-  } else if (decision.scored && !decision.locked) {
-    facts.push('本组未入选：综合分不在前 N 名内')
-  }
-  return facts
+// 原因列的分类结论：把散文收敛成一眼可辨的色标签。kind 决定颜色，label 是短标签。
+type ReasonBadgeKind =
+  | 'elected' | 'required' | 'locked' | 'converged' | 'not-elected' | 'test-failed' | 'no-election'
+interface ReasonBadge {
+  kind: ReasonBadgeKind
+  label: string
+}
+interface ReasonView {
+  badge: ReasonBadge | null
+  // 标签说不完、但对比时又必须点破的补充（如「该账号在其它分组当选」）。无则为空串。
+  note: string
+  // 名次/综合分：对比时最常看的两个数，从折叠的「依据」里提到行内。无评分时为空串。
+  rank: string
+  // 没归到任何分类时（旧记录无依据、账号级跳过原因）降级回的原文。
+  fallback: string
 }
 
-// 本行在**当前分组**下的结论，用作「原因」列那句话。
+// 本行在**当前分组**下的分类结论 —— 原因列的色标签就按它上色。
 //
-// 为什么不直接用 log.reason：那是账号级结论，而账号的调度开关是单一字段（union 语义）——
+// 为什么不直接按账号级 log.reason 分类：那是账号级结论，而账号的调度开关是单一字段（union 语义）——
 // 它在 A 组当选、在 B 组落选时整体仍记「分组内最优」，照抄到 B 组的分节下就是错的。
-// 这里按本组那条依据重新给结论；旧运行记录没有依据，返回空串由调用方降级回 log.reason。
-function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLog): string {
-  const decision = decisionFor(section, log)
-  if (!decision) return ''
-  // 容量收敛必须排在锁定之前：被收敛掉的账号也带 locked（本组本轮没做择优），
-  // 但它是被关闭的，写「未换人」会和同一行的「关闭」自相矛盾。
-  if (decision.over_capacity) return '本组开启数已达上限，收敛关闭'
-  if (decision.locked) return '本组在任者健康锁定，未换人'
+// 这里只认「本组那条依据」，所以同一账号在不同分组分节下可以是不同的标签；
+// 旧运行记录没有依据（decision 为空）时不归类，由调用方降级回 log.reason。
+function classifyReason(
+  log: SupplierGroupElectionChangeLog,
+  decision?: SupplierGroupElectionDecisionDetail,
+): { badge: ReasonBadge | null; note: string } {
+  if (!decision) return { badge: null, note: '' }
+  // 收敛关闭必须排在锁定之前：被收敛掉的在任者也带 locked（本组本轮没做择优），
+  // 但它是被「关闭」的，标成「健康锁定（保留）」会与同一行的「关闭调度」自相矛盾。
+  if (decision.over_capacity) return { badge: { kind: 'converged', label: '收敛关闭' }, note: '本组开启数已达上限' }
+  if (decision.locked) return { badge: { kind: 'locked', label: '健康锁定' }, note: '在任者正常，本轮未换人' }
   if (decision.required_models && decision.required_models.length > 0) {
-    return `本组因必需模型 ${decision.required_models.join('、')} 补选`
+    return { badge: { kind: 'required', label: '必需模型补选' }, note: decision.required_models.join('、') }
   }
-  if (decision.elected) return '本组择优入选'
-  // 含未切换视图里的「本该动却没动」行（before === after，且非锁定）：结论落在账号级
-  // ——无备选保留 / 连续失败待观察 / 写库失败，这些都是 union 语义下账号整体的裁决，
-  // 交回 log.reason 才准；这里按「本组未入选」下结论反而是错的（它压根没被换掉）。
-  if (log.schedulable_before === log.schedulable_after) return ''
-  // 本组没选它，它却可能因为在别的分组当选而被打开 —— 不点破的话，
-  // 「开启调度」与「本组未入选」并列会被读成自相矛盾。
-  if (log.direction === 'enabled') return '本组未入选（该账号在其它分组当选）'
-  if (decision.test_failed) return '本组测试失败'
-  if (decision.scored) return '本组未入选'
-  return '本组未参与择优'
+  if (decision.elected) return { badge: { kind: 'elected', label: '择优入选' }, note: '' }
+  // 「本该动却没动」行（before === after 且非锁定）：结论落在账号级 —— 无备选保留 /
+  // 连续失败待观察 / 写库失败，这些是 union 语义下账号整体的裁决，交回 log.reason 才准，这里不硬归类。
+  if (log.schedulable_before === log.schedulable_after) return { badge: null, note: '' }
+  // 本组没选它、账号却开着（靠别的分组当选）：必须点破，否则「开启调度」与「未入选」并列会读成自相矛盾。
+  if (log.direction === 'enabled') return { badge: { kind: 'not-elected', label: '本组未入选' }, note: '该账号在其它分组当选' }
+  if (decision.test_failed) return { badge: { kind: 'test-failed', label: '测试失败' }, note: '' }
+  if (decision.scored) return { badge: { kind: 'not-elected', label: '未入选' }, note: '' }
+  return { badge: { kind: 'no-election', label: '未参与择优' }, note: '' }
+}
+
+// 名次/综合分：对比时最常看的两个数，原先埋在折叠的「依据」里、逐行点开才看得到，提到行内。
+// 只有真正参与评分（scored）才给：锁定/收敛的行虽也带名次，但那是评过分后才被规则收走的。
+function reasonRankText(decision?: SupplierGroupElectionDecisionDetail): string {
+  if (!decision || !decision.scored) return ''
+  const parts: string[] = []
+  if (decision.rank && decision.rank_total) parts.push(`名次 ${decision.rank}/${decision.rank_total}`)
+  if (typeof decision.score === 'number') parts.push(`综合分 ${decision.score.toFixed(3)}`)
+  return parts.join(' · ')
 }
 
 // 按分组分节、组内再按批次分块。
@@ -719,6 +790,33 @@ const sections = computed<LogSection[]>(() => {
   }
   return list
 })
+
+// 每行的原因视图预先算好一份，模板里多处引用同一份，省得反复分类。
+// 键要拼分组：同一个账号在它所属的每个分组分节下各出现一次，本组结论可以不同。
+function buildReasonView(section: LogSection, log: SupplierGroupElectionChangeLog): ReasonView {
+  const decision = decisionFor(section, log)
+  const { badge, note } = classifyReason(log, decision)
+  return { badge, note, rank: reasonRankText(decision), fallback: log.reason || '—' }
+}
+
+const reasonViewMap = computed(() => {
+  const map = new Map<string, ReasonView>()
+  for (const section of sections.value) {
+    for (const batch of section.batches) {
+      for (const log of batch.rows) map.set(`${section.key}::${rowKey(log)}`, buildReasonView(section, log))
+    }
+  }
+  return map
+})
+
+function reasonView(section: LogSection, log: SupplierGroupElectionChangeLog): ReasonView {
+  return reasonViewMap.value.get(`${section.key}::${rowKey(log)}`)
+    ?? { badge: null, note: '', rank: '', fallback: log.reason || '—' }
+}
+
+function reasonBadgeClass(badge: ReasonBadge | null): string {
+  return badge ? `is-${badge.kind}` : ''
+}
 
 async function load() {
   loading.value = true
@@ -857,6 +955,9 @@ watch(() => props.accountId, () => {
   --sp-election-log-line: #e5e7eb;
   --sp-election-log-panel: #ffffff;
   --sp-election-log-soft: #f1f5f9;
+  /* 贡献条段首标签用的正文字色。段底色是「色相 50% 混面板」，深浅不定，
+     标签压在上面必须自己带色，不能靠继承（继承到的颜色随主题漂）。 */
+  --sp-election-log-ink: #0f172a;
   display: grid;
   gap: 12px;
 }
@@ -878,6 +979,7 @@ watch(() => props.accountId, () => {
   --sp-election-log-line: #374151;
   --sp-election-log-panel: #1f2937;
   --sp-election-log-soft: #374151;
+  --sp-election-log-ink: #e2e8f0;
 }
 
 .sp-election-log-hint {
@@ -1201,6 +1303,13 @@ watch(() => props.accountId, () => {
   font-size: 11px;
 }
 
+/* 批次口径：取前 N 名、入选线、权重、封顶等组级固定参数，同批次同组每行都一样，只在标题写一次。 */
+.sp-election-log-batch-calibration {
+  margin-left: 10px;
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+}
+
 /* 批次状态徽标。刻意不复用页面级 `.sp-status`：它依赖 `.supplier-management-page` 上的 --sp-*，
    而本弹窗被 Teleport 到 body，那些变量在这里未定义 ⇒ 边框/底色/颜色全部失效、只剩裸文字。
    这里用弹窗自己声明的 --sp-election-log-*，配色与数据行的方向列对齐（绿 / 黄 / 红）。 */
@@ -1337,44 +1446,150 @@ watch(() => props.accountId, () => {
   color: #f87171;
 }
 
-/* 「依据」折叠块：默认收起，免得一屏几十行把表格撑散；展开后逐条列出评分构成、
-   组内名次、入选线、必需模型补选、在任者锁定等。配色沿用弹窗自持变量，暗色自动跟随。 */
-.sp-election-log-why {
-  margin-top: 4px;
+/* 原因列的分类色标签：把结论从灰色小字提成一眼可辨的色块，扫一列就能分堆
+   （入选 / 收敛关闭 / 健康锁定 / 必需模型补选 / 未入选 / 测试失败 / 未参与）。
+   配色由业务语义驱动，与方向列、批次状态徽标同一套取色（绿好 / 琥珀让位 / 蓝保留 / 红失败）。 */
+.sp-election-log-reason-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sp-election-log-reason-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border: 1px solid var(--sp-election-log-line);
+  border-radius: 9999px;
+  background: var(--sp-election-log-panel);
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sp-election-log-reason-badge.is-elected {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #16a34a 8%, var(--sp-election-log-panel));
+  color: #16a34a;
+}
+
+.sp-election-log-reason-badge.is-converged {
+  border-color: color-mix(in srgb, #d97706 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #d97706 8%, var(--sp-election-log-panel));
+  color: #d97706;
+}
+
+.sp-election-log-reason-badge.is-locked {
+  border-color: color-mix(in srgb, #2563eb 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #2563eb 8%, var(--sp-election-log-panel));
+  color: #2563eb;
+}
+
+.sp-election-log-reason-badge.is-required {
+  border-color: color-mix(in srgb, #7c3aed 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #7c3aed 8%, var(--sp-election-log-panel));
+  color: #7c3aed;
+}
+
+.sp-election-log-reason-badge.is-test-failed {
+  border-color: color-mix(in srgb, #dc2626 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #dc2626 8%, var(--sp-election-log-panel));
+  color: #dc2626;
+}
+
+/* 未入选 / 未参与择优：中性灰。它们不是错误也不是成绩，只是「这次没轮到」，
+   染成红或绿都会误读，用默认的灰底灰字即可，不再单独上色。 */
+
+/* 暗色下把语义色亮一档，否则深底上对比不足（与批次状态徽标同样处理）。 */
+.dark .sp-election-log-reason-badge.is-elected { color: #4ade80; border-color: color-mix(in srgb, #4ade80 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-converged { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-locked { color: #60a5fa; border-color: color-mix(in srgb, #60a5fa 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-required { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-test-failed { color: #f87171; border-color: color-mix(in srgb, #f87171 35%, var(--sp-election-log-line)); }
+
+/* 名次/综合分：等宽数字，方便上下行对齐着比大小。 */
+.sp-election-log-reason-rank {
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 标签说不完、但对比时又必须点破的补充（如「该账号在其它分组当选」）。 */
+.sp-election-log-reason-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--sp-election-log-muted);
   font-size: 11px;
   line-height: 1.5;
 }
 
-.sp-election-log-why > summary {
-  color: var(--sp-election-log-accent);
-  cursor: pointer;
+/* 评分贡献条：次数/用时/优先三段按加权贡献上色，上下对齐扫一列就看出谁靠哪项赢的。
+   只对 scored 行显示（没参与评分就没有构成可言）。 */
+.sp-election-log-score-breakdown {
+  margin-top: 6px;
+}
+
+.sp-election-log-score-bar {
+  display: flex;
+  height: 18px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--sp-election-log-line) 30%, transparent);
+}
+
+/* 标签放段首（「次▇▇▇」），不居中：一眼能对上「这一段是哪一项」，省掉一行图例。
+   标签永远在段内左侧，所以特别窄的段会把字裁掉 —— 但窄到那种程度的段贡献已接近 0，
+   早就在 pushSegment 里被滤掉了，不会出现「只看得见半截标签」。 */
+.sp-election-log-score-segment {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  position: relative;
+  min-width: 1px;
+  padding-left: 3px;
+}
+
+.sp-election-log-score-segment.is-count {
+  background: color-mix(in srgb, #16a34a 50%, var(--sp-election-log-panel));
+}
+
+.sp-election-log-score-segment.is-latency {
+  background: color-mix(in srgb, #2563eb 50%, var(--sp-election-log-panel));
+}
+
+.sp-election-log-score-segment.is-priority {
+  background: color-mix(in srgb, #7c3aed 50%, var(--sp-election-log-panel));
+}
+
+.dark .sp-election-log-score-segment.is-count {
+  background: color-mix(in srgb, #4ade80 40%, var(--sp-election-log-panel));
+}
+
+.dark .sp-election-log-score-segment.is-latency {
+  background: color-mix(in srgb, #60a5fa 40%, var(--sp-election-log-panel));
+}
+
+.dark .sp-election-log-score-segment.is-priority {
+  background: color-mix(in srgb, #a78bfa 40%, var(--sp-election-log-panel));
+}
+
+.sp-election-log-score-segment-label {
+  color: var(--sp-election-log-ink);
+  font-size: 10px;
   font-weight: 700;
-  list-style: none;
+  opacity: 0.7;
 }
 
-.sp-election-log-why > summary::-webkit-details-marker {
-  display: none;
-}
-
-/* 原生 marker 被摘掉后自己画一个，否则看不出这里可以点开。 */
-.sp-election-log-why > summary::before {
-  content: '▸';
-  display: inline-block;
-  margin-right: 4px;
-}
-
-.sp-election-log-why[open] > summary::before {
-  content: '▾';
-}
-
-.sp-election-log-why-list {
-  margin: 4px 0 0;
-  padding-left: 14px;
+/* 单行旗标：只跟这一行相关的标记（封顶命中、用时中性）才显示，不命中就不出现。 */
+.sp-election-log-score-flags {
+  display: block;
+  margin-top: 3px;
   color: var(--sp-election-log-muted);
-  list-style: disc;
-}
-
-.sp-election-log-why-list > li + li {
-  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.5;
 }
 </style>

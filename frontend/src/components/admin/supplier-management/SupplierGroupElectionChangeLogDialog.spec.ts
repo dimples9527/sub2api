@@ -68,7 +68,8 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
   it('重置筛选保留分组锁定，换分组要走查看全部', () => {
     // 用户是冲着某个分组点开弹窗的，重置时把分组一起清掉会让人误以为看到的是全局日志。
     // 平台也要一起清：它是筛选条件，不清就会留下一个看不见的收窄。
-    expect(source).toContain("filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '' }")
+    // 「含未切换」同理，是个放宽范围的开关，重置也要收回默认（false）。
+    expect(source).toContain("filters.value = { direction: 'all', platform: '', search: '', startedFrom: '', startedTo: '', includeSkipped: false }")
     expect(source).toContain('function clearGroup()')
     expect(source).toContain('clearedGroup.value = true')
     // 分组筛选有三个来源（下拉 > 查看全部 > props 锁定），props 锁定的优先级最低那一档。
@@ -318,34 +319,103 @@ describe('调度切换日志的两个入口', () => {
     expect(cssBlock('.sp-election-log-suggested')).toContain('dashed')
   })
 
-  it('原因列摊开「为什么是它」：评分、名次、入选线、必需模型补选都要能看见', () => {
-    // 一句话原因（「综合分入选」）没法复核：评分怎么算的、组内第几名、入选线多少、
+  it('批次口径只写一次：上提到批次小标题行，不再逐行重复', () => {
+    // 取前 N 名、入选线、三项权重、次数封顶这些「同组同批次每行都一样」的参数，
+    // 逐行铺正是这份日志显得啰嗦的根源 —— 上提到批次小标题行，一组一批只写一次。
+    expect(source).toContain('function batchCalibration(')
+    expect(source).toContain('class="sp-election-log-batch-calibration"')
+    expect(source).toContain('取前 ${anyScored.top_n} 名')
+    expect(source).toContain('入选线 ${anyScored.winner_cutoff.toFixed(3)}')
+    expect(source).toContain('次数封顶 ${anyScored.count_score_cap}')
+    // 该批次没人参与评分就没有口径可言，整块不渲染。
+    expect(source).toContain('if (!anyScored) return')
+  })
+
+  it('「本组不计优先级」要能看出来，不能把配置权重照抄成 0.5', () => {
+    // priority_weight 恒为配置值（本组禁用优先级时后端也照给 0.5），
+    // 无条件列进权重会把「不计」写成「计了 0.5」——所以禁用时改列一句显式口径。
+    expect(source).toContain('anyScored.priority_enabled !== false')
+    expect(source).toContain("parts.push('本组不计优先级')")
+    // 判定依据必须来自后端那一条事实，不能拿 priority_score 去猜：
+    // 0 分既可能是「本组不计」，也可能是「计了、但这账号就是最低分」，前端分不出来。
+    expect(source).toContain('decision.priority_enabled !== false')
+  })
+
+  it('评分贡献条只对 scored 行画，且只画真有贡献的段', () => {
+    // 锁定无评分、测试失败、无备选保留这些行本来就没参与打分，没有构成可言，不画条。
+    expect(source).toContain('function scoreBreakdown(')
+    expect(source).toContain('if (!decision || !decision.scored) return null')
+    // 段宽 = 加权贡献 / 综合分。
+    expect(source).toContain('const widthPercent = total > 0 ? ((scoreValue * weight) / total) * 100 : 0')
+    // 0 贡献的段（本组不计优先级、或该项就是最低分）画出来只剩 1px 空条 + 被裁掉的标签，
+    // 会被读成「这项有值、只是很小」，一律不画；全空就整块不渲染。
+    expect(source).toContain('if (widthPercent <= 0) return')
+    expect(source).toContain('if (segments.length === 0 && flags.length === 0) return null')
+    // 标签放段首「次▇▇▇」而不是居中：段窄了居中的字会被裁掉，段首至少和色块起点对得上。
+    expect(cssBlock('.sp-election-log-score-segment')).toContain('justify-content: flex-start')
+    // 标签色必须是弹窗自己声明的变量：段底色是「色相 50% 混面板」，
+    // 靠继承拿到的字色会随主题漂，浅底深字 / 深底浅字都不一定成立。
+    expect(source).toContain('--sp-election-log-ink: #0f172a')
+    expect(cssBlock('.sp-election-log-dialog')).toContain('--sp-election-log-ink')
+  })
+
+  it('单行旗标只在该行命中时出现，不再逐行铺封顶 / 中性 / 入选线', () => {
+    // 封顶命中、用时中性只跟这一行有关：命中才显示，不命中不出现。
+    expect(source).toContain("flags.push('次数封顶命中')")
+    expect(source).toContain("flags.push('用时中性')")
+    expect(source).toContain("{{ scoreBreakdown(section, log)!.flags.join(' · ') }}")
+    expect(cssBlock('.sp-election-log-score-flags')).toContain('margin-top')
+  })
+
+  it('原因列摊开「为什么是它」：评分、名次、必需模型补选都要能看见', () => {
+    // 一句话原因（「综合分入选」）没法复核：评分怎么算的、组内第几名、
     // 是不是因为必需模型被补选，都得摊出来，否则管理员只能回头翻配置和源码。
-    expect(source).toContain('v-if="whyFacts(section, log).length > 0"')
-    expect(source).toContain('<summary>依据</summary>')
     // 依据按分组存，必须挑当前分节那一条 —— 一个账号跨多个分组时各组结论可以不同，
     // 把 A 组的评分解释到 B 组的行上是纯误导。
     expect(source).toContain('decisions.find((decision) => decision.group_name === section.groupName)')
     // 旧运行记录里没有 group_decisions：取不到依据就整块不渲染，降级回原来的一行原因。
     expect(source).toContain('if (!decisions || decisions.length === 0) return undefined')
-    // 必需模型补选要单独说明：它的综合分不一定进前 N，不写清楚看起来像择优算错了。
-    expect(source).toContain('在赢家中无人支持，被按综合分补选开启')
+    // 必需模型补选要单独分类：它的综合分不一定进前 N，混进「择优入选」看起来像择优算错了。
+    expect(source).toContain("kind: 'required'")
+    expect(source).toContain("note: decision.required_models.join('、')")
     // 用时项取中性值时必须标明，否则管理员会拿这个 0.5 去反推配置。
-    expect(source).toContain('用时项取中性值 0.5')
-    expect(cssBlock('.sp-election-log-why')).toContain('margin-top')
+    expect(source).toContain("flags.push('用时中性')")
+    expect(cssBlock('.sp-election-log-score-breakdown')).toContain('margin-top')
   })
 
-  it('「原因」列给本组结论，不照抄账号级的 union 原因', () => {
+  it('「原因」列按本组那条依据分类，不照抄账号级的 union 原因', () => {
     // 账号的调度开关是单一字段：它在 A 组当选、在 B 组落选时，账号级 reason 仍记「分组内最优」。
-    // 每个分组分节下照抄这句话，就会把「本组落选」写成「分组内最优」。
-    expect(source).toContain("{{ groupReasonText(section, log) || log.reason || '—' }}")
-    expect(source).toContain('function groupReasonText(section: LogSection, log: SupplierGroupElectionChangeLog): string')
+    // 每个分组分节下照抄这句话就会把「本组落选」写成「分组内最优」——所以按本组那条依据重新分类。
+    expect(source).toContain('function classifyReason(')
+    expect(source).toContain('decisions.find((decision) => decision.group_name === section.groupName)')
     // 本组没选它、账号却开着（靠别的分组当选）时必须点破，
-    // 否则「开启调度」与「本组未入选」并列会被读成自相矛盾。
-    expect(source).toContain("if (log.direction === 'enabled') return '本组未入选（该账号在其它分组当选）'")
-    // 因必需模型补选要能与「择优入选」区分开。
-    expect(source).toContain("return `本组因必需模型 ${decision.required_models.join('、')} 补选`")
-    // 旧记录没有依据 ⇒ 返回空串，由调用方降级回 log.reason。
-    expect(source).toContain("if (!decision) return ''")
+    // 否则「开启调度」与「未入选」并列会被读成自相矛盾。
+    expect(source).toContain("note: '该账号在其它分组当选'")
+    // 因必需模型补选要能与「择优入选」区分开：两者是不同的徽标分类。
+    expect(source).toContain("kind: 'required'")
+    expect(source).toContain("kind: 'elected'")
+    // 收敛关闭与在任者健康锁定是两回事（一个关、一个留），必须分开分类；
+    // 且收敛判断排在锁定之前 —— 被收敛的在任者也带 locked，先判 locked 会把「关闭」标成「保留」。
+    expect(source.indexOf("kind: 'converged'")).toBeLessThan(source.indexOf("kind: 'locked'"))
+    // 旧记录没有依据 ⇒ 不归类，降级回账号级原文。
+    expect(source).toContain("if (!decision) return { badge: null, note: '' }")
+    expect(source).toContain("fallback: log.reason || '—'")
+  })
+
+  it('原因列用分类色标签 + 行内名次/综合分，替代灰色散文', () => {
+    // 原来结论是全表最弱的灰色 11px 小字，扫读和对比都费劲：
+    // 现在收敛成一组带色徽标（配色由业务语义驱动），名次/综合分从折叠的「依据」提到行内。
+    expect(source).toContain('class="sp-election-log-reason-badge"')
+    expect(source).toContain(':class="reasonBadgeClass(reasonView(section, log).badge)"')
+    expect(source).toContain('class="sp-election-log-reason-rank"')
+    expect(source).toContain('function reasonRankText(')
+    expect(source).toContain('名次 ${decision.rank}/${decision.rank_total}')
+    expect(source).toContain('综合分 ${decision.score.toFixed(3)}')
+    // 分类色必须真的落到样式上（扫读靠的就是颜色区分），不能只有类名没有配色。
+    expect(cssBlock('.sp-election-log-reason-badge.is-elected')).toContain('color')
+    expect(cssBlock('.sp-election-log-reason-badge.is-converged')).toContain('color')
+    // 没归到分类的行（旧记录、账号级跳过原因）降级回原来的灰色原文，不硬塞徽标。
+    expect(source).toContain('class="sp-election-log-reason"')
+    expect(source).toContain('reasonView(section, log).fallback')
   })
 })
