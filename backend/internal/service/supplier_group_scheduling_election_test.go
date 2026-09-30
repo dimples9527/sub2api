@@ -918,9 +918,10 @@ func TestGroupElectionKeepHealthyIncumbentBreaksLockAtThreshold(t *testing.T) {
 	require.Equal(t, 1, result.DisabledCount)
 }
 
-// 锁定分组里「当前开着的在任者」已经超过 TopN（多活已累积）：此时必须放弃锁定、走正常择优收敛回 TopN。
-// 不加这道容量判断的话，锁定会把多活永久固化——它只记赢家、从不关人，下一轮仍满足锁定条件，只增不减。
-func TestGroupElectionKeepHealthyIncumbentYieldsWhenOverCapacity(t *testing.T) {
+// 锁定分组里「当前开着的在任者」已经超过 TopN（多活已累积）：此时不能退回正常择优
+// ——正常择优取的是本组综合分前 N 名，会在已有的多活之上再加一个，只增不减。
+// 正解是就地收敛：只保留 TopN 个在任者，多出来的让位关闭。
+func TestGroupElectionKeepHealthyIncumbentConvergesWhenOverCapacity(t *testing.T) {
 	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
 		{GroupID: 1, AccountID: 301, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 1000},
 		{GroupID: 1, AccountID: 302, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 1000},
@@ -931,7 +932,7 @@ func TestGroupElectionKeepHealthyIncumbentYieldsWhenOverCapacity(t *testing.T) {
 
 	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, []int64{303}, result.Groups[0].WinnerIDs, "在任者超过 TopN → 放弃锁定，择优只保分数最高的 303")
+	require.Equal(t, []int64{303}, result.Groups[0].WinnerIDs, "在任者超过 TopN → 只保留综合分最高的 303")
 	require.Equal(t, 0, result.EnabledCount)
 	require.Equal(t, 2, result.DisabledCount, "多活的另外两个在任者被收敛关闭")
 	require.Equal(t, false, store.calls[301])
@@ -944,7 +945,7 @@ func TestGroupElectionKeepHealthyIncumbentYieldsWhenOverCapacity(t *testing.T) {
 //
 // 旧实现下，锁定把「当前开着的 3 个在任者」全部记为赢家；而 winner 是账号级、跨组取并集，
 // 于是三个分组各显示 3 个开启，且永远关不掉——每轮再开一个组内 top1，旧的靠并集保住，只增不减。
-// 修复后：在任者超过 TopN → 锁定让位给择优 → 三个分组选出同一账号 → 并集只剩 1 个。
+// 修复后：锁定组只保留 TopN 个在任者 → 三个分组选出同一账号 → 并集只剩 1 个。
 func TestGroupElectionSharedMembersConvergeToTopNUnderGlobalLock(t *testing.T) {
 	members := make([]SupplierGroupSchedulingElectionMember, 0, 9)
 	for _, groupID := range []int64{1, 2, 3} {
@@ -979,6 +980,89 @@ func TestGroupElectionSharedMembersConvergeToTopNUnderGlobalLock(t *testing.T) {
 	require.Equal(t, false, store.calls[102])
 	_, touched103 := store.calls[103]
 	require.False(t, touched103, "当选的 103 本就开着，不产生调度写库")
+}
+
+// 回归守卫（2026-09-30 生产故障）：锁定分组已经开着「别组的在任者」，本轮绝不能再开本组 top1。
+//
+// 旧实现：在任者数一超过 TopN 就放弃锁定、退回正常择优；而正常择优取的是本组综合分前 N 名，
+// 于是会在已经开着的账号之上**再加一个**。实测：gpt plus 组本来开着 446 / 445（都是别组在任者、
+// 本组关不掉），本轮又开出本组 top1 361，变成 3 个；下一轮容量判断依然超，于是继续加开。
+// 修复后：锁定组只保留最多 TopN 个在任者，且优先保留「已被其它分组选为赢家」的那些。
+func TestGroupElectionKeepHealthyIncumbentDoesNotOpenWhenAlreadyServed(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 分组 8 只有 446 → 先处理，446 先成为赢家。
+		{GroupID: 8, AccountID: 446, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 5000},
+		// 分组 59 开着 446（别组在任者）与 445；361 综合分高得多，但本组已经开够了账号。
+		{GroupID: 59, AccountID: 446, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 5000},
+		{GroupID: 59, AccountID: 445, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 2, LastTestLatencyMs: 5000},
+		{GroupID: 59, AccountID: 361, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 100},
+		// 分组 152 只有 445 → 445 由它保住。
+		{GroupID: 152, AccountID: 445, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 2, LastTestLatencyMs: 5000},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                       1,
+		KeepHealthyIncumbentGlobal: true,
+	}, time.Now())
+	require.NoError(t, err)
+
+	_, opened := store.calls[361]
+	require.False(t, opened, "本组已经开着 446/445，绝不能再开综合分更高的 361")
+	require.Equal(t, []int64{446}, result.Groups[0].WinnerIDs, "分组 8 保留它的在任者 446")
+	require.Equal(t, []int64{446}, result.Groups[1].WinnerIDs, "分组 59 优先保留被别组共用的 446，不再占第二个名额")
+	require.Equal(t, []int64{445}, result.Groups[2].WinnerIDs, "分组 152 保留 445")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount, "446/445 都被各自分组保住，361 本就关着")
+}
+
+// 存量自愈：锁定分组已经累积出多活（3 个开着），其中两个被别的分组共用 →
+// 只保留共用的那两个，只服务本组的那个被收敛关闭，并明确标成「开启数达上限」而不是「非分组最优」。
+func TestGroupElectionKeepHealthyIncumbentConvergesAccumulatedStock(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 8, AccountID: 446, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 5000},
+		{GroupID: 59, AccountID: 446, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 5000},
+		{GroupID: 59, AccountID: 445, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 2, LastTestLatencyMs: 5000},
+		{GroupID: 59, AccountID: 361, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 100},
+		{GroupID: 152, AccountID: 445, Platform: "openai", Schedulable: true, LastTestStatus: "success", HealthyCount: 2, LastTestLatencyMs: 5000},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                       1,
+		KeepHealthyIncumbentGlobal: true,
+	}, time.Now())
+	require.NoError(t, err)
+
+	// 361 是本组综合分最高的账号（健康次数 30），但本组已经开着被别组共用的 446/445，它必须让位：
+	// 留着它，本组就是 3 个开启，突破「每组开启账号数」这个硬上限。
+	require.Equal(t, []int64{446}, result.Groups[1].WinnerIDs, "分组 59 收敛到被共用的 446")
+	require.Equal(t, false, store.calls[361], "只服务本组的 361 被收敛关闭")
+	require.Equal(t, 1, result.DisabledCount)
+
+	var item361 *SupplierGroupSchedulingElectionAccountItem
+	for index := range result.Items {
+		if result.Items[index].AccountID == 361 {
+			item361 = &result.Items[index]
+		}
+	}
+	require.NotNil(t, item361)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonOverCapacity, item361.Reason,
+		"关闭原因必须说明是「开启数达上限」，否则运维会去查一个根本不存在的评分问题")
+
+	// 明细要能把「被容量收敛」与「在任者健康锁定保留」区分开 —— 两者都带 Locked，但一个关一个留。
+	var decision59 *SupplierGroupSchedulingElectionDecisionDetail
+	for index := range item361.GroupDecisions {
+		if item361.GroupDecisions[index].GroupID == 59 {
+			decision59 = &item361.GroupDecisions[index]
+		}
+	}
+	require.NotNil(t, decision59)
+	require.True(t, decision59.Locked, "本组本轮确实没做择优")
+	require.True(t, decision59.OverCapacity, "被容量收敛掉的成员必须单独标出来")
+	require.False(t, decision59.Elected)
 }
 
 // 全局健康锁定 + 分组级反向覆盖：全局开则默认锁定所有分组，force-off 名单可单独排除，

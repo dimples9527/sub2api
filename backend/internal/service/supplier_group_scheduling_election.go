@@ -26,6 +26,10 @@ const (
 	SupplierGroupSchedulingElectionReasonNotElected  = "非分组最优，关闭调度"
 	SupplierGroupSchedulingElectionReasonUntested    = "尚未测试，保持原状"
 	SupplierGroupSchedulingElectionReasonWriteFailed = "更新调度状态失败"
+	// SupplierGroupSchedulingElectionReasonOverCapacity 是「本组已开启账号数达上限、多出来的被收敛掉」的关闭原因。
+	// 与 ReasonNotElected 分开：被收敛掉的账号未必不是本组最优，只是本组已经开够了账号
+	// （多数情况是别的分组与它共用了这个账号，把它一并开启了），再留着就会突破「每组开启账号数」这个硬上限。
+	SupplierGroupSchedulingElectionReasonOverCapacity = "分组已开启账号数达上限，收敛关闭"
 	// 下面两条是「失败不再立刻关」后的新出口：
 	// 未达阈值时保持原状等下一轮，或分组没有备选账号时保留调度（绝不把分组关成空组）。
 	// 未达阈值的理由带上进度（第几次/共几次），否则运维只看到"没关"却不知道还要等几轮。
@@ -327,6 +331,11 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	// Locked 表示该组本轮走「在任者健康锁定」，没有做择优 —— 此时名次只是参考，
 	// 真正决定保留的是「它本来就开着且测试正常」。
 	Locked bool `json:"locked,omitempty"`
+	// OverCapacity 表示该账号在本组被「每组开启账号数」这个硬上限收敛掉了：本组当前开着的账号已经够数，
+	// 本轮不再新开，超出的在任者在这里让位关闭。
+	// 与 Locked 的分工：Locked 说明「本组本轮没做择优」，OverCapacity 说明「这个账号是这次收敛的代价」——
+	// 只有后者为 true 时才不能对着一行"被关闭"的记录写「未换人」。
+	OverCapacity bool `json:"over_capacity,omitempty"`
 	// RequiredModels 非空表示该账号是因为「分组要求这些模型、而赢家里没人支持」被补选开启的。
 	// 它的综合分并不是 TopN，不写清楚日志看起来像择优算错了。
 	RequiredModels []string `json:"required_models,omitempty"`
@@ -497,6 +506,9 @@ type supplierGroupElectionAccount struct {
 	// 非空即 notable：只靠汇总数字的话，运维看到"关闭 0 个"会以为任务没跑，
 	// 而实际恰恰是最需要被看见的情况——有账号连续失败但被闸门拦住了。
 	hold string
+	// convergedOut 表示这个账号本轮是被「每组开启账号数」上限收敛掉的：它在某个分组里丢了名额，
+	// 而没有任何分组选它。它只影响关闭原因文案（"收敛关闭"而不是"非分组最优"），不改变裁决本身。
+	convergedOut bool
 	// groupDecisions 是逐分组累积的裁决依据（见 SupplierGroupSchedulingElectionDecisionDetail），
 	// 最终原样写进运行明细，供切换日志展开「为什么是它」。
 	groupDecisions []SupplierGroupSchedulingElectionDecisionDetail
@@ -691,10 +703,11 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 就把两个账号永久焊在一起（多活累积）——单在任者分组尤其致命：在任者一失败 scheduledHealthy 就空了，
 		// 若只看「有没有健康在任者」，锁根本合不上，故这里以「有没有未到阈值的在任者」为准。
 		locked := false
+		// convergedDropped 记录本组因「开启数已达上限」被收敛掉的账号，供明细标注关闭原因。
+		convergedDropped := make(map[int64]struct{})
 		if keepHealthyForGroup(groupID) {
-			scheduledHealthy := make([]int64, 0) // 开着且测试成功的在任者，锁定时记为赢家
+			scheduledHealthy := make([]SupplierGroupSchedulingElectionMember, 0) // 开着且测试成功的在任者，锁定时记为赢家
 			// scheduledIncumbentCount 是「开着、且没到关闭阈值的在任者」总数（含成功、含失败但未到阈值）。
-			// 锁定前必须拿它跟 TopN 比一次，理由见下方 locked 赋值的注释。
 			// 只统计已测出状态的成员：未测过的账号走「保持原状」分支、本任务关不掉它们，
 			// 把它们算进容量只会白白放弃锁定、丢掉防抖动能力，却换不来收敛。
 			scheduledIncumbentCount := 0
@@ -705,7 +718,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				}
 				switch strings.TrimSpace(member.LastTestStatus) {
 				case SupplierGroupSchedulingElectionTestStatusSuccess:
-					scheduledHealthy = append(scheduledHealthy, member.AccountID)
+					scheduledHealthy = append(scheduledHealthy, member)
 					scheduledIncumbentCount++
 				case SupplierGroupSchedulingElectionTestStatusFailed:
 					if member.FailedCount+1 >= config.FailureThreshold {
@@ -717,20 +730,41 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 					scheduledIncumbentCount++
 				}
 			}
-			// 只有当在任者数量没有超过 TopN 时，才允许锁定；超了必须让位给正常择优。
+			// 只要还有「没到关闭阈值的在任者」，本组就走锁定：保留在任者、跳过择优与换人。
 			//
-			// 为什么必须加这道「容量」判断：锁定的动作是「把当前开着的在任者全部记为赢家」，
-			// 而 winner 是账号级、跨组取并集的（见 supplierGroupElectionAccount.winner）。
-			// 一旦多个分组共享同一批账号（例如 gpt福利 /【对接】0085分组 /【订阅】0085分组 成员完全相同），
-			// 任何一个组锁住多活，都会通过并集让这批账号在**所有**相关分组里保持开启；
-			// 而锁定本身永远不关人，于是「每组开启账号数」被永久突破，且下一轮仍满足锁定条件，
-			// 只增不减、无法自愈（实测：每 30 分钟新开一个组内 top1，旧的永不关）。
-			// 超过 TopN 说明多活已经存在（历史累积或共享成员），此时收敛优先于「不换人」：
-			// 走正常择优只保前 TopN 名，多活的组因此能自愈回 TopN。
-			// 未超过 TopN 的分组行为完全不变，仍是「绝不换人」。
-			if scheduledIncumbentCount > 0 && !scheduledFailedPastThreshold && scheduledIncumbentCount <= config.TopN {
-				for _, accountID := range scheduledHealthy {
-					recordWinner(accountID, "")
+			// 但「每组开启账号数」是硬上限，而锁定的动作只是「记赢家、从不关人」，所以这里必须自己收敛：
+			// 保留的在任者最多 TopN 个，超出的不记赢家 —— 不被其它分组共用的会被关闭（存量自愈），
+			// 被共用的仍由那些分组保住（重合导致的多活是被允许的）。
+			//
+			// 为什么不能像以前那样「超容量就退回正常择优」：正常择优取的是「本组综合分前 N 名」，
+			// 而 winner 是账号级、跨组取并集的，本组前 N 名往往不是当前开着的那几个 ——
+			// 于是会在已有的多活之上**再开一个**，每轮只增不减、无法自愈。
+			// 实测：某分组已经开着两个账号（都是别组的在任者、本组关不掉），本轮又开出本组 top1，变成 3 个；
+			// 下一轮容量判断依然超，于是继续加开。
+			//
+			// 排序：先「已被其它分组选为赢家」的成员（关掉它会连累那些分组），再按综合分降序。
+			// 这样多组共用的账号优先留下，只服务本组的那个先让位 —— 收敛的目标正是后者。
+			if scheduledIncumbentCount > 0 && !scheduledFailedPastThreshold {
+				sort.SliceStable(scheduledHealthy, func(i, j int) bool {
+					sharedI := accounts[scheduledHealthy[i].AccountID] != nil && accounts[scheduledHealthy[i].AccountID].winner
+					sharedJ := accounts[scheduledHealthy[j].AccountID] != nil && accounts[scheduledHealthy[j].AccountID].winner
+					if sharedI != sharedJ {
+						return sharedI
+					}
+					return supplierGroupSchedulingElectionMemberLess(scheduledHealthy[i], scheduledHealthy[j], electionScores)
+				})
+				limit := config.TopN
+				if limit > len(scheduledHealthy) {
+					limit = len(scheduledHealthy)
+				}
+				for index := 0; index < limit; index++ {
+					recordWinner(scheduledHealthy[index].AccountID, "")
+				}
+				for index := limit; index < len(scheduledHealthy); index++ {
+					convergedDropped[scheduledHealthy[index].AccountID] = struct{}{}
+					if account := accounts[scheduledHealthy[index].AccountID]; account != nil {
+						account.convergedOut = true
+					}
 				}
 				locked = true
 			}
@@ -796,6 +830,11 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				TopN:         config.TopN,
 				RankTotal:    len(ranked),
 				WinnerCutoff: winnerCutoff,
+			}
+			// 被容量收敛掉的成员必须单独标出来：它和「在任者健康锁定保住的」在明细里长得一样
+			// （都带 Locked），但一个被关闭、一个被保留，不标就会把关闭写成「未换人」。
+			if _, dropped := convergedDropped[member.AccountID]; dropped {
+				decision.OverCapacity = true
 			}
 			if _, elected := winnerSet[member.AccountID]; elected {
 				decision.Elected = true
@@ -973,6 +1012,11 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 			return true, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonElected
 		}
 		if account.schedulableBefore {
+			// 关闭原因要能自解释：被容量收敛掉的账号未必不是本组最优（它可能是本组 top1，
+			// 只是本组已经开够了账号），记成「非分组最优」会让运维去翻配置找那个不存在的评分问题。
+			if account.convergedOut {
+				return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonOverCapacity
+			}
 			return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonNotElected
 		}
 		return false, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonNotElected
