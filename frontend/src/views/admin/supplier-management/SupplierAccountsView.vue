@@ -1434,16 +1434,33 @@
         >
           <p class="sp-account-sync-result-head">
             {{ syncModelsResult.applied ? '已写入' : '预览' }}：
-            共 {{ syncModelsResult.total }} 个账号，成功 {{ syncModelsResult.success }} 个，失败 {{ syncModelsResult.failed }} 个。
+            共 {{ syncModelsResult.total }} 个账号，已完成 {{ syncModelsResult.completed }} 个，成功 {{ syncModelsResult.success }} 个，失败 {{ syncModelsResult.failed }} 个。
           </p>
           <ul class="sp-account-sync-result-list">
             <li
-              v-for="item in syncModelsResult.results"
+              v-for="item in syncModelsProgressRows"
               :key="`sync-result-${item.account_id}`"
               :data-test="`supplier-account-sync-upstream-models-item-${item.account_id}`"
-              :class="['sp-account-sync-result-item', item.status === 'success' ? 'ok' : 'failed']"
+              :class="[
+                'sp-account-sync-result-item',
+                item.status === 'success' ? 'ok' : 'failed',
+                { running: item.status === 'running' },
+              ]"
             >
               <strong>{{ syncModelsAccountLabel(item) }}</strong>
+              <div
+                class="sp-account-sync-progress"
+                role="progressbar"
+                :aria-valuenow="syncModelsItemProgress(item)"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-label="`${syncModelsAccountLabel(item)} 同步进度`"
+              >
+                <span
+                  class="sp-account-sync-progress-bar"
+                  :style="{ width: `${syncModelsItemProgress(item)}%` }"
+                ></span>
+              </div>
               <span v-if="item.status === 'success'" class="sp-account-sync-result-detail">
                 上游 {{ item.upstream_total }} 个 · 新增 {{ item.added }} 个{{
                   item.removed > 0 ? ` · 移除 ${item.removed} 个` : ''
@@ -1452,7 +1469,7 @@
                 }}
               </span>
               <span v-else class="sp-account-sync-result-detail">
-                {{ item.error_message || '同步失败' }}
+                {{ syncModelsItemPhaseLabel(item) }}
               </span>
             </li>
           </ul>
@@ -1460,9 +1477,17 @@
       </div>
       <template #footer>
         <button
+          v-if="syncModelsSubmitting"
           class="sp-button ghost"
           type="button"
-          :disabled="syncModelsSubmitting"
+          data-test="supplier-account-sync-upstream-models-abort"
+          :disabled="syncModelsCancelling"
+          @click="cancelSyncUpstreamModels"
+        >{{ syncModelsCancelling ? '中止中…' : '中止同步' }}</button>
+        <button
+          v-else
+          class="sp-button ghost"
+          type="button"
           @click="closeSyncModelsDialog"
         >取消</button>
         <button
@@ -1747,21 +1772,23 @@ import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatf
 import {
   batchBindSupplierAccountGroups,
   cancelSupplierAccountBatchTestJob,
+  cancelSyncUpstreamModelsBatchJob,
   clearSupplierLocalAccountPlatformOverride,
   deleteSupplierAccount,
   getSupplierAccountBatchTestJob,
+  getSyncUpstreamModelsBatchJob,
   listSupplierAccounts,
   listSupplierBindableLocalAccounts,
   setSupplierLocalAccountPlatformOverride,
   startSupplierAccountBatchTest,
-  syncUpstreamModelsBatch,
+  startSyncUpstreamModelsBatchJob,
   type SupplierAccountGroupBindItemResult,
   type SupplierAccountGroupBindResult,
   type SupplierBindableLocalAccount,
   type SupplierProviderAccount,
   type UpstreamModelBatchSyncItem,
+  type UpstreamModelBatchSyncJob,
   type UpstreamModelBatchSyncMode,
-  type UpstreamModelBatchSyncResult,
 } from '@/api/admin/supplierProviderData'
 import Icon from '@/components/icons/Icon.vue'
 import { listAccountRateGuardUnbindLogs, listRuns, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
@@ -2055,7 +2082,13 @@ const upstreamSyncModeOptions: SelectOption[] = [
 const showSyncModelsDialog = ref(false)
 const syncModelsMode = ref<UpstreamModelBatchSyncMode>('merge')
 const syncModelsSubmitting = ref(false)
-const syncModelsResult = ref<UpstreamModelBatchSyncResult | null>(null)
+const syncModelsCancelling = ref(false)
+// 进度条需要「进行中」的中间态，所以这里存的是任务快照而不是一次性结果。
+// 快照的 total/success/failed/results/applied 与原来的同步结果同名，模板可直接复用。
+const syncModelsResult = ref<UpstreamModelBatchSyncJob | null>(null)
+// 轮询令牌：关闭弹窗或重新发起时自增，用来丢弃迟到的旧响应（同 batchTestPollToken 的写法）。
+let syncModelsPollTimer: ReturnType<typeof setTimeout> | null = null
+let syncModelsPollToken = 0
 
 // 只有匹配到本地账号的行才能同步：批量接口要的是本地 account ID。
 const syncModelsTargets = computed(() => bindableLocalAccountIDs(selectedBindableAccounts.value))
@@ -2083,11 +2116,67 @@ function closeSyncModelsDialog() {
   if (syncModelsSubmitting.value) return
   showSyncModelsDialog.value = false
   syncModelsResult.value = null
+  // 令牌自增让迟到的轮询响应直接失效，避免关窗后又被写回结果。
+  syncModelsPollToken += 1
+  clearSyncModelsPollTimer()
 }
 
 function syncModelsAccountLabel(item: UpstreamModelBatchSyncItem): string {
   // 后端已回传账号名，优先用它；查不到再用页面里已有的兜底命名。
   return item.account_name || batchBindAccountLabel(item.account_id)
+}
+
+/**
+ * 弹窗里的进度行：以「本次要同步的账号」为准展开，而不是只渲染后端已回传的项。
+ *
+ * 任务快照只包含已经出过状态的账号，等待中的账号如果直接不渲染，用户会以为漏掉了；
+ * 这里给还没轮到的账号补一条 0% 的等待行，进度条才能做到「每个账号都有一条」。
+ */
+const syncModelsProgressRows = computed<UpstreamModelBatchSyncItem[]>(() => {
+  const result = syncModelsResult.value
+  if (!result) return []
+  const byAccountID = new Map(result.results.map(item => [item.account_id, item]))
+  return syncModelsTargets.value.map(accountID => {
+    const item = byAccountID.get(accountID)
+    if (item) return item
+    return {
+      account_id: accountID,
+      status: 'running',
+      phase: 'queued',
+      progress: 0,
+      upstream_total: 0,
+      added: 0,
+      removed: 0,
+      final_count: 0,
+      current_count: 0,
+      custom_mapping_kept: 0,
+    }
+  })
+})
+
+// 阶段文案写「正在做什么」而不是内部阶段名：用户要看的是这个账号卡在哪一步。
+function syncModelsItemPhaseLabel(item: UpstreamModelBatchSyncItem): string {
+  if (item.status === 'success') return '已完成'
+  if (item.status !== 'running') return item.error_message || '同步失败'
+  switch (item.phase) {
+    case 'fetching':
+      return '正在拉取上游模型列表…'
+    case 'enriching':
+      return '正在补齐模型能力…'
+    case 'applying':
+      return '正在写入白名单…'
+    default:
+      return '等待开始…'
+  }
+}
+
+function syncModelsItemProgress(item: UpstreamModelBatchSyncItem): number {
+  if (item.status === 'running') {
+    // 未完成时封顶 99：条走满就等于告诉用户「已经结束了」，那是假的。
+    return Math.min(99, Math.max(0, item.progress ?? 0))
+  }
+  // 成功 / 失败 / 不存在 / 中断都已经结束，条走满，不留一个看起来还在跑的进度条。
+  return 100
 }
 
 async function runSyncUpstreamModels(apply: boolean) {
@@ -2104,27 +2193,107 @@ async function runSyncUpstreamModels(apply: boolean) {
     }
   }
   syncModelsSubmitting.value = true
+  syncModelsCancelling.value = false
+  syncModelsResult.value = null
+  clearSyncModelsPollTimer()
+  const pollToken = ++syncModelsPollToken
+
   try {
-    const result = await syncUpstreamModelsBatch({
+    // 改成「启动任务 + 轮询」：一次性的同步接口拿不到「某项正在拉上游 / 正在写白名单」
+    // 这类中间态，弹窗里的逐账号进度条只能靠轮询任务快照推进。
+    const job = await startSyncUpstreamModelsBatchJob({
       account_ids: syncModelsTargets.value,
       mode: syncModelsMode.value,
       apply,
     })
-    syncModelsResult.value = result
-    if (result.failed > 0) {
-      appStore.showError(`同步完成，但有 ${result.failed} 个账号失败，详见列表`)
+    if (pollToken !== syncModelsPollToken) return
+    syncModelsResult.value = job
+    if (isSyncModelsJobTerminal(job.status)) {
+      finishSyncModelsJob(job, pollToken)
       return
     }
-    appStore.showSuccess(
-      apply
-        ? `已完成 ${result.total} 个账号：${syncModelsMode.value === 'replace' ? '去除现有并增加新的' : '保留现有并增加新的'}`
-        : `已预览 ${result.total} 个账号，尚未写入`
-    )
+    scheduleSyncModelsPoll(job.job_id, pollToken)
   } catch (err) {
-    appStore.showError(extractApiErrorMessage(err, '同步上游模型失败'))
-  } finally {
+    if (pollToken !== syncModelsPollToken) return
     syncModelsSubmitting.value = false
+    appStore.showError(extractApiErrorMessage(err, '同步上游模型失败'))
   }
+}
+
+function scheduleSyncModelsPoll(jobID: string, pollToken: number) {
+  clearSyncModelsPollTimer()
+  syncModelsPollTimer = setTimeout(async () => {
+    if (pollToken !== syncModelsPollToken) return
+    try {
+      const job = await getSyncUpstreamModelsBatchJob(jobID)
+      if (pollToken !== syncModelsPollToken) return
+      syncModelsResult.value = job
+      if (isSyncModelsJobTerminal(job.status)) {
+        finishSyncModelsJob(job, pollToken)
+      } else {
+        scheduleSyncModelsPoll(jobID, pollToken)
+      }
+    } catch (err) {
+      if (pollToken !== syncModelsPollToken) return
+      syncModelsSubmitting.value = false
+      clearSyncModelsPollTimer()
+      appStore.showError(extractApiErrorMessage(err, '查询上游模型同步进度失败'))
+    }
+  }, SUPPLIER_BATCH_TEST_POLL_INTERVAL_MS)
+}
+
+function finishSyncModelsJob(job: UpstreamModelBatchSyncJob, pollToken: number) {
+  if (pollToken !== syncModelsPollToken) return
+  clearSyncModelsPollTimer()
+  syncModelsSubmitting.value = false
+  syncModelsCancelling.value = false
+  syncModelsResult.value = job
+
+  if (job.status === 'cancelled') {
+    appStore.showWarning('上游模型同步已中止')
+    return
+  }
+  if (job.status === 'failed') {
+    appStore.showError(job.error_message || '同步上游模型失败')
+    return
+  }
+  if (job.failed > 0) {
+    appStore.showError(`同步完成，但有 ${job.failed} 个账号失败，详见列表`)
+    return
+  }
+  appStore.showSuccess(
+    job.applied
+      ? `已完成 ${job.total} 个账号：${syncModelsMode.value === 'replace' ? '去除现有并增加新的' : '保留现有并增加新的'}`
+      : `已预览 ${job.total} 个账号，尚未写入`
+  )
+}
+
+async function cancelSyncUpstreamModels() {
+  const jobID = syncModelsResult.value?.job_id
+  if (!jobID || syncModelsCancelling.value) return
+  syncModelsCancelling.value = true
+  try {
+    const job = await cancelSyncUpstreamModelsBatchJob(jobID)
+    // 后端可能只推到 cancelling，真正收尾由轮询看到 cancelled 后再统一提示。
+    if (isSyncModelsJobTerminal(job.status)) {
+      finishSyncModelsJob(job, syncModelsPollToken)
+    }
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '中止上游模型同步失败'))
+  } finally {
+    syncModelsCancelling.value = false
+  }
+}
+
+function clearSyncModelsPollTimer() {
+  if (syncModelsPollTimer) {
+    clearTimeout(syncModelsPollTimer)
+    syncModelsPollTimer = null
+  }
+}
+
+function isSyncModelsJobTerminal(status: UpstreamModelBatchSyncJob['status']): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'failed'
 }
 
 function openBindByGroupDialog() {
@@ -2626,6 +2795,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleWindowScroll)
   batchTestPollToken += 1
   clearBatchTestPollTimer()
+  syncModelsPollToken += 1
+  clearSyncModelsPollTimer()
 })
 
 // 平台 / 供应商筛选变化时重新拉候选账号；已勾选的账号不在新结果里也保留，用户切回来还能看到选择。
@@ -7157,6 +7328,11 @@ button.sp-guard-failure-hint:hover {
     transition: none;
   }
 
+  /* 进度条的宽度过渡同样属于动效，系统要求减少动态效果时直接落位。 */
+  .sp-account-sync-progress-bar {
+    transition: none;
+  }
+
   /* 悬浮按钮本身也不做位移/淡入，只保留可见性切换 */
   .sp-scroll-top,
   .sp-scroll-top:hover,
@@ -7580,6 +7756,41 @@ button.sp-guard-failure-hint:hover {
 
 .sp-account-sync-result-item.failed {
   border-left-color: var(--sp-red);
+}
+
+/* 等待中/进行中的行不该沿用 .failed 的红边，所以必须写在 .failed 之后才压得住它。 */
+.sp-account-sync-result-item.running {
+  border-left-color: var(--sp-blue);
+}
+
+.sp-account-sync-progress {
+  height: 0.375rem;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  border-radius: 0.1875rem;
+  background: color-mix(in srgb, var(--sp-line) 70%, transparent);
+}
+
+.sp-account-sync-progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sp-blue);
+  transition: width 0.24s ease-out;
+}
+
+.sp-account-sync-result-item.ok .sp-account-sync-progress-bar {
+  background: var(--sp-green);
+}
+
+.sp-account-sync-result-item.failed .sp-account-sync-progress-bar {
+  background: var(--sp-red);
+}
+
+/* 进行中的行同时也带着 .failed（class 表达式是产品决策守卫，不能改），
+   所以这里用更高权重把进度条颜色压回蓝色。 */
+.sp-account-sync-result-item.running .sp-account-sync-progress-bar {
+  background: var(--sp-blue);
 }
 
 .sp-account-sync-result-item strong {

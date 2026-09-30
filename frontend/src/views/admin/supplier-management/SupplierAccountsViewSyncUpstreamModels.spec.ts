@@ -119,4 +119,51 @@ describe('SupplierAccountsView 批量同步上游模型', () => {
     expect(source).toContain('type UpstreamModelBatchSyncItem,')
     expect(source).not.toContain("} from '@/api/admin/accounts'")
   })
+
+  it('接口契约：job 三件套提供启动 / 查询 / 取消，进度条靠它拿中间态', () => {
+    expect(supplierApiSource).toContain('export async function startSyncUpstreamModelsBatchJob')
+    expect(supplierApiSource).toContain('export async function getSyncUpstreamModelsBatchJob')
+    expect(supplierApiSource).toContain('export async function cancelSyncUpstreamModelsBatchJob')
+    expect(supplierApiSource).toContain(
+      "'/admin/supplier-management/accounts/models/sync-upstream/batch/jobs'"
+    )
+    expect(supplierApiSource).toContain(
+      '`/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/${jobID}`'
+    )
+    expect(supplierApiSource).toContain(
+      '`/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/${jobID}/cancel`'
+    )
+    // 一次性同步结果没有「进行中」字段，进度条必须依赖任务快照的 phase / progress。
+    expect(supplierApiSource).toContain('export interface UpstreamModelBatchSyncJob')
+    expect(supplierApiSource).toContain('progress?: number')
+  })
+
+  it('每个账号一条进度条，等待中的账号也要占一行', () => {
+    // 快照只含已出过状态的账号；若不按「本次要同步的账号」补全，
+    // 等待中的账号会整行消失，用户会以为被漏掉了。
+    expect(source).toContain('const syncModelsProgressRows = computed<UpstreamModelBatchSyncItem[]>')
+    expect(source).toContain('v-for="item in syncModelsProgressRows"')
+    expect(source).toContain('class="sp-account-sync-progress"')
+    expect(source).toContain('class="sp-account-sync-progress-bar"')
+    expect(source).toContain('role="progressbar"')
+    // 宽度必须来自后端上报的阶段进度，不能是前端自己跑的假动画。
+    expect(source).toContain(':style="{ width: `${syncModelsItemProgress(item)}%` }"')
+    expect(source).toContain("return '正在拉取上游模型列表…'")
+    expect(source).toContain("return '正在写入白名单…'")
+  })
+
+  it('轮询带令牌防竞态，并在关闭弹窗与卸载时清理', () => {
+    expect(source).toContain('let syncModelsPollToken = 0')
+    expect(source).toContain('if (pollToken !== syncModelsPollToken) return')
+    expect(source).toContain('function clearSyncModelsPollTimer()')
+    // 关窗/卸载后迟到的响应不能把结果再写回去。
+    const unmountBlock = source.match(/onBeforeUnmount\(\(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
+    expect(unmountBlock).toContain('clearSyncModelsPollTimer()')
+  })
+
+  it('运行中提供中止入口，不把用户锁在弹窗里等满整批', () => {
+    expect(source).toContain('data-test="supplier-account-sync-upstream-models-abort"')
+    expect(source).toContain('async function cancelSyncUpstreamModels()')
+    expect(source).toContain('cancelSyncUpstreamModelsBatchJob(jobID)')
+  })
 })

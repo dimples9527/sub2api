@@ -558,6 +558,10 @@ export interface UpstreamModelBatchSyncItem {
   account_name?: string
   platform?: string
   status: string
+  /** 进度条阶段：queued / fetching / enriching / applying / done；终态恒为 done */
+  phase?: string
+  /** 进度条百分比（0-100）；终态恒为 100 */
+  progress?: number
   error_message?: string
   upstream_total: number
   added: number
@@ -592,6 +596,71 @@ export async function syncUpstreamModelsBatch(payload: {
   const { data } = await apiClient.post<UpstreamModelBatchSyncResult>(
     '/admin/supplier-management/accounts/models/sync-upstream/batch',
     payload
+  )
+  return data
+}
+
+export type UpstreamModelBatchSyncJobStatus =
+  | 'queued'
+  | 'running'
+  | 'cancelling'
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+
+/** 批量同步任务快照：弹窗的逐账号进度条靠轮询它拿到中间态。 */
+export interface UpstreamModelBatchSyncJob {
+  job_id: string
+  status: UpstreamModelBatchSyncJobStatus
+  total: number
+  completed: number
+  success: number
+  failed: number
+  mode: UpstreamModelBatchSyncMode
+  applied: boolean
+  results: UpstreamModelBatchSyncItem[]
+  error_message?: string
+  created_at?: string
+  started_at?: string
+  finished_at?: string
+}
+
+export type UpstreamModelBatchSyncJobPayload = {
+  account_ids: number[]
+  mode: UpstreamModelBatchSyncMode
+  apply: boolean
+}
+
+/**
+ * 启动批量同步任务并立即返回任务快照（入口在供应商账号页）
+ *
+ * 参数与 syncUpstreamModelsBatch 一致，区别是不阻塞等结果：同步弹窗要逐账号显示进度条，
+ * 而「正在拉上游 / 正在写白名单」这类中间态只有轮询本任务才拿得到。
+ */
+export async function startSyncUpstreamModelsBatchJob(
+  payload: UpstreamModelBatchSyncJobPayload
+): Promise<UpstreamModelBatchSyncJob> {
+  const { data } = await apiClient.post<UpstreamModelBatchSyncJob>(
+    '/admin/supplier-management/accounts/models/sync-upstream/batch/jobs',
+    payload
+  )
+  return data
+}
+
+export async function getSyncUpstreamModelsBatchJob(
+  jobID: string
+): Promise<UpstreamModelBatchSyncJob> {
+  const { data } = await apiClient.get<UpstreamModelBatchSyncJob>(
+    `/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/${jobID}`
+  )
+  return data
+}
+
+export async function cancelSyncUpstreamModelsBatchJob(
+  jobID: string
+): Promise<UpstreamModelBatchSyncJob> {
+  const { data } = await apiClient.post<UpstreamModelBatchSyncJob>(
+    `/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/${jobID}/cancel`
   )
   return data
 }
