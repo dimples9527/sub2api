@@ -172,6 +172,10 @@ type AccountTestService struct {
 	runTestBackgroundFunc func(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error)
 	batchTestJobsMu       sync.RWMutex
 	batchTestJobs         map[string]*BatchAccountTestJob
+	// 批量同步上游模型的 job（弹窗逐账号进度条）与批量测试是两套独立任务，
+	// 分开存避免互相挤占上限，也免得复用同一类型时把两边的字段语义搅在一起。
+	upstreamModelSyncJobsMu sync.RWMutex
+	upstreamModelSyncJobs   map[string]*UpstreamModelBatchSyncJob
 }
 
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {

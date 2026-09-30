@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -97,6 +99,88 @@ func upstreamModelBatchTestService(repo *upstreamModelBatchRepoStub, upstream *h
 		accountRepo:  repo,
 		httpUpstream: upstream,
 		cfg:          upstreamModelSyncTestConfig(),
+	}
+}
+
+func TestRunUpstreamModelBatchSyncEmitsPhaseProgress(t *testing.T) {
+	t.Parallel()
+
+	repo := &upstreamModelBatchRepoStub{accounts: []*Account{upstreamModelBatchTestAccount(1, nil)}}
+	svc := upstreamModelBatchTestService(repo, upstreamModelBatchUpstream(upstreamModelBatchCompleteModelsBody))
+
+	normalized, err := normalizeUpstreamModelBatchSyncInput(UpstreamModelBatchSyncInput{
+		AccountIDs:  []int64{1},
+		Mode:        UpstreamModelBatchSyncModeMerge,
+		Apply:       true,
+		Concurrency: 1,
+	}, svc)
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	phases := make([]string, 0)
+	progress := make([]int, 0)
+	_, err = svc.runUpstreamModelBatchSync(context.Background(), normalized, func(_ int, item UpstreamModelBatchSyncItem) {
+		mu.Lock()
+		defer mu.Unlock()
+		phases = append(phases, item.Phase)
+		progress = append(progress, item.Progress)
+	})
+	require.NoError(t, err)
+
+	// 弹窗进度条靠这串回调推进：如果只上报首尾两项，进度条会从 0 直接跳到 100，
+	// 用户看到的仍然是「卡住不动」。
+	require.Contains(t, phases, UpstreamModelBatchSyncPhaseQueued)
+	require.Contains(t, phases, UpstreamModelBatchSyncPhaseFetching)
+	require.Contains(t, phases, UpstreamModelBatchSyncPhaseApplying)
+	require.Contains(t, phases, UpstreamModelBatchSyncPhaseDone)
+	require.Contains(t, progress, upstreamModelBatchSyncPhaseProgress(UpstreamModelBatchSyncPhaseFetching))
+	require.Equal(t, 100, progress[len(progress)-1])
+}
+
+func TestStartSyncUpstreamModelCatalogBatchJobReachesTerminalState(t *testing.T) {
+	t.Parallel()
+
+	repo := &upstreamModelBatchRepoStub{accounts: []*Account{
+		upstreamModelBatchTestAccount(1, nil),
+		upstreamModelBatchTestAccount(2, nil),
+	}}
+	// 并发度必须为 1：upstreamModelBatchUpstream 的响应队列按调用顺序消费，
+	// 并发下 stub 自身会 data race（见该 helper 的注释）。
+	svc := upstreamModelBatchTestService(repo, upstreamModelBatchUpstream(
+		upstreamModelBatchCompleteModelsBody,
+		upstreamModelBatchCompleteModelsBody,
+	))
+
+	job, err := svc.StartSyncUpstreamModelCatalogBatchJob(context.Background(), UpstreamModelBatchSyncInput{
+		AccountIDs:  []int64{1, 2},
+		Mode:        UpstreamModelBatchSyncModeMerge,
+		Apply:       true,
+		Concurrency: 1,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, job.JobID)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		current, err := svc.GetSyncUpstreamModelCatalogBatchJob(context.Background(), job.JobID)
+		require.NoError(t, err)
+		if current.Status == UpstreamModelSyncJobStatusCompleted {
+			require.Equal(t, 2, current.Total)
+			require.Equal(t, 2, current.Completed)
+			require.Equal(t, 2, current.Success)
+			require.Equal(t, 0, current.Failed)
+			require.Len(t, current.Results, 2)
+			for _, item := range current.Results {
+				require.Equal(t, UpstreamModelBatchSyncStatusSuccess, item.Status)
+				require.Equal(t, UpstreamModelBatchSyncPhaseDone, item.Phase)
+				require.Equal(t, 100, item.Progress)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job did not finish, status=%s", current.Status)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

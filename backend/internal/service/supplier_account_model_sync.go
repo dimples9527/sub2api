@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -34,14 +36,44 @@ const (
 	upstreamModelBatchSyncMaxPerTimeout      = 90 * time.Second
 	upstreamModelBatchSyncDefaultTimeout     = 5 * time.Minute
 	upstreamModelBatchSyncMaxTimeout         = 10 * time.Minute
+
+	// job 模式（弹窗进度条）单独给整批预算：每账号除了探测上游还要写库，
+	// 用户又会盯着进度条等，所以比同步接口的默认值放宽。
+	upstreamModelSyncJobDefaultTimeout = 10 * time.Minute
+	upstreamModelSyncJobMaxTimeout     = 30 * time.Minute
+	upstreamModelSyncJobRetention      = 30 * time.Minute
+	maxUpstreamModelSyncJobs           = 100
 )
 
 // 状态值与批量账号测试（BatchAccountTestItem）保持一致，前端可以按同一套语义渲染。
+// running 只出现在 job 模式的中间态：该项已被 worker 领走但还没出终态。
 const (
+	UpstreamModelBatchSyncStatusRunning     = "running"
 	UpstreamModelBatchSyncStatusSuccess     = "success"
 	UpstreamModelBatchSyncStatusFailed      = "failed"
 	UpstreamModelBatchSyncStatusNotFound    = "not_found"
 	UpstreamModelBatchSyncStatusInterrupted = "interrupted"
+)
+
+// 阶段驱动弹窗里的逐账号进度条：单账号同步依次经过
+// fetching（拉上游模型列表）→ enriching（补能力元数据）→ applying（写白名单），
+// 每段开始时上报一次；done 表示该项已有终态。
+const (
+	UpstreamModelBatchSyncPhaseQueued    = "queued"
+	UpstreamModelBatchSyncPhaseFetching  = "fetching"
+	UpstreamModelBatchSyncPhaseEnriching = "enriching"
+	UpstreamModelBatchSyncPhaseApplying  = "applying"
+	UpstreamModelBatchSyncPhaseDone      = "done"
+)
+
+// job 级状态；cancelling 与批量测试同义 —— 已请求取消，等后台 goroutine 收尾。
+const (
+	UpstreamModelSyncJobStatusQueued     = "queued"
+	UpstreamModelSyncJobStatusRunning    = "running"
+	UpstreamModelSyncJobStatusCancelling = "cancelling"
+	UpstreamModelSyncJobStatusCompleted  = "completed"
+	UpstreamModelSyncJobStatusCancelled  = "cancelled"
+	UpstreamModelSyncJobStatusFailed     = "failed"
 )
 
 type UpstreamModelBatchSyncInput struct {
@@ -58,6 +90,10 @@ type UpstreamModelBatchSyncItem struct {
 	AccountName string `json:"account_name,omitempty"`
 	Platform    string `json:"platform,omitempty"`
 	Status      string `json:"status"`
+	// Phase / Progress 是给弹窗进度条用的中间态，取值见 UpstreamModelBatchSyncPhase*。
+	// 终态项一律 Phase=done、Progress=100；同步接口不消费这两个字段，行为不受影响。
+	Phase    string `json:"phase,omitempty"`
+	Progress int    `json:"progress"`
 	// ErrorMessage 只回传 SafeMessage：上游 401/403 等响应体不得外泄（同单账号接口）。
 	ErrorMessage string `json:"error_message,omitempty"`
 	// UpstreamTotal 是上游返回的模型数；Added/Removed/FinalCount 一律按「应用后」的口径算，
@@ -80,6 +116,31 @@ type UpstreamModelBatchSyncResult struct {
 	Mode    string                       `json:"mode"`
 	Applied bool                         `json:"applied"`
 	Results []UpstreamModelBatchSyncItem `json:"results"`
+}
+
+// UpstreamModelBatchSyncJob 是 job 模式下的任务快照。
+//
+// 与 BatchAccountTestJob 同构（同页同 group 的两个批量入口，前端用同一套轮询写法），
+// 差别只在多带 Mode/Applied，以及每项多带 Phase/Progress 供进度条渲染。
+type UpstreamModelBatchSyncJob struct {
+	JobID        string                       `json:"job_id"`
+	Status       string                       `json:"status"`
+	Total        int                          `json:"total"`
+	Completed    int                          `json:"completed"`
+	Success      int                          `json:"success"`
+	Failed       int                          `json:"failed"`
+	Mode         string                       `json:"mode"`
+	Applied      bool                         `json:"applied"`
+	Results      []UpstreamModelBatchSyncItem `json:"results"`
+	ErrorMessage string                       `json:"error_message,omitempty"`
+	CreatedAt    string                       `json:"created_at,omitempty"`
+	StartedAt    string                       `json:"started_at,omitempty"`
+	FinishedAt   string                       `json:"finished_at,omitempty"`
+
+	cancel         context.CancelFunc
+	resultSlots    []UpstreamModelBatchSyncItem
+	createdAtTime  time.Time
+	finishedAtTime time.Time
 }
 
 type normalizedUpstreamModelBatchSyncInput struct {
@@ -115,7 +176,29 @@ func (s *AccountTestService) SyncUpstreamModelCatalogBatch(
 	runCtx, cancel := context.WithTimeout(ctx, normalized.Timeout)
 	defer cancel()
 
-	accounts, err := s.accountRepo.GetByIDs(runCtx, normalized.AccountIDs)
+	return s.runUpstreamModelBatchSync(runCtx, normalized, nil)
+}
+
+// runUpstreamModelBatchSync 是同步接口与 job 模式共用的编排。
+//
+// onItem 不为 nil 时，每项「被 worker 领走」「进入新阶段」「出终态」各回调一次，
+// 供 job 上报进度条；同步接口传 nil，拿到的结果与改造前完全一致。
+// onItem 会被多个 worker 并发调用，实现必须自带同步（job 侧用的是带锁的更新函数）。
+func (s *AccountTestService) runUpstreamModelBatchSync(
+	ctx context.Context,
+	input normalizedUpstreamModelBatchSyncInput,
+	onItem func(index int, item UpstreamModelBatchSyncItem),
+) (*UpstreamModelBatchSyncResult, error) {
+	ids := input.AccountIDs
+	if len(ids) == 0 {
+		return &UpstreamModelBatchSyncResult{
+			Mode:    input.Mode,
+			Applied: input.Apply,
+			Results: []UpstreamModelBatchSyncItem{},
+		}, nil
+	}
+
+	accounts, err := s.accountRepo.GetByIDs(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load accounts: %w", err)
 	}
@@ -126,27 +209,43 @@ func (s *AccountTestService) SyncUpstreamModelCatalogBatch(
 		}
 	}
 
-	ids := normalized.AccountIDs
 	results := make([]UpstreamModelBatchSyncItem, len(ids))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	for worker := 0; worker < normalized.Concurrency; worker++ {
+	for worker := 0; worker < input.Concurrency; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for index := range jobs {
-				item := s.runUpstreamModelBatchSyncItem(runCtx, accountByID[ids[index]], normalized)
+				account := accountByID[ids[index]]
+				if onItem != nil {
+					onItem(index, upstreamModelBatchSyncPendingItem(ids[index], account, UpstreamModelBatchSyncPhaseQueued))
+				}
+				item := s.runUpstreamModelBatchSyncItem(ctx, account, input, func(phase string) {
+					if onItem == nil {
+						return
+					}
+					onItem(index, upstreamModelBatchSyncPendingItem(ids[index], account, phase))
+				})
+				// account 为 nil 时同步流程拿不到 ID，这里补齐，
+				// 否则前端没法按 account_id 把进度挂到对应那一行。
+				if item.AccountID == 0 {
+					item.AccountID = ids[index]
+				}
 				mu.Lock()
 				results[index] = item
 				mu.Unlock()
+				if onItem != nil {
+					onItem(index, item)
+				}
 			}
 		}()
 	}
 enqueue:
 	for index := range ids {
 		select {
-		case <-runCtx.Done():
+		case <-ctx.Done():
 			break enqueue
 		case jobs <- index:
 		}
@@ -156,8 +255,8 @@ enqueue:
 
 	result := &UpstreamModelBatchSyncResult{
 		Total:   len(ids),
-		Mode:    normalized.Mode,
-		Applied: normalized.Apply,
+		Mode:    input.Mode,
+		Applied: input.Apply,
 		Results: results,
 	}
 	for i := range results {
@@ -166,11 +265,16 @@ enqueue:
 			results[i] = UpstreamModelBatchSyncItem{
 				AccountID:    ids[i],
 				Status:       UpstreamModelBatchSyncStatusInterrupted,
+				Phase:        UpstreamModelBatchSyncPhaseDone,
+				Progress:     upstreamModelBatchSyncPhaseProgress(UpstreamModelBatchSyncPhaseDone),
 				ErrorMessage: "batch sync was interrupted",
 			}
 			if account := accountByID[ids[i]]; account != nil {
 				results[i].AccountName = account.Name
 				results[i].Platform = account.Platform
+			}
+			if onItem != nil {
+				onItem(i, results[i])
 			}
 		}
 		if results[i].Status == UpstreamModelBatchSyncStatusSuccess {
@@ -186,9 +290,13 @@ func (s *AccountTestService) runUpstreamModelBatchSyncItem(
 	ctx context.Context,
 	account *Account,
 	input normalizedUpstreamModelBatchSyncInput,
+	onPhase func(phase string),
 ) UpstreamModelBatchSyncItem {
 	if account == nil {
-		return UpstreamModelBatchSyncItem{Status: UpstreamModelBatchSyncStatusNotFound, ErrorMessage: "account not found"}
+		return upstreamModelBatchSyncFinishedItem(UpstreamModelBatchSyncItem{
+			Status:       UpstreamModelBatchSyncStatusNotFound,
+			ErrorMessage: "account not found",
+		})
 	}
 
 	item := UpstreamModelBatchSyncItem{
@@ -200,14 +308,18 @@ func (s *AccountTestService) runUpstreamModelBatchSyncItem(
 	itemCtx, cancel := context.WithTimeout(ctx, input.TimeoutPerAccount)
 	defer cancel()
 
-	// SyncUpstreamModelCatalog 会写回传入账号的能力快照缓存，多 worker 各跑各的账号，
-	// 这里仍给每个账号一份副本，避免与账号列表里还在被别处读取的对象共享可变状态。
+	// SyncUpstreamModelCatalogWithProgress 会写回传入账号的能力快照缓存，多 worker 各跑各的
+	// 账号，这里仍给每个账号一份副本，避免与账号列表里还在被别处读取的对象共享可变状态。
 	working := accountShallowCopyForUpstreamSync(account)
-	catalog, err := s.SyncUpstreamModelCatalog(itemCtx, working)
+	catalog, err := s.SyncUpstreamModelCatalogWithProgress(itemCtx, working, func(phase UpstreamModelSyncPhase) {
+		if onPhase != nil {
+			onPhase(string(phase))
+		}
+	})
 	if err != nil {
 		item.Status = UpstreamModelBatchSyncStatusFailed
 		item.ErrorMessage = upstreamModelBatchSyncSafeMessage(err)
-		return item
+		return upstreamModelBatchSyncFinishedItem(item)
 	}
 
 	models := dedupeAndSortModelIDs(catalog.Models)
@@ -223,14 +335,58 @@ func (s *AccountTestService) runUpstreamModelBatchSyncItem(
 	item.Warnings = catalog.Warnings
 
 	if input.Apply {
+		if onPhase != nil {
+			onPhase(UpstreamModelBatchSyncPhaseApplying)
+		}
 		if err := applyUpstreamModelSyncToAccount(ctx, s.accountRepo, working, plan); err != nil {
 			item.Status = UpstreamModelBatchSyncStatusFailed
 			item.ErrorMessage = "failed to save upstream models"
-			return item
+			return upstreamModelBatchSyncFinishedItem(item)
 		}
 	}
 	item.Status = UpstreamModelBatchSyncStatusSuccess
+	return upstreamModelBatchSyncFinishedItem(item)
+}
+
+// upstreamModelBatchSyncPendingItem 构造「尚未出终态」的进度项：Status 固定为 running，
+// 具体位置由 Phase/Progress 表达。
+func upstreamModelBatchSyncPendingItem(accountID int64, account *Account, phase string) UpstreamModelBatchSyncItem {
+	item := UpstreamModelBatchSyncItem{
+		AccountID: accountID,
+		Status:    UpstreamModelBatchSyncStatusRunning,
+		Phase:     phase,
+		Progress:  upstreamModelBatchSyncPhaseProgress(phase),
+	}
+	if account != nil {
+		item.AccountName = account.Name
+		item.Platform = account.Platform
+	}
 	return item
+}
+
+// upstreamModelBatchSyncFinishedItem 给终态项补上收尾的 Phase/Progress。
+// 进度条走到头必须显式落到 100，否则「已完成的账号」会停在中途的百分比上。
+func upstreamModelBatchSyncFinishedItem(item UpstreamModelBatchSyncItem) UpstreamModelBatchSyncItem {
+	item.Phase = UpstreamModelBatchSyncPhaseDone
+	item.Progress = upstreamModelBatchSyncPhaseProgress(UpstreamModelBatchSyncPhaseDone)
+	return item
+}
+
+// upstreamModelBatchSyncPhaseProgress 把阶段映射成进度条百分比。
+// 数字只服务进度条，不参与任何业务判断：三段外部/写库动作各占一段，done 必为 100。
+func upstreamModelBatchSyncPhaseProgress(phase string) int {
+	switch phase {
+	case UpstreamModelBatchSyncPhaseQueued:
+		return 0
+	case UpstreamModelBatchSyncPhaseFetching:
+		return 25
+	case UpstreamModelBatchSyncPhaseEnriching:
+		return 60
+	case UpstreamModelBatchSyncPhaseApplying:
+		return 85
+	default:
+		return 100
+	}
 }
 
 func normalizeUpstreamModelBatchSyncInput(
@@ -435,4 +591,269 @@ func upstreamModelBatchSyncSafeMessage(err error) string {
 		return syncErr.SafeMessage()
 	}
 	return "failed to sync upstream models"
+}
+
+// StartSyncUpstreamModelCatalogBatchJob 启动一次批量同步任务并立即返回任务快照。
+//
+// 与 SyncUpstreamModelCatalogBatch 的区别只有一处：不阻塞等结果，改为后台跑 + 轮询。
+// 弹窗要逐账号显示进度条，而进度只能在每项「被领走 / 换阶段 / 出终态」时上报，
+// 同步接口一次性返回是拿不到的。
+func (s *AccountTestService) StartSyncUpstreamModelCatalogBatchJob(
+	ctx context.Context,
+	input UpstreamModelBatchSyncInput,
+) (*UpstreamModelBatchSyncJob, error) {
+	normalized, err := normalizeUpstreamModelBatchSyncInput(input, s)
+	if err != nil {
+		return nil, err
+	}
+
+	// 整批预算按原始输入重算：normalize 已把 0 兜成同步接口的 5 分钟，
+	// 而 job 模式每账号还要写库、用户又在等进度条，给更宽的默认值。
+	jobTimeout := input.Timeout
+	if jobTimeout <= 0 {
+		jobTimeout = upstreamModelSyncJobDefaultTimeout
+	}
+	if jobTimeout > upstreamModelSyncJobMaxTimeout {
+		jobTimeout = upstreamModelSyncJobMaxTimeout
+	}
+	normalized.Timeout = jobTimeout
+
+	jobCtx, cancel := context.WithTimeout(context.Background(), jobTimeout)
+	now := time.Now().UTC()
+	job := &UpstreamModelBatchSyncJob{
+		JobID:         uuid.NewString(),
+		Status:        UpstreamModelSyncJobStatusQueued,
+		Total:         len(normalized.AccountIDs),
+		Mode:          normalized.Mode,
+		Applied:       normalized.Apply,
+		CreatedAt:     now.Format(time.RFC3339Nano),
+		cancel:        cancel,
+		resultSlots:   make([]UpstreamModelBatchSyncItem, len(normalized.AccountIDs)),
+		createdAtTime: now,
+	}
+	if err := s.storeUpstreamModelSyncJob(job); err != nil {
+		cancel()
+		return nil, err
+	}
+	go s.runUpstreamModelSyncJob(jobCtx, job.JobID, normalized)
+
+	return s.GetSyncUpstreamModelCatalogBatchJob(ctx, job.JobID)
+}
+
+// GetSyncUpstreamModelCatalogBatchJob 返回任务快照，供弹窗轮询。
+func (s *AccountTestService) GetSyncUpstreamModelCatalogBatchJob(
+	_ context.Context,
+	jobID string,
+) (*UpstreamModelBatchSyncJob, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, infraerrors.BadRequest("UPSTREAM_MODEL_SYNC_JOB_ID_REQUIRED", "job_id is required")
+	}
+	s.upstreamModelSyncJobsMu.RLock()
+	defer s.upstreamModelSyncJobsMu.RUnlock()
+	job := s.upstreamModelSyncJobs[jobID]
+	if job == nil {
+		return nil, infraerrors.NotFound("UPSTREAM_MODEL_SYNC_JOB_NOT_FOUND", "upstream model sync job not found")
+	}
+	return snapshotUpstreamModelSyncJob(job), nil
+}
+
+// CancelSyncUpstreamModelCatalogBatchJob 请求取消任务，语义与批量测试的取消一致：
+// 只把状态推成 cancelling 并触发 context 取消，收尾由后台 goroutine 完成。
+func (s *AccountTestService) CancelSyncUpstreamModelCatalogBatchJob(
+	ctx context.Context,
+	jobID string,
+) (*UpstreamModelBatchSyncJob, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, infraerrors.BadRequest("UPSTREAM_MODEL_SYNC_JOB_ID_REQUIRED", "job_id is required")
+	}
+
+	s.upstreamModelSyncJobsMu.Lock()
+	job := s.upstreamModelSyncJobs[jobID]
+	if job == nil {
+		s.upstreamModelSyncJobsMu.Unlock()
+		return nil, infraerrors.NotFound("UPSTREAM_MODEL_SYNC_JOB_NOT_FOUND", "upstream model sync job not found")
+	}
+	if job.Status == UpstreamModelSyncJobStatusQueued || job.Status == UpstreamModelSyncJobStatusRunning {
+		job.Status = UpstreamModelSyncJobStatusCancelling
+		if job.cancel != nil {
+			job.cancel()
+		}
+	}
+	s.upstreamModelSyncJobsMu.Unlock()
+	return s.GetSyncUpstreamModelCatalogBatchJob(ctx, jobID)
+}
+
+func (s *AccountTestService) runUpstreamModelSyncJob(
+	ctx context.Context,
+	jobID string,
+	input normalizedUpstreamModelBatchSyncInput,
+) {
+	s.markUpstreamModelSyncJobStarted(jobID)
+	_, err := s.runUpstreamModelBatchSync(ctx, input, func(index int, item UpstreamModelBatchSyncItem) {
+		s.updateUpstreamModelSyncJobItem(jobID, index, item)
+	})
+	s.finishUpstreamModelSyncJob(jobID, ctx, err)
+}
+
+func (s *AccountTestService) markUpstreamModelSyncJobStarted(jobID string) {
+	s.upstreamModelSyncJobsMu.Lock()
+	defer s.upstreamModelSyncJobsMu.Unlock()
+	job := s.upstreamModelSyncJobs[jobID]
+	if job == nil {
+		return
+	}
+	if job.Status == UpstreamModelSyncJobStatusQueued {
+		job.Status = UpstreamModelSyncJobStatusRunning
+	}
+	job.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+func (s *AccountTestService) updateUpstreamModelSyncJobItem(
+	jobID string,
+	index int,
+	item UpstreamModelBatchSyncItem,
+) {
+	s.upstreamModelSyncJobsMu.Lock()
+	defer s.upstreamModelSyncJobsMu.Unlock()
+	job := s.upstreamModelSyncJobs[jobID]
+	if job == nil || index < 0 || index >= len(job.resultSlots) {
+		return
+	}
+	job.resultSlots[index] = item
+	recountUpstreamModelSyncJobLocked(job)
+}
+
+// recountUpstreamModelSyncJobLocked 每次都按槽位重算计数，而不是增量累加。
+//
+// 同一项会被上报多次（领走 / 换阶段 / 出终态），增量累加很容易把成功数算重；
+// 槽位数上限 200，整批重算的代价可以忽略。
+func recountUpstreamModelSyncJobLocked(job *UpstreamModelBatchSyncJob) {
+	completed, success, failed := 0, 0, 0
+	for index := range job.resultSlots {
+		status := job.resultSlots[index].Status
+		if !isUpstreamModelBatchSyncTerminalStatus(status) {
+			continue
+		}
+		completed++
+		if status == UpstreamModelBatchSyncStatusSuccess {
+			success++
+		} else {
+			failed++
+		}
+	}
+	job.Completed, job.Success, job.Failed = completed, success, failed
+}
+
+func (s *AccountTestService) finishUpstreamModelSyncJob(jobID string, ctx context.Context, err error) {
+	s.upstreamModelSyncJobsMu.Lock()
+	defer s.upstreamModelSyncJobsMu.Unlock()
+	job := s.upstreamModelSyncJobs[jobID]
+	if job == nil {
+		return
+	}
+
+	// 超时/取消时仍在「进行中」的槽位收不到终态回调，这里统一补成 interrupted：
+	// 否则前端那一行的进度条会永远停在中途，也统计不出最终成功/失败数。
+	for index := range job.resultSlots {
+		slot := &job.resultSlots[index]
+		if isUpstreamModelBatchSyncTerminalStatus(slot.Status) {
+			continue
+		}
+		*slot = UpstreamModelBatchSyncItem{
+			AccountID:    slot.AccountID,
+			AccountName:  slot.AccountName,
+			Platform:     slot.Platform,
+			Status:       UpstreamModelBatchSyncStatusInterrupted,
+			Phase:        UpstreamModelBatchSyncPhaseDone,
+			Progress:     upstreamModelBatchSyncPhaseProgress(UpstreamModelBatchSyncPhaseDone),
+			ErrorMessage: "batch sync was interrupted",
+		}
+	}
+	recountUpstreamModelSyncJobLocked(job)
+
+	if err != nil {
+		job.Status = UpstreamModelSyncJobStatusFailed
+		job.ErrorMessage = err.Error()
+	} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		job.Status = UpstreamModelSyncJobStatusCompleted
+		job.ErrorMessage = "batch upstream model sync timed out"
+	} else if ctx.Err() != nil {
+		job.Status = UpstreamModelSyncJobStatusCancelled
+	} else {
+		job.Status = UpstreamModelSyncJobStatusCompleted
+	}
+	now := time.Now().UTC()
+	job.FinishedAt = now.Format(time.RFC3339Nano)
+	job.finishedAtTime = now
+	job.cancel = nil
+}
+
+func (s *AccountTestService) storeUpstreamModelSyncJob(job *UpstreamModelBatchSyncJob) error {
+	s.upstreamModelSyncJobsMu.Lock()
+	defer s.upstreamModelSyncJobsMu.Unlock()
+	if s.upstreamModelSyncJobs == nil {
+		s.upstreamModelSyncJobs = make(map[string]*UpstreamModelBatchSyncJob)
+	}
+	s.pruneUpstreamModelSyncJobsLocked(time.Now())
+	if len(s.upstreamModelSyncJobs) >= maxUpstreamModelSyncJobs {
+		return infraerrors.TooManyRequests(
+			"UPSTREAM_MODEL_SYNC_JOBS_FULL",
+			"too many upstream model sync jobs are running or retained",
+		)
+	}
+	s.upstreamModelSyncJobs[job.JobID] = job
+	return nil
+}
+
+func (s *AccountTestService) pruneUpstreamModelSyncJobsLocked(now time.Time) {
+	for jobID, job := range s.upstreamModelSyncJobs {
+		if !isUpstreamModelSyncJobTerminal(job.Status) || job.finishedAtTime.IsZero() {
+			continue
+		}
+		if now.Sub(job.finishedAtTime) > upstreamModelSyncJobRetention {
+			delete(s.upstreamModelSyncJobs, jobID)
+		}
+	}
+}
+
+func isUpstreamModelBatchSyncTerminalStatus(status string) bool {
+	switch status {
+	case UpstreamModelBatchSyncStatusSuccess,
+		UpstreamModelBatchSyncStatusFailed,
+		UpstreamModelBatchSyncStatusNotFound,
+		UpstreamModelBatchSyncStatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUpstreamModelSyncJobTerminal(status string) bool {
+	return status == UpstreamModelSyncJobStatusCompleted ||
+		status == UpstreamModelSyncJobStatusCancelled ||
+		status == UpstreamModelSyncJobStatusFailed
+}
+
+func snapshotUpstreamModelSyncJob(job *UpstreamModelBatchSyncJob) *UpstreamModelBatchSyncJob {
+	out := &UpstreamModelBatchSyncJob{
+		JobID:        job.JobID,
+		Status:       job.Status,
+		Total:        job.Total,
+		Completed:    job.Completed,
+		Success:      job.Success,
+		Failed:       job.Failed,
+		Mode:         job.Mode,
+		Applied:      job.Applied,
+		ErrorMessage: job.ErrorMessage,
+		CreatedAt:    job.CreatedAt,
+		StartedAt:    job.StartedAt,
+		FinishedAt:   job.FinishedAt,
+	}
+	out.Results = make([]UpstreamModelBatchSyncItem, 0, len(job.resultSlots))
+	for _, item := range job.resultSlots {
+		if item.Status != "" {
+			out.Results = append(out.Results, item)
+		}
+	}
+	return out
 }

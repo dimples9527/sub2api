@@ -198,6 +198,26 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 	return models, err
 }
 
+// UpstreamModelSyncPhase 是单账号同步上游模型时对外可观察的阶段。
+//
+// 供应商账号页的批量同步要在弹窗里逐账号显示进度，需要知道每个账号正卡在哪一段；
+// 单账号接口不关心进度，回调传 nil 即可，行为与不带阶段完全一致。
+type UpstreamModelSyncPhase string
+
+const (
+	// UpstreamModelSyncPhaseFetching 正在请求上游的模型列表。
+	UpstreamModelSyncPhaseFetching UpstreamModelSyncPhase = "fetching"
+	// UpstreamModelSyncPhaseEnriching 正在从 models.dev 补齐模型能力元数据。
+	UpstreamModelSyncPhaseEnriching UpstreamModelSyncPhase = "enriching"
+)
+
+func notifyUpstreamModelSyncPhase(onPhase func(UpstreamModelSyncPhase), phase UpstreamModelSyncPhase) {
+	if onPhase == nil {
+		return
+	}
+	onPhase(phase)
+}
+
 // SyncUpstreamModelCatalog fetches the account's live model list, enriches
 // missing capability fields from the provider registry used by the upstream,
 // and persists a normalized account snapshot when complete metadata is available.
@@ -208,6 +228,28 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 // snapshot. When no model is complete, the existing account snapshot is left
 // untouched.
 func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	return s.syncUpstreamModelCatalog(ctx, account, nil)
+}
+
+// SyncUpstreamModelCatalogWithProgress 是 SyncUpstreamModelCatalog 的带阶段回调变体。
+//
+// 「请求上游模型列表」与「从 models.dev 补齐能力元数据」是同步过程中两段耗时的外部请求，
+// 批量编排需要据此在弹窗里逐账号推进进度条。这里只多一个回调，流程与原方法完全共用，
+// 不新增分支、不改任何既有调用方的行为。
+func (s *AccountTestService) SyncUpstreamModelCatalogWithProgress(
+	ctx context.Context,
+	account *Account,
+	onPhase func(UpstreamModelSyncPhase),
+) (*UpstreamModelCatalog, error) {
+	return s.syncUpstreamModelCatalog(ctx, account, onPhase)
+}
+
+func (s *AccountTestService) syncUpstreamModelCatalog(
+	ctx context.Context,
+	account *Account,
+	onPhase func(UpstreamModelSyncPhase),
+) (*UpstreamModelCatalog, error) {
+	notifyUpstreamModelSyncPhase(onPhase, UpstreamModelSyncPhaseFetching)
 	models, body, err := s.fetchUpstreamModelList(ctx, account)
 	liveListAvailable := err == nil
 	if err != nil {
@@ -243,6 +285,8 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 
 	source := "upstream"
 	if upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {
+		// 只有真要去 registry 取数时才上报该阶段，避免进度条闪现一个实际没发生的阶段。
+		notifyUpstreamModelSyncPhase(onPhase, UpstreamModelSyncPhaseEnriching)
 		if registryMetadata, registryErr := s.fetchModelsDevMetadata(ctx, account, enrichIDs); registryErr == nil {
 			for modelID, fallback := range registryMetadata {
 				current := catalog.Metadata[modelID]

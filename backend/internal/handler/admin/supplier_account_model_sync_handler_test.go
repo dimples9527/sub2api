@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -85,6 +86,10 @@ func setupSupplierModelSyncRouter(repo *batchSyncAccountRepo, upstream service.H
 	router.POST("/api/v1/admin/supplier-management/accounts/batch-test", handler.SupplierBatchTest)
 	router.POST("/api/v1/admin/supplier-management/accounts/batch-bind-groups", handler.BatchBindSupplierAccountGroups)
 	router.POST("/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch", handler.SyncUpstreamModelsBatch)
+	// job 三件套与上面同前缀、深度多一层（/jobs），注册期同样不能冲突。
+	router.POST("/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs", handler.StartSyncUpstreamModelsBatchJob)
+	router.GET("/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/:job_id", handler.GetSyncUpstreamModelsBatchJob)
+	router.POST("/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/:job_id/cancel", handler.CancelSyncUpstreamModelsBatchJob)
 	return router
 }
 
@@ -94,6 +99,84 @@ func TestSupplierSyncUpstreamModelsBatchRouteRegistersWithoutPanic(t *testing.T)
 	require.NotPanics(t, func() {
 		setupSupplierModelSyncRouter(&batchSyncAccountRepo{}, &syncUpstreamHTTPUpstream{})
 	})
+}
+
+func TestSupplierStartSyncUpstreamModelsBatchJobRequiresAccountIDs(t *testing.T) {
+	// 路由没挂上会返回 404，所以这条同时证明 job 启动入口确实注册成功。
+	router := setupSupplierModelSyncRouter(&batchSyncAccountRepo{}, &syncUpstreamHTTPUpstream{
+		resp: jsonModelsResponse(batchSyncCompleteModelsBody),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs",
+		strings.NewReader(`{"mode":"merge"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestSupplierStartSyncUpstreamModelsBatchJobReturnsPollableJob(t *testing.T) {
+	repo := &batchSyncAccountRepo{accounts: []*service.Account{
+		{
+			ID:          31,
+			Name:        "batch-account",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "openai-key", "base_url": "https://openai.example.com/v1"},
+		},
+	}}
+	router := setupSupplierModelSyncRouter(repo, &syncUpstreamHTTPUpstream{
+		resp: jsonModelsResponse(batchSyncCompleteModelsBody),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs",
+		strings.NewReader(`{"account_ids":[31],"mode":"merge","apply":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var started struct {
+		Data service.UpstreamModelBatchSyncJob `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &started))
+	require.NotEmpty(t, started.Data.JobID)
+	require.Equal(t, 1, started.Data.Total)
+	// 启动接口必须立即返回，不能等整批跑完：状态只可能是排队或运行中。
+	require.Contains(t, []string{
+		service.UpstreamModelSyncJobStatusQueued,
+		service.UpstreamModelSyncJobStatusRunning,
+	}, started.Data.Status)
+
+	// 轮询到终态，同时覆盖查询接口；顺带确保后台 goroutine 在测试结束前收尾。
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		pollRec := httptest.NewRecorder()
+		pollReq := httptest.NewRequest(http.MethodGet,
+			"/api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/"+started.Data.JobID, nil)
+		router.ServeHTTP(pollRec, pollReq)
+		require.Equal(t, http.StatusOK, pollRec.Code)
+
+		var polled struct {
+			Data service.UpstreamModelBatchSyncJob `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(pollRec.Body.Bytes(), &polled))
+		if polled.Data.Status == service.UpstreamModelSyncJobStatusCompleted {
+			require.Equal(t, 1, polled.Data.Completed)
+			require.Equal(t, 1, polled.Data.Success)
+			require.Len(t, polled.Data.Results, 1)
+			require.Equal(t, service.UpstreamModelBatchSyncPhaseDone, polled.Data.Results[0].Phase)
+			require.Equal(t, 100, polled.Data.Results[0].Progress)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s did not finish, status=%s", started.Data.JobID, polled.Data.Status)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func TestSupplierSyncUpstreamModelsBatchRequiresAccountIDs(t *testing.T) {

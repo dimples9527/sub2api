@@ -138,6 +138,11 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		supplier.POST("/accounts/batch-bind-groups", h.Admin.Account.BatchBindSupplierAccountGroups)
 		// 批量同步上游模型：与上面两个批量入口同页同 group，都是静态段，彼此不冲突。
 		supplier.POST("/accounts/models/sync-upstream/batch", h.Admin.Account.SyncUpstreamModelsBatch)
+		// job 模式：参数与同步接口一致但不阻塞，返回 job_id 供弹窗轮询逐账号进度。
+		// 与上面的前缀相同、深度多一层（/jobs），静态段与 :job_id 共存不冲突。
+		supplier.POST("/accounts/models/sync-upstream/batch/jobs", h.Admin.Account.StartSyncUpstreamModelsBatchJob)
+		supplier.GET("/accounts/models/sync-upstream/batch/jobs/:job_id", h.Admin.Account.GetSyncUpstreamModelsBatchJob)
+		supplier.POST("/accounts/models/sync-upstream/batch/jobs/:job_id/cancel", h.Admin.Account.CancelSyncUpstreamModelsBatchJob)
 		supplier.GET("/groups", h.Admin.SupplierProviderSync.ListGroups)
 		supplier.GET("/groups/health-trends", h.Admin.SupplierProviderSync.ListGroupHealthTrends)
 		supplier.PUT("/local-groups/:id/platform-override", h.Admin.SupplierProviderSync.SetLocalGroupPlatformOverride)

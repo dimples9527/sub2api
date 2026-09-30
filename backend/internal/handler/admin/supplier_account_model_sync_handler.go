@@ -61,3 +61,73 @@ func (h *AccountHandler) SyncUpstreamModelsBatch(c *gin.Context) {
 
 	response.Success(c, result)
 }
+
+// StartSyncUpstreamModelsBatchJob 启动批量同步任务（弹窗逐账号进度条用）。
+//
+// POST /api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs
+//
+// 参数与同步接口完全一致，区别是不阻塞等结果：立即返回 job_id，进度由每项的
+// Phase/Progress 体现，前端轮询查询接口。同步接口保留，供不需要进度的调用方使用。
+func (h *AccountHandler) StartSyncUpstreamModelsBatchJob(c *gin.Context) {
+	if h.accountTestService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account test service unavailable")
+		return
+	}
+
+	var req SyncUpstreamModelsBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if len(req.AccountIDs) == 0 {
+		response.BadRequest(c, "account_ids is required")
+		return
+	}
+
+	job, err := h.accountTestService.StartSyncUpstreamModelCatalogBatchJob(c.Request.Context(), service.UpstreamModelBatchSyncInput{
+		AccountIDs:        req.AccountIDs,
+		Mode:              req.Mode,
+		Apply:             req.Apply,
+		Concurrency:       req.Concurrency,
+		TimeoutPerAccount: time.Duration(req.TimeoutPerAccountSecs) * time.Second,
+		Timeout:           time.Duration(req.TimeoutSecs) * time.Second,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, job)
+}
+
+// GetSyncUpstreamModelsBatchJob 查询批量同步任务状态。
+// GET /api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/:job_id
+func (h *AccountHandler) GetSyncUpstreamModelsBatchJob(c *gin.Context) {
+	if h.accountTestService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account test service unavailable")
+		return
+	}
+
+	job, err := h.accountTestService.GetSyncUpstreamModelCatalogBatchJob(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, job)
+}
+
+// CancelSyncUpstreamModelsBatchJob 取消批量同步任务。
+// POST /api/v1/admin/supplier-management/accounts/models/sync-upstream/batch/jobs/:job_id/cancel
+func (h *AccountHandler) CancelSyncUpstreamModelsBatchJob(c *gin.Context) {
+	if h.accountTestService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account test service unavailable")
+		return
+	}
+
+	job, err := h.accountTestService.CancelSyncUpstreamModelCatalogBatchJob(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, job)
+}
