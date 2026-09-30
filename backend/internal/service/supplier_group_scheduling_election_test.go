@@ -71,6 +71,26 @@ func TestGroupElectionNormalizeConfigDefaults(t *testing.T) {
 	require.Equal(t, MaxSupplierGroupSchedulingElectionTopN, capped.TopN)
 }
 
+// 分组级 TopN 覆盖的清洗：丢弃非正 groupID 与非正 TopN（等于该组回落全局），超上限钳到上限，
+// 清洗后为空则收敛成 nil（与 required_models 同口径，空覆盖不落库）。
+func TestGroupElectionNormalizeTopNByGroup(t *testing.T) {
+	require.Nil(t, normalizeSupplierGroupElectionTopNByGroup(nil))
+	require.Nil(t, normalizeSupplierGroupElectionTopNByGroup(map[int64]int{}))
+	require.Nil(t, normalizeSupplierGroupElectionTopNByGroup(map[int64]int{0: 3, -1: 2, 5: 0, 6: -4}),
+		"非正 groupID 与非正 TopN 全部丢弃后应为 nil")
+
+	cleaned := normalizeSupplierGroupElectionTopNByGroup(map[int64]int{
+		1:  2,
+		2:  9999, // 超上限 → 钳到 Max
+		3:  0,    // 非正 → 丢弃（该组回落全局）
+		-4: 5,    // 非正 groupID → 丢弃
+	})
+	require.Equal(t, map[int64]int{
+		1: 2,
+		2: MaxSupplierGroupSchedulingElectionTopN,
+	}, cleaned)
+}
+
 // 单组单活：失败且开着的要过闸门（默认阈值 2，首次失败不关）；成功里连续成功最多的开启；
 // 成功落选的关掉；未测过的不动。
 func TestGroupElectionSingleGroupTopOne(t *testing.T) {
@@ -123,6 +143,36 @@ func TestGroupElectionTopN(t *testing.T) {
 	require.Equal(t, true, store.calls[21])
 	require.Equal(t, true, store.calls[22])
 	require.Equal(t, false, store.calls[23])
+}
+
+// 分组级 TopN 覆盖：全局 TopN=1，但 group 1 单独配成 2 → 该组开前两名、关第三名；
+// 未配置覆盖的 group 2 仍回落全局 TopN=1，只开最优、关次优。证明覆盖只作用于命中的分组。
+func TestGroupElectionTopNByGroupOverride(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// group 1：override=2，连续成功前两名(31,32)开，第三名(33)超额被关。
+		{GroupID: 1, AccountID: 31, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+		{GroupID: 1, AccountID: 32, Schedulable: false, LastTestStatus: "success", HealthyCount: 5},
+		{GroupID: 1, AccountID: 33, Schedulable: true, LastTestStatus: "success", HealthyCount: 1},
+		// group 2：无 override，回落全局 TopN=1，只开最优(41)、关次优(42)。
+		{GroupID: 2, AccountID: 41, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+		{GroupID: 2, AccountID: 42, Schedulable: true, LastTestStatus: "success", HealthyCount: 5},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:        1,
+		TopNByGroup: map[int64]int{1: 2},
+	}, time.Now())
+	require.NoError(t, err)
+
+	// group 1 生效 TopN=2：31、32 开，33 关。
+	require.Equal(t, true, store.calls[31])
+	require.Equal(t, true, store.calls[32])
+	require.Equal(t, false, store.calls[33], "第三名超出该组生效 TopN(2)，应被关闭")
+	// group 2 无覆盖 → 按全局 TopN=1：41 开、42 关。
+	require.Equal(t, true, store.calls[41])
+	require.Equal(t, false, store.calls[42], "未配置覆盖的分组仍按全局 TopN=1，次优应被关闭")
 }
 
 // 多分组 union-enable：账号在 G1 落选但在 G2 是最优 → 应保持/开启，不被 G1 关掉。

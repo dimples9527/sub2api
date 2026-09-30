@@ -454,6 +454,7 @@
                 <span v-if="electionPriorityAll">已<strong class="sp-election-keep-healthy-count">全局</strong>开启「优先级计分」：综合分计入账号优先级，都健康时高优先级更占优势<template v-if="groupElectionPriorityDisabledGroupIDs.length > 0">，其中 <strong class="sp-rate-guard-scope-count">{{ groupElectionPriorityDisabledGroupIDs.length }}</strong> 个分组单独关闭</template>。</span>
                 <span v-else-if="groupElectionPriorityEnabledGroupIDs.length > 0">已对 <strong class="sp-rate-guard-scope-count">{{ groupElectionPriorityEnabledGroupIDs.length }}</strong> 个分组开启「优先级计分」：综合分计入账号优先级，都健康时高优先级更占优势。</span>
                 <span v-if="groupElectionRequiredModelsCount > 0">已为 <strong class="sp-rate-guard-scope-count">{{ groupElectionRequiredModelsCount }}</strong> 个分组设置必需模型：换人时保证这些模型不断供，支持者全失败则告警待恢复。</span>
+                <span v-if="groupElectionTopNOverridesCount > 0">已为 <strong class="sp-rate-guard-scope-count">{{ groupElectionTopNOverridesCount }}</strong> 个分组单独设置「每组开启账号数」，覆盖全局默认值。</span>
                 <span v-if="electionDryRunAll">演练模式已开启：<strong class="sp-election-dry-run-count">全部分组</strong>只记录建议，不修改调度。</span>
                 <span v-else-if="groupElectionDryRunGroupIDs.length > 0">已对 <strong class="sp-election-dry-run-count">{{ groupElectionDryRunGroupIDs.length }}</strong> 个分组开启演练：这些分组只记录建议，不修改调度。</span>
               </div>
@@ -1684,21 +1685,38 @@
                   />
                   <span>参与择优</span>
                 </label>
-                <label
-                  v-if="!electionGroupIsDisabled(group.id)"
-                  class="sp-election-required-models"
-                  :title="`分组「${group.name}」的必需模型：择优后若赢家没覆盖这些模型，会补选一个健康支持者开启；支持它的账号全失败时不硬留、只告警待恢复。逗号或空格分隔。`"
-                >
-                  <span class="sp-election-required-models-label">必需模型</span>
-                  <input
-                    class="sp-election-required-models-input"
-                    type="text"
-                    placeholder="留空=无强制要求，如 gpt-5.6, claude-opus-5"
-                    :value="electionGroupRequiredModelsText(group.id)"
-                    :aria-label="`分组 ${group.name} 的必需模型`"
-                    @change="setElectionGroupRequiredModels(group.id, ($event.target as HTMLInputElement).value)"
-                  />
-                </label>
+                <div v-if="!electionGroupIsDisabled(group.id)" class="sp-election-group-extra">
+                  <label
+                    class="sp-election-top-n-override"
+                    :title="`分组「${group.name}」单独设置「每组开启账号数」：留空=沿用全局默认（当前 ${editForm.config.group_scheduling_election_top_n ?? 1}），填 1–100 的正整数则覆盖全局。`"
+                  >
+                    <span class="sp-election-top-n-override-label">每组开启数</span>
+                    <input
+                      class="sp-election-top-n-override-input"
+                      type="number"
+                      min="1"
+                      max="100"
+                      :placeholder="`全局 ${editForm.config.group_scheduling_election_top_n ?? 1}`"
+                      :value="electionGroupTopNText(group.id)"
+                      :aria-label="`分组 ${group.name} 单独设置的每组开启账号数`"
+                      @change="setElectionGroupTopN(group.id, ($event.target as HTMLInputElement).value)"
+                    />
+                  </label>
+                  <label
+                    class="sp-election-required-models"
+                    :title="`分组「${group.name}」的必需模型：择优后若赢家没覆盖这些模型，会补选一个健康支持者开启；支持它的账号全失败时不硬留、只告警待恢复。逗号或空格分隔。`"
+                  >
+                    <span class="sp-election-required-models-label">必需模型</span>
+                    <input
+                      class="sp-election-required-models-input"
+                      type="text"
+                      placeholder="留空=无强制要求，如 gpt-5.6, claude-opus-5"
+                      :value="electionGroupRequiredModelsText(group.id)"
+                      :aria-label="`分组 ${group.name} 的必需模型`"
+                      @change="setElectionGroupRequiredModels(group.id, ($event.target as HTMLInputElement).value)"
+                    />
+                  </label>
+                </div>
               </article>
               </div>
             </template>
@@ -1887,6 +1905,7 @@ const editForm = reactive<SupplierAutomationTask>({
     account_health_guard_platform_multiplier_intervals: {},
     account_health_guard_cursor_account_id: 0,
     group_scheduling_election_top_n: 1,
+    group_scheduling_election_top_n_by_group: {},
     group_scheduling_election_disabled_group_ids: [],
     group_scheduling_election_count_weight: 1,
     group_scheduling_election_latency_weight: 0.5,
@@ -2198,6 +2217,14 @@ async function saveTask() {
     if (topN > 100) {
       appStore.showError('每组开启账号数不能超过 100')
       return
+    }
+    const topNByGroup = editForm.config.group_scheduling_election_top_n_by_group ?? {}
+    for (const groupTopN of Object.values(topNByGroup)) {
+      const n = Number(groupTopN)
+      if (!Number.isInteger(n) || n < 1 || n > 100) {
+        appStore.showError('分组单独设置的每组开启账号数必须是 1–100 的整数')
+        return
+      }
     }
     applyGroupElectionDefaults()
   }
@@ -2820,6 +2847,25 @@ const groupElectionRequiredModelsMap = computed<Record<string, string[]>>(() => 
 
 const groupElectionRequiredModelsCount = computed(() => Object.keys(groupElectionRequiredModelsMap.value).length)
 
+// 每组开启账号数的分组级覆盖：group_id → TopN。JSON 键是字符串，统一用 String(groupID) 归一读写；
+// 只保留正整数（<=0 视为不覆盖、回落全局），与后端 normalize 同口径。
+const groupElectionTopNByGroupMap = computed<Record<string, number>>(() => {
+  const raw = editForm.config.group_scheduling_election_top_n_by_group
+  const out: Record<string, number> = {}
+  if (raw && typeof raw === 'object') {
+    for (const [key, value] of Object.entries(raw)) {
+      const groupID = Number(key)
+      if (!Number.isFinite(groupID) || groupID <= 0) continue
+      const topN = Number(value)
+      if (!Number.isInteger(topN) || topN <= 0) continue
+      out[String(groupID)] = topN
+    }
+  }
+  return out
+})
+
+const groupElectionTopNOverridesCount = computed(() => Object.keys(groupElectionTopNByGroupMap.value).length)
+
 // 分组择优列表按倍率升序：倍率低的分组排前面，方便一眼看到最便宜的优先级。
 // 完全没有可用倍率的分组排到最后 —— 用 0 代替会把「免费(0)」和「查不到倍率」混在一起，
 // 排序键口径与行上显示的 `倍率 xx` 一致（Number + Number.isFinite，同 healthGuard 那套）。
@@ -3369,6 +3415,10 @@ function applyGroupElectionDefaults() {
   // 必需模型：清洗成 { [groupID]: 模型列表 }，丢弃非正 groupID 与空列表；空 map 也保留（等于无强制要求）。
   editForm.config.group_scheduling_election_required_models =
     groupElectionRequiredModelsMap.value as unknown as Record<number, string[]>
+  // 每组开启账号数的分组级覆盖：清洗成 { [groupID]: TopN }，丢弃非正 groupID 与非正 TopN（等于回落全局）；
+  // 空 map 也必须序列化而非省略 —— 后端整块覆盖 config_json，省略等于保留旧值，"清掉全部覆盖"就存不成功。
+  editForm.config.group_scheduling_election_top_n_by_group =
+    groupElectionTopNByGroupMap.value as unknown as Record<number, number>
   // 演练：总开关收敛成真正的布尔（旧配置没有这个键，读回来是 undefined）；
   // 分组名单必须序列化成数组而不是省略 —— 后端是整块覆盖 config_json，
   // 省略等于保留旧值，"清掉全部演练分组"就永远保存不成功。
@@ -3559,6 +3609,12 @@ function toggleElectionGroup(groupID: number) {
         groupElectionPriorityDisabledGroupIDs.value.filter(id => id !== groupID)
       )
     }
+    // 每组开启数的分组级覆盖同理：不参与择优的分组留着覆盖没意义，清掉、回落全局默认。
+    if (groupElectionTopNByGroupMap.value[String(groupID)]) {
+      const next: Record<string, number> = { ...groupElectionTopNByGroupMap.value }
+      delete next[String(groupID)]
+      editForm.config.group_scheduling_election_top_n_by_group = next as unknown as Record<number, number>
+    }
   }
 }
 
@@ -3643,6 +3699,21 @@ function setElectionGroupRequiredModels(groupID: number, text: string) {
   if (models.length) next[String(groupID)] = models
   else delete next[String(groupID)]
   editForm.config.group_scheduling_election_required_models = next as unknown as Record<number, string[]>
+}
+
+// 每组开启账号数的分组级覆盖：未设置返回空串，让输入框显示全局默认的 placeholder。
+function electionGroupTopNText(groupID: number): string {
+  const value = groupElectionTopNByGroupMap.value[String(groupID)]
+  return value ? String(value) : ''
+}
+
+// 录入分组级 TopN：正整数才写覆盖（钳到 [1,100] 与后端同口径），留空/非正/非法则删除该键、回落全局默认。
+function setElectionGroupTopN(groupID: number, text: string) {
+  const next: Record<string, number> = { ...groupElectionTopNByGroupMap.value }
+  const topN = Math.floor(Number(String(text ?? '').trim()))
+  if (Number.isFinite(topN) && topN > 0) next[String(groupID)] = Math.min(topN, 100)
+  else delete next[String(groupID)]
+  editForm.config.group_scheduling_election_top_n_by_group = next as unknown as Record<number, number>
 }
 
 function enableAllElectionGroups() {
@@ -6526,7 +6597,8 @@ function intervalSecondsToCron(seconds: number): string | null {
   grid-column: 5;
 }
 
-.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-required-models {
+/* 「每组开启数 + 必需模型」合并成一行占满整行、另起一行：TopN 是窄数字框、必需模型吃掉剩余宽度。 */
+.sp-rate-guard-group-row:has(.sp-election-participate-toggle) > .sp-election-group-extra {
   grid-column: 1 / -1;
 }
 
@@ -7545,14 +7617,22 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-muted);
 }
 
-/* 必需模型录入：占整行、另起一行，避免和上面的勾选/健康锁定挤在同一水平线上。 */
+/* 「每组开启数 + 必需模型」同处一行：另起一整行，避免和上面的勾选/健康锁定挤在同一水平线上。
+   TopN 窄、必需模型宽，两者用一个 flex 容器并排。 */
+.sp-election-group-extra {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding-left: 24px;
+}
+
 .sp-election-required-models {
-  flex: 1 1 100%;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding-left: 24px;
 }
 
 .sp-election-required-models-label {
@@ -7573,6 +7653,36 @@ function intervalSecondsToCron(seconds: number): string | null {
 }
 
 .sp-election-required-models-input:focus {
+  outline: none;
+  border-color: var(--sp-cyan);
+}
+
+/* 每组开启数覆盖：窄数字框，不铺满，与左侧必需模型并排。 */
+.sp-election-top-n-override {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-election-top-n-override-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--sp-muted);
+}
+
+.sp-election-top-n-override-input {
+  flex: 0 0 auto;
+  width: 120px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--sp-text);
+  background: var(--sp-panel);
+  border: 1px solid var(--sp-line);
+  border-radius: 6px;
+}
+
+.sp-election-top-n-override-input:focus {
   outline: none;
   border-color: var(--sp-cyan);
 }

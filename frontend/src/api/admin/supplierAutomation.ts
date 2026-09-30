@@ -50,6 +50,11 @@ export interface SupplierAutomationConfig {
   /** 分组择优调度：每个分组保持开启调度的最优账号数量，默认 1（严格单活）。 */
   group_scheduling_election_top_n?: number
   /**
+   * 分组择优调度：每组开启账号数的分组级覆盖，分组 ID → 该组的 TopN，命中即替换全局值，
+   * 未命中的分组沿用全局 group_scheduling_election_top_n。空对象或不传 = 所有分组都用全局值（默认）。
+   */
+  group_scheduling_election_top_n_by_group?: Record<number, number>
+  /**
    * 分组择优调度按本地分组开关：这里存"不参与择优"的分组 ID。
    * 空列表或不传 = 所有分组都参与择优（新增分组自动参与，无需补齐配置）。
    */

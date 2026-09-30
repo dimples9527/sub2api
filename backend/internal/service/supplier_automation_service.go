@@ -94,8 +94,10 @@ type SupplierAutomationConfig struct {
 	AccountHealthGuardCursorAccountID                    int64                                                     `json:"account_health_guard_cursor_account_id"`
 
 	// 分组择优调度：每组保持开启的最优账号数（默认 1），以及不参与择优的分组 ID 列表（空=全部参与）。
-	GroupElectionTopN             int     `json:"group_scheduling_election_top_n"`
-	GroupElectionDisabledGroupIDs []int64 `json:"group_scheduling_election_disabled_group_ids"`
+	GroupElectionTopN int `json:"group_scheduling_election_top_n"`
+	// 每组开启账号数的分组级覆盖：group_id → 该组 TopN，覆盖全局 GroupElectionTopN；空=全部用全局值。
+	GroupElectionTopNByGroup      map[int64]int `json:"group_scheduling_election_top_n_by_group"`
+	GroupElectionDisabledGroupIDs []int64       `json:"group_scheduling_election_disabled_group_ids"`
 	// 两项各自归一到 [0,1] 后加权，比值即相对话语权；缺省由归一化回落默认值。
 	GroupElectionCountWeight   float64 `json:"group_scheduling_election_count_weight"`
 	GroupElectionLatencyWeight float64 `json:"group_scheduling_election_latency_weight"`
@@ -773,6 +775,7 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 		}
 		result, err := s.groupElection.Run(ctx, SupplierGroupSchedulingElectionConfig{
 			TopN:                                 task.Config.GroupElectionTopN,
+			TopNByGroup:                          task.Config.GroupElectionTopNByGroup,
 			DisabledGroupIDs:                     task.Config.GroupElectionDisabledGroupIDs,
 			CountWeight:                          task.Config.GroupElectionCountWeight,
 			LatencyWeight:                        task.Config.GroupElectionLatencyWeight,
@@ -934,6 +937,13 @@ func validateSupplierAutomationTask(task SupplierAutomationTask) error {
 		// TopN 允许为 0（归一化时回落默认 1），但负数视为配置错误。
 		if task.Config.GroupElectionTopN < 0 || task.Config.GroupElectionTopN > MaxSupplierGroupSchedulingElectionTopN {
 			return ErrSupplierProviderInvalid
+		}
+		// 每组 TopN 覆盖：分组 ID 必须为正，取值必须在 [1, Max]。这里拒绝而不是静默钳/丢，
+		// 免得管理员以为自己填的越界值生效了（与全局 TopN 拒绝越界同口径）。
+		for groupID, topN := range task.Config.GroupElectionTopNByGroup {
+			if groupID <= 0 || topN < 1 || topN > MaxSupplierGroupSchedulingElectionTopN {
+				return ErrSupplierProviderInvalid
+			}
 		}
 		for _, groupID := range task.Config.GroupElectionDisabledGroupIDs {
 			if groupID <= 0 {

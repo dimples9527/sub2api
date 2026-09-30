@@ -116,6 +116,11 @@ const (
 type SupplierGroupSchedulingElectionConfig struct {
 	// TopN 是每个分组允许保持开启调度的最优账号数量，默认 1（严格单活）。
 	TopN int `json:"group_scheduling_election_top_n"`
+	// TopNByGroup 是「每组开启账号数」的分组级覆盖：group_id → 该组的 TopN，命中即替换全局 TopN，
+	// 未命中的分组仍用全局 TopN。语义与 RequiredModelsByGroup 一致（分组级 override map）：
+	// 空 map 表示所有分组都用全局值（默认，无需数据迁移）。归一化里丢弃非正 groupID 与 <=0 的值
+	// （等于该组不覆盖、回落全局），超上限的钳到上限，与全局 TopN 同口径。
+	TopNByGroup map[int64]int `json:"group_scheduling_election_top_n_by_group"`
 	// DisabledGroupIDs 存"被关闭择优"的分组 ID，空列表表示全部分组都参与。
 	// 存关闭项而不是开启项，是为了让"新增分组默认参与"无需数据迁移。
 	DisabledGroupIDs []int64 `json:"group_scheduling_election_disabled_group_ids"`
@@ -578,6 +583,15 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 	for _, groupID := range config.DryRunGroupIDs {
 		dryRunGroups[groupID] = struct{}{}
 	}
+	// topNForGroup 汇总「全局默认 + 分组级覆盖」得到某分组本轮的「每组开启账号数」：
+	// 分组在覆盖表里且值有效 → 用它；否则回落全局 TopN。归一化已保证表里的值都在 [1, Max]，
+	// 这里再兜一次 >0 判空，避免直接调用方传进未清洗的 0。
+	topNForGroup := func(groupID int64) int {
+		if n, ok := config.TopNByGroup[groupID]; ok && n > 0 {
+			return n
+		}
+		return config.TopN
+	}
 
 	// 1) 按分组归拢成员，同时聚合账号级视图（同一账号可能横跨多个分组）。
 	membersByGroup := make(map[int64][]SupplierGroupSchedulingElectionMember)
@@ -641,6 +655,9 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			GroupName: groupNames[groupID],
 		}
 		groupMembers := membersByGroup[groupID]
+		// groupTopN 是本组本轮生效的「每组开启账号数」：分组级覆盖优先，否则全局 TopN。
+		// 收敛上限、正常择优取前 N、入选分数线、逐组依据 top_n 四处都用它，口径必须一致。
+		groupTopN := topNForGroup(groupID)
 		// recordWinner 统一「标记账号赢家（union，跨组累积）+ 记入本组明细」。
 		// 明细里始终追加（同一账号跨多组时每组都应列出），故不因 account.winner 已置而跳过追加。
 		// requiredModel 非空表示这次入选是「为覆盖该必需模型」补选的、并不是综合分进了前 N ——
@@ -753,7 +770,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 					}
 					return supplierGroupSchedulingElectionMemberLess(scheduledHealthy[i], scheduledHealthy[j], electionScores)
 				})
-				limit := config.TopN
+				limit := groupTopN
 				if limit > len(scheduledHealthy) {
 					limit = len(scheduledHealthy)
 				}
@@ -775,7 +792,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			sort.SliceStable(successMembers, func(i, j int) bool {
 				return supplierGroupSchedulingElectionMemberLess(successMembers[i], successMembers[j], electionScores)
 			})
-			winners := config.TopN
+			winners := groupTopN
 			if winners > len(successMembers) {
 				winners = len(successMembers)
 			}
@@ -809,7 +826,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			rankByID[member.AccountID] = index + 1
 		}
 		// 入选分数线 = 实际取到的最后一名（TopN 超过参评数时就是末位）的综合分。
-		cutoffIndex := config.TopN
+		cutoffIndex := groupTopN
 		if cutoffIndex > len(ranked) {
 			cutoffIndex = len(ranked)
 		}
@@ -827,7 +844,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				GroupID:      groupID,
 				GroupName:    groupNames[groupID],
 				Locked:       locked,
-				TopN:         config.TopN,
+				TopN:         groupTopN,
 				RankTotal:    len(ranked),
 				WinnerCutoff: winnerCutoff,
 			}
@@ -1341,6 +1358,7 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	if config.TopN > MaxSupplierGroupSchedulingElectionTopN {
 		config.TopN = MaxSupplierGroupSchedulingElectionTopN
 	}
+	config.TopNByGroup = normalizeSupplierGroupElectionTopNByGroup(config.TopNByGroup)
 	config.DisabledGroupIDs = uniquePositiveInt64s(config.DisabledGroupIDs)
 	sort.Slice(config.DisabledGroupIDs, func(i, j int) bool {
 		return config.DisabledGroupIDs[i] < config.DisabledGroupIDs[j]
@@ -1428,6 +1446,30 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 	}
 	config.RequiredModelsByGroup = normalizeSupplierGroupElectionRequiredModels(config.RequiredModelsByGroup)
 	return config
+}
+
+// normalizeSupplierGroupElectionTopNByGroup 清洗「每组开启账号数」的分组级覆盖：
+// 丢弃非正 groupID；值 <=0 视为「不覆盖」丢弃（下游回落全局 TopN）；超上限的钳到上限，
+// 与全局 TopN 的归一化同口径。返回 nil 而非空 map，让「没配置」与「配了空」在下游一致
+// （len==0 都表示所有分组用全局值）。
+func normalizeSupplierGroupElectionTopNByGroup(raw map[int64]int) map[int64]int {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[int64]int, len(raw))
+	for groupID, topN := range raw {
+		if groupID <= 0 || topN <= 0 {
+			continue
+		}
+		if topN > MaxSupplierGroupSchedulingElectionTopN {
+			topN = MaxSupplierGroupSchedulingElectionTopN
+		}
+		out[groupID] = topN
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // normalizeSupplierGroupElectionRequiredModels 清洗「分组必需模型」：丢弃非正 groupID，

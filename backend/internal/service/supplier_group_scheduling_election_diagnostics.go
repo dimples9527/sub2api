@@ -72,6 +72,8 @@ func (s *SupplierAutomationService) BuildGroupSchedulingElectionDiagnostics(ctx 
 	b.WriteString("任务: " + SupplierAutomationTaskGroupElection + "\n")
 
 	topN := DefaultSupplierGroupSchedulingElectionTopN
+	// topNByGroup 是「每组开启账号数」的分组级覆盖，section [2] 按它算每组的生效 TopN。
+	var topNByGroup map[int64]int
 	task, err := s.repo.GetTask(ctx, SupplierAutomationTaskGroupElection)
 	if err != nil {
 		return "", fmt.Errorf("读取分组择优任务配置失败: %w", err)
@@ -84,8 +86,10 @@ func (s *SupplierAutomationService) BuildGroupSchedulingElectionDiagnostics(ctx 
 		if cfg.GroupElectionTopN > 0 {
 			topN = cfg.GroupElectionTopN
 		}
+		topNByGroup = cfg.GroupElectionTopNByGroup
 		b.WriteString(fmt.Sprintf("  enabled=%t  cron=%s  timeout=%ds\n", task.Enabled, task.CronExpression, task.TimeoutSeconds))
 		b.WriteString(fmt.Sprintf("  top_n=%d（每组开启账号数）\n", cfg.GroupElectionTopN))
+		b.WriteString("  top_n_by_group=" + supplierGroupElectionDiagnosticsTopNByGroup(cfg.GroupElectionTopNByGroup) + "\n")
 		b.WriteString(fmt.Sprintf("  count_weight=%s  latency_weight=%s  switch_margin=%s  count_score_cap=%d\n",
 			supplierGroupElectionDiagnosticsFloat(cfg.GroupElectionCountWeight),
 			supplierGroupElectionDiagnosticsFloat(cfg.GroupElectionLatencyWeight),
@@ -157,19 +161,30 @@ func (s *SupplierAutomationService) BuildGroupSchedulingElectionDiagnostics(ctx 
 	sort.Slice(groupOrder, func(i, j int) bool { return groupOrder[i] < groupOrder[j] })
 	sort.Slice(accountOrder, func(i, j int) bool { return accountOrder[i] < accountOrder[j] })
 
-	b.WriteString(fmt.Sprintf("\n[2] 分组现状（实时，取自 accounts.schedulable；TopN=%d）\n", topN))
+	// effectiveTopN 与后端 topNForGroup 同口径：分组级覆盖优先，否则全局 TopN。
+	// 表头写「全局默认」而各行 TopN 列写生效值，超员判定也按生效值——否则被单独调过 TopN 的分组
+	// 会被错判成超员。
+	effectiveTopN := func(groupID int64) int {
+		if n, ok := topNByGroup[groupID]; ok && n > 0 {
+			return n
+		}
+		return topN
+	}
+
+	b.WriteString(fmt.Sprintf("\n[2] 分组现状（实时，取自 accounts.schedulable；全局默认 TopN=%d，各行 TopN 为生效值）\n", topN))
 	b.WriteString(fmt.Sprintf("  参与择优的分组共 %d 个\n", len(groupOrder)))
 	b.WriteString("  group_id | 分组名 | 成员 | 已开启 | TopN | 状态\n")
 	overflowCount := 0
 	for _, groupID := range groupOrder {
 		group := groupAggs[groupID]
+		effTopN := effectiveTopN(group.groupID)
 		status := "-"
-		if group.openCount > topN {
-			status = fmt.Sprintf("超员 +%d", group.openCount-topN)
+		if group.openCount > effTopN {
+			status = fmt.Sprintf("超员 +%d", group.openCount-effTopN)
 			overflowCount++
 		}
 		b.WriteString(fmt.Sprintf("  %d | %s | %d | %d | %d | %s\n",
-			group.groupID, group.groupName, group.memberCount, group.openCount, topN, status))
+			group.groupID, group.groupName, group.memberCount, group.openCount, effTopN, status))
 	}
 	b.WriteString(fmt.Sprintf("  → 超员分组数: %d\n", overflowCount))
 
@@ -266,6 +281,24 @@ func supplierGroupElectionDiagnosticsInt64List(values []int64) string {
 
 func supplierGroupElectionDiagnosticsFloat(value float64) string {
 	return strconv.FormatFloat(value, 'g', -1, 64)
+}
+
+// supplierGroupElectionDiagnosticsTopNByGroup 把「每组开启账号数」的分组级覆盖压成紧凑文本，
+// 形如 {12:2 34:5}，按 groupID 升序，空覆盖输出 {}。口径与 required_models 的格式化保持一致。
+func supplierGroupElectionDiagnosticsTopNByGroup(topNByGroup map[int64]int) string {
+	if len(topNByGroup) == 0 {
+		return "{}"
+	}
+	groupIDs := make([]int64, 0, len(topNByGroup))
+	for groupID := range topNByGroup {
+		groupIDs = append(groupIDs, groupID)
+	}
+	sort.Slice(groupIDs, func(i, j int) bool { return groupIDs[i] < groupIDs[j] })
+	parts := make([]string, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		parts = append(parts, fmt.Sprintf("%d:%d", groupID, topNByGroup[groupID]))
+	}
+	return "{" + strings.Join(parts, " ") + "}"
 }
 
 func supplierGroupElectionDiagnosticsRequiredModels(models map[int64][]string) string {
