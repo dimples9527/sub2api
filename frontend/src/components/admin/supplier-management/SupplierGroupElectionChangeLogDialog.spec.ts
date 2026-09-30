@@ -351,8 +351,13 @@ describe('调度切换日志的两个入口', () => {
     // 会被读成「这项有值、只是很小」，一律不画；全空就整块不渲染。
     expect(source).toContain('if (widthPercent <= 0) return')
     expect(source).toContain('if (segments.length === 0 && flags.length === 0) return null')
-    // 标签放段首「次▇▇▇」而不是居中：段窄了居中的字会被裁掉，段首至少和色块起点对得上。
+    // 段内标「次0.900」而不是居中：段窄了居中的字会被裁掉，段首至少和色块起点对得上。
     expect(cssBlock('.sp-election-log-score-segment')).toContain('justify-content: flex-start')
+    // 段内要直接读得到这一项算出来的分，不能只给颜色和宽度、让管理员去悬停看 title。
+    expect(source).toContain('{{ segment.shortLabel }}{{ segment.value }}')
+    expect(source).toContain('value: score(scoreValue)')
+    // 段窄时横向裁尾巴，不折行 —— 条只有 18px 高，折成两行哪一行都读不全。
+    expect(cssBlock('.sp-election-log-score-segment-label')).toContain('white-space: nowrap')
     // 标签色必须是弹窗自己声明的变量：段底色是「色相 50% 混面板」，
     // 靠继承拿到的字色会随主题漂，浅底深字 / 深底浅字都不一定成立。
     expect(source).toContain('--sp-election-log-ink: #0f172a')

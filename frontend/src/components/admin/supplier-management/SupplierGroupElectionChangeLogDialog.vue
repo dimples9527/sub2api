@@ -205,7 +205,8 @@
                           </div>
                           <small v-if="reasonView(section, log).note" class="sp-election-log-reason-note">{{ reasonView(section, log).note }}</small>
                           <!-- 评分贡献条：次数/用时/优先三段按加权贡献上色，上下对齐扫一列就看出谁靠哪项赢的。
-                               段宽 = 加权贡献 / 综合分；段首的「次/时/级」小字就是图例，不再单画一行。
+                               段宽 = 加权贡献 / 综合分；段内标「次0.900」= 项名 + 该项算出来的分项得分，
+                               既是图例也是读数，不用再悬停看 title。
                                0 贡献的段（如本组不计优先级）不画，只对 scored 行显示。 -->
                           <div v-if="scoreBreakdown(section, log)" class="sp-election-log-score-breakdown">
                             <div v-if="scoreBreakdown(section, log)!.segments.length > 0" class="sp-election-log-score-bar">
@@ -217,7 +218,7 @@
                                 :style="{ width: `${segment.widthPercent}%` }"
                                 :title="`${segment.label} ${segment.value}`"
                               >
-                                <small class="sp-election-log-score-segment-label">{{ segment.shortLabel }}</small>
+                                <small class="sp-election-log-score-segment-label">{{ segment.shortLabel }}{{ segment.value }}</small>
                               </span>
                             </div>
                             <!-- 单行旗标：只跟这一行相关的标记（封顶命中、用时中性）才显示，不命中就不出现。 -->
@@ -1541,9 +1542,9 @@ watch(() => props.accountId, () => {
   background: color-mix(in srgb, var(--sp-election-log-line) 30%, transparent);
 }
 
-/* 标签放段首（「次▇▇▇」），不居中：一眼能对上「这一段是哪一项」，省掉一行图例。
-   标签永远在段内左侧，所以特别窄的段会把字裁掉 —— 但窄到那种程度的段贡献已接近 0，
-   早就在 pushSegment 里被滤掉了，不会出现「只看得见半截标签」。 */
+/* 段内标「次0.900」：项名放段首（「次▇▇▇」），不居中 —— 段窄了居中的字会被裁，
+   段首至少能和色块起点对上。字宽随段宽变化，**窄段会把读数裁掉**（这是「段宽=比例」的固有代价，
+   0 贡献的段已经在 pushSegment 里滤掉，剩下的都是真有贡献的）。 */
 .sp-election-log-score-segment {
   display: flex;
   align-items: center;
@@ -1577,11 +1578,14 @@ watch(() => props.accountId, () => {
   background: color-mix(in srgb, #a78bfa 40%, var(--sp-election-log-panel));
 }
 
+/* 段内读数：项名 + 该项的分项得分（如「次0.900」）。 */
 .sp-election-log-score-segment-label {
   color: var(--sp-election-log-ink);
   font-size: 10px;
   font-weight: 700;
   opacity: 0.7;
+  /* 段窄时宁可横向裁掉尾巴，也不要折成两行 —— 条只有 18px 高，折行后两行都读不全。 */
+  white-space: nowrap;
 }
 
 /* 单行旗标：只跟这一行相关的标记（封顶命中、用时中性）才显示，不命中就不出现。 */
