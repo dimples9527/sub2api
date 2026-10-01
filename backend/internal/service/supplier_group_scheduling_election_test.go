@@ -1291,6 +1291,119 @@ func TestGroupElectionRequiredModelCoveredByUnmappedAccount(t *testing.T) {
 	require.Equal(t, []int64{511}, result.Groups[0].WinnerIDs)
 }
 
+// 回归守卫（2026-10-01 生产故障）：必需模型支持者不能被「更快的同类支持者」顶掉。
+//
+// 生产现象：两个分组一小时对调两次 —— 每轮都是「上一轮的补选者被 over_capacity 关掉 +
+// 另一个账号带 required_models 被补选开启」，且四条记录全带 locked:true。
+// 根因：收敛按「综合分前 TopN」硬切，而补选跑在收敛之后、只增开 ——
+// 上一轮的补选者下一轮必被当成「超出 TopN 的在任者」淘汰，补选再按「当轮最高分支持者」补一个；
+// 而综合分里的用时分是组内 min-max 归一化的，延迟抖一下补选目标就换人。
+// 修复：收敛保留集 = TopN 名额 + 必需模型支持者（额外保留、不占名额）。
+//
+// ⚠️ 场景必须让「在任支持者」不是「当轮最高分支持者」，否则单轮内「收敛关它 + 补选又开它」
+// 会互相抵消，修复前后结果相同、测试没有区分力。这里 302 在任但分数低、303 关着但分数更高。
+func TestGroupElectionRequiredModelSupporterSurvivesConvergence(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 301：本组综合分最高的在任者，但不支持 aaa。
+		{GroupID: 1, GroupName: "G1", AccountID: 301, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000, ModelMapping: map[string]any{"bbb": "bbb"}},
+		// 302：上一轮为覆盖 aaa 被补选开启的支持者，综合分低。
+		{GroupID: 1, GroupName: "G1", AccountID: 302, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 3000, ModelMapping: map[string]any{"aaa": "aaa"}},
+		// 303：同样支持 aaa 且综合分更高，但当前关着 —— 修复前它会把在任的 302 顶掉。
+		{GroupID: 1, GroupName: "G1", AccountID: 303, Platform: "anthropic", Schedulable: false, LastTestStatus: "success", HealthyCount: 10, LastTestLatencyMs: 1500, ModelMapping: map[string]any{"aaa": "aaa"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+		RequiredModelsByGroup:        map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "aaa 已由在任的 302 覆盖 → 既不该关 302，也不该开 303")
+	require.ElementsMatch(t, []int64{301, 302}, result.Groups[0].WinnerIDs,
+		"TopN 最优 301 + 必需模型支持者 302 都保留")
+	require.Equal(t, 0, result.DisabledCount)
+	require.Equal(t, 0, result.EnabledCount)
+}
+
+// 跨轮稳定性：对「每轮翻烙饼」的直接复刻 —— 连跑两轮都不该产生任何调度写库。
+// 修复前第一轮就会「关 302、开 303」，第二轮再反向换一次（生产日志里每轮一关一开的来源）。
+func TestGroupElectionRequiredModelSupporterStableAcrossRounds(t *testing.T) {
+	members := []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 301, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000, ModelMapping: map[string]any{"bbb": "bbb"}},
+		{GroupID: 1, GroupName: "G1", AccountID: 302, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 3000, ModelMapping: map[string]any{"aaa": "aaa"}},
+		{GroupID: 1, GroupName: "G1", AccountID: 303, Platform: "anthropic", Schedulable: false, LastTestStatus: "success", HealthyCount: 10, LastTestLatencyMs: 1500, ModelMapping: map[string]any{"aaa": "aaa"}},
+	}
+	config := SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+		RequiredModelsByGroup:        map[int64][]string{1: {"aaa"}},
+	}
+
+	firstStore := newFakeGroupElectionStore()
+	first := NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: members}, firstStore)
+	_, err := first.Run(context.Background(), config, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, firstStore.calls, "第一轮状态已稳定，不该换人")
+
+	// 真实任务每轮都读回上一轮写下的 schedulable；本轮没有写库，状态不变，再跑一轮仍应无写库。
+	secondStore := newFakeGroupElectionStore()
+	second := NewSupplierGroupSchedulingElectionService(&fakeGroupElectionRepo{members: members}, secondStore)
+	result, err := second.Run(context.Background(), config, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, secondStore.calls, "第二轮同样不该换人")
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount)
+}
+
+// 支持者不会无限累积：同组有多个 aaa 支持者都在任时，只为未覆盖的模型保留综合分最高的一个。
+// ⚠️ 这一条不区分修复前后（补选会把被关的那个再开回来），它守的是「全部保留」这种退化改法。
+func TestGroupElectionRequiredModelKeepersDoNotOverKeep(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 301, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000, ModelMapping: map[string]any{"bbb": "bbb"}},
+		{GroupID: 1, AccountID: 302, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 3000, ModelMapping: map[string]any{"aaa": "aaa"}},
+		{GroupID: 1, AccountID: 303, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 3000, ModelMapping: map[string]any{"aaa": "aaa"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+		RequiredModelsByGroup:        map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.ElementsMatch(t, []int64{301, 302}, result.Groups[0].WinnerIDs,
+		"aaa 只需一个支持者 → 保留综合分更高的 302，303 收敛关闭")
+	require.Equal(t, false, store.calls[303])
+	require.Equal(t, 1, result.DisabledCount)
+}
+
+// 支持必需模型的账号本身就是 TopN 最优时不额外保留任何人（保持原有收敛行为）。
+func TestGroupElectionRequiredModelKeeperSkippedWhenTopNCovers(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 301, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000, ModelMapping: map[string]any{"aaa": "aaa"}},
+		{GroupID: 1, AccountID: 302, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 1, LastTestLatencyMs: 3000, ModelMapping: map[string]any{"bbb": "bbb"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+		RequiredModelsByGroup:        map[int64][]string{1: {"aaa"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, []int64{301}, result.Groups[0].WinnerIDs,
+		"aaa 已由 TopN 最优 301 覆盖 → 不额外保留 302")
+	require.Equal(t, false, store.calls[302], "302 应被容量收敛关闭")
+	require.Equal(t, 1, result.DisabledCount)
+}
+
 // 归一化必需模型：丢弃非正 groupID，模型名 trim、按小写去重保序，清洗后为空的分组整条丢弃。
 func TestGroupElectionNormalizeRequiredModels(t *testing.T) {
 	cfg := normalizeSupplierGroupSchedulingElectionConfig(SupplierGroupSchedulingElectionConfig{

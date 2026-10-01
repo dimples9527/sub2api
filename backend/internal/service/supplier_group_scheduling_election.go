@@ -780,12 +780,25 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				if limit > len(scheduledHealthy) {
 					limit = len(scheduledHealthy)
 				}
+				// 保留集 = TopN 名额 + 「必需模型覆盖所需的在任支持者」。
+				// 后者必须**额外**保留、不占 TopN 名额：必需模型是硬底线，而补选跑在收敛之后、只增开 ——
+				// 若这里把支持者当成「超出 TopN 的在任者」关掉，下一轮补选就会再开一个，
+				// 且补选目标随组内 min-max 归一化的延迟抖动而换人，
+				// 表现为同一分组每轮「关一个、开一个」来回横跳、永不收敛。
+				kept := make(map[int64]struct{}, len(scheduledHealthy))
 				for index := 0; index < limit; index++ {
-					recordWinner(scheduledHealthy[index].AccountID, "")
+					kept[scheduledHealthy[index].AccountID] = struct{}{}
 				}
-				for index := limit; index < len(scheduledHealthy); index++ {
-					convergedDropped[scheduledHealthy[index].AccountID] = struct{}{}
-					if account := accounts[scheduledHealthy[index].AccountID]; account != nil {
+				for _, accountID := range supplierGroupElectionRequiredModelKeepers(scheduledHealthy, limit, config.RequiredModelsByGroup[groupID]) {
+					kept[accountID] = struct{}{}
+				}
+				for _, member := range scheduledHealthy {
+					if _, keep := kept[member.AccountID]; keep {
+						recordWinner(member.AccountID, "")
+						continue
+					}
+					convergedDropped[member.AccountID] = struct{}{}
+					if account := accounts[member.AccountID]; account != nil {
 						account.convergedOut = true
 					}
 				}
@@ -1239,6 +1252,59 @@ func supplierGroupSchedulingElectionMemberLess(a, b SupplierGroupSchedulingElect
 		return a.LastTestedAt.After(b.LastTestedAt)
 	}
 	return a.AccountID < b.AccountID
+}
+
+// supplierGroupElectionRequiredModelKeepers 挑出「为了让本组必需模型都有在任者覆盖，
+// 必须额外保留（不占 TopN 名额）的在任者 ID」。
+//
+// 为什么收敛需要它：必需模型覆盖是在补选阶段（applySupplierGroupRequiredModelCoverage）才做的，
+// 而补选跑在收敛之后、且只增开 —— 收敛若按「综合分前 TopN」把上一轮补选进来的支持者关掉，
+// 下一轮补选就会再开一个，目标还会随组内 min-max 归一化的延迟抖动而换人，
+// 于是同一分组每轮「关一个、开一个」来回横跳（生产实测 2026-10-01：两个分组一小时对调两次）。
+// 把支持者纳入保留集，补选者一旦开启就不会被下一轮收敛淘汰，振荡即停。
+//
+// 口径与补选同构：每个未被 TopN 名额覆盖的必需模型，保留综合分最高的一个支持者
+// （一个账号可同时覆盖多个模型，故实际保留数 ≤ 未覆盖模型数）。
+// members 必须已按「更优在前」排好序，前 limit 个即 TopN 名额。
+func supplierGroupElectionRequiredModelKeepers(members []SupplierGroupSchedulingElectionMember, limit int, requiredModels []string) []int64 {
+	// 在任者全在 TopN 名额内时，没有可额外保留的对象。
+	if len(requiredModels) == 0 || limit >= len(members) {
+		return nil
+	}
+	// 小写 → 原始名：去空、按小写去重，与 applySupplierGroupRequiredModelCoverage 同口径。
+	uncovered := make(map[string]string, len(requiredModels))
+	for _, model := range requiredModels {
+		trimmed := strings.TrimSpace(model)
+		if trimmed == "" {
+			continue
+		}
+		uncovered[strings.ToLower(trimmed)] = trimmed
+	}
+	// TopN 名额里已经有人支持的模型算已覆盖，不必再额外保留。
+	for index := 0; index < limit; index++ {
+		for key, model := range uncovered {
+			if supplierGroupElectionMemberSupportsModel(members[index], model) {
+				delete(uncovered, key)
+			}
+		}
+	}
+	if len(uncovered) == 0 {
+		return nil
+	}
+	keepers := make([]int64, 0, len(uncovered))
+	for index := limit; index < len(members) && len(uncovered) > 0; index++ {
+		covered := false
+		for key, model := range uncovered {
+			if supplierGroupElectionMemberSupportsModel(members[index], model) {
+				delete(uncovered, key)
+				covered = true
+			}
+		}
+		if covered {
+			keepers = append(keepers, members[index].AccountID)
+		}
+	}
+	return keepers
 }
 
 // applySupplierGroupRequiredModelCoverage 保证分组配置的每个「必需模型」都至少有一个赢家能提供。
