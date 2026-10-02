@@ -386,6 +386,11 @@ describe('调度切换日志的两个入口', () => {
     // 用时项取中性值时必须标明，否则管理员会拿这个 0.5 去反推配置。
     expect(source).toContain("flags.push('用时中性')")
     expect(cssBlock('.sp-election-log-score-breakdown')).toContain('margin-top')
+    // 综合分要能手工复核：段条只标分项得分（窄了还会被裁），原始值又散在别的列，
+    // 必须把「原始值 → 分项得分 × 权重 → 求和」整式写进 DOM。
+    expect(source).toContain('sp-election-log-score-formula')
+    expect(source).toContain('= ${score(total)}')
+    expect(cssBlock('.sp-election-log-score-formula')).toContain('word-break')
   })
 
   it('「原因」列按本组那条依据分类，不照抄账号级的 union 原因', () => {

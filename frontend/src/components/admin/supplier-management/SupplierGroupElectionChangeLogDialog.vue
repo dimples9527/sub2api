@@ -221,6 +221,12 @@
                                 <small class="sp-election-log-score-segment-label">{{ segment.shortLabel }}{{ segment.value }}</small>
                               </span>
                             </div>
+                            <!-- 综合分的计算式：每项「原始值 → 分项得分 × 权重」再求和。
+                                 段条只标分项得分且窄了会被裁，原始值又散在别的列 ⇒
+                                 给一行不依赖布局的完整式，综合分可手工复核。 -->
+                            <small v-if="scoreBreakdown(section, log)!.formula" class="sp-election-log-score-formula">
+                              {{ scoreBreakdown(section, log)!.formula }}
+                            </small>
                             <!-- 单行旗标：只跟这一行相关的标记（封顶命中、用时中性）才显示，不命中就不出现。 -->
                             <small v-if="scoreBreakdown(section, log)!.flags.length > 0" class="sp-election-log-score-flags">
                               {{ scoreBreakdown(section, log)!.flags.join(' · ') }}
@@ -612,31 +618,64 @@ interface ScoreSegment {
 interface ScoreBreakdown {
   segments: ScoreSegment[]
   flags: string[]
+  /** 综合分的计算式：每项「原始值 → 分项得分 × 权重」再求和。没有可写的项时为空串。 */
+  formula: string
 }
 function scoreBreakdown(section: LogSection, log: SupplierGroupElectionChangeLog): ScoreBreakdown | null {
   const decision = decisionFor(section, log)
   if (!decision || !decision.scored) return null
   const segments: ScoreSegment[] = []
   const flags: string[] = []
+  const terms: string[] = []
   const score = (value?: number) => (typeof value === 'number' ? value.toFixed(3) : '—')
+  // 权重按原值写、只给整数补一位小数（1 → 1.0，0.5 → 0.5，1.25 → 1.25）：
+  // 统一 toFixed(1) 会把 1.25 截成 1.3，式子当场算不平 —— 复核用的式子宁可长一点也要准。
+  const weightText = (value: number) => {
+    const text = String(value)
+    return text.includes('.') ? text : `${text}.0`
+  }
 
   // 加权贡献 = 分项得分 × 权重；段宽 = 加权贡献 / 综合分。
   const total = decision.score ?? 0
-  const pushSegment = (kind: ScoreSegment['kind'], label: string, shortLabel: string, scoreValue?: number, weight?: number) => {
+  // rawText 是该分项的**原始输入**（次数、参与评分的用时），只进计算式、不进段条 ——
+  // 段条按贡献比例分宽，塞原始值只会被裁掉。
+  const pushSegment = (
+    kind: ScoreSegment['kind'],
+    label: string,
+    shortLabel: string,
+    rawText: string,
+    scoreValue?: number,
+    weight?: number,
+  ) => {
     if (typeof scoreValue !== 'number' || typeof weight !== 'number') return
     const widthPercent = total > 0 ? ((scoreValue * weight) / total) * 100 : 0
     // 段宽为 0 的项在这一行上没有任何贡献：画出来只剩一个 1px 空条加一个被裁掉的标签，
     // 反而会被读成「这项有值、只是很小」。0 贡献的段一律不画。
     if (widthPercent <= 0) return
     segments.push({ kind, label, shortLabel, value: score(scoreValue), widthPercent })
+    // 计算式与段条**同口径**（0 贡献的项两边都不出现），否则式子的项与条的颜色对不上。
+    terms.push(`${shortLabel}${rawText}=${score(scoreValue)}×${weightText(weight)}`)
   }
 
-  pushSegment('count', '次数', '次', decision.count_score, decision.count_weight)
-  pushSegment('latency', '用时', '时', decision.latency_score, decision.latency_weight)
+  // 次数原始值写「12/10」：分母是封顶值，超过即封顶命中（批次口径已列封顶值，这里再给一份自解释）。
+  const countCap = decision.count_score_cap
+  const countRaw = typeof countCap === 'number' && countCap > 0 ? `${log.healthy_count}/${countCap}` : `${log.healthy_count}`
+  // 用时原始值取 effective_latency_ms —— 它**不是**表格里的「测试用时」：含成功率惩罚，
+  // 且在任者还要按迟滞死区折算，真正进公式的是这个数。
+  // 取中性值时直接标「中性」，免得管理员拿一个没参与计算的值去反推分项得分。
+  const latencyRaw = decision.latency_fallback
+    ? '中性'
+    : typeof decision.effective_latency_ms === 'number' && decision.effective_latency_ms > 0
+      ? `${decision.effective_latency_ms}ms`
+      : ''
+
+  pushSegment('count', '次数', '次', countRaw, decision.count_score, decision.count_weight)
+  pushSegment('latency', '用时', '时', latencyRaw, decision.latency_score, decision.latency_weight)
   // 本组不计优先级时这一项必然 0 贡献（后端已把 priority_score 置 0），直接不参与画条；
   // 旧运行记录没有 priority_enabled，由上面「0 贡献不画」兜住。
+  // 优先级没有原始值可写（后端只给归一化后的 priority_score），留空。
   if (decision.priority_enabled !== false) {
-    pushSegment('priority', '优先级', '级', decision.priority_score, decision.priority_weight)
+    pushSegment('priority', '优先级', '级', '', decision.priority_score, decision.priority_weight)
   }
 
   // 单行旗标：只跟这一行相关的标记才显示，不命中就不出现。
@@ -649,7 +688,10 @@ function scoreBreakdown(section: LogSection, log: SupplierGroupElectionChangeLog
 
   // 既没构成也没旗标就整块不渲染，别留一条空条。
   if (segments.length === 0 && flags.length === 0) return null
-  return { segments, flags }
+  // 计算式：段条只标分项得分、窄了还会被裁，原始值又散在别的列（且用时列显示的不是参与计算的那个数），
+  // 光看条子推不出综合分。这里给一行不依赖布局的完整式，综合分可手工复核。
+  const formula = terms.length > 0 ? `${terms.join(' + ')} = ${score(total)}` : ''
+  return { segments, flags, formula }
 }
 
 // 取「本行在本分节这个分组下」的那条裁决依据。
@@ -1598,5 +1640,17 @@ watch(() => props.accountId, () => {
   color: var(--sp-election-log-muted);
   font-size: 10px;
   line-height: 1.5;
+}
+
+/* 综合分的计算式：原始值 → 分项得分 × 权重 → 求和。
+   排在旗标之前（紧贴段条），因为它是段条上那几个读数的来源。
+   原因列最窄 200px，长式子必然折行 —— 宁可折行也不省略项，否则综合分复核不了。 */
+.sp-election-log-score-formula {
+  display: block;
+  margin-top: 3px;
+  color: var(--sp-election-log-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 </style>
