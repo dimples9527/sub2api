@@ -694,11 +694,14 @@ function classifyReason(
   if (!decision) return { badge: null, note: '' }
   // 收敛关闭必须排在锁定之前：被收敛掉的在任者也带 locked（本组本轮没做择优），
   // 但它是被「关闭」的，标成「健康锁定（保留）」会与同一行的「关闭调度」自相矛盾。
-  if (decision.over_capacity) return { badge: { kind: 'converged', label: '收敛关闭' }, note: '本组开启数已达上限' }
-  if (decision.locked) return { badge: { kind: 'locked', label: '健康锁定' }, note: '在任者正常，本轮未换人' }
+  if (decision.over_capacity) return { badge: { kind: 'converged', label: '收敛关闭' }, note: '本组在任账号数超过上限' }
+  // 必需模型补选同理，只是方向相反：补选跑在收敛之后、锁定组也执行（必需模型是硬底线），
+  // 所以被补选进来的账号同样带 locked —— 先判 locked 会把「刚被开启」标成「本轮未换人」，
+  // 与同一行的「开启调度」自相矛盾。
   if (decision.required_models && decision.required_models.length > 0) {
     return { badge: { kind: 'required', label: '必需模型补选' }, note: decision.required_models.join('、') }
   }
+  if (decision.locked) return { badge: { kind: 'locked', label: '健康锁定' }, note: '在任者正常，本轮未换人' }
   if (decision.elected) return { badge: { kind: 'elected', label: '择优入选' }, note: '' }
   // 「本该动却没动」行（before === after 且非锁定）：结论落在账号级 —— 无备选保留 /
   // 连续失败待观察 / 写库失败，这些是 union 语义下账号整体的裁决，交回 log.reason 才准，这里不硬归类。

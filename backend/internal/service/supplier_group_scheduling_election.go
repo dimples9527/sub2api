@@ -26,10 +26,12 @@ const (
 	SupplierGroupSchedulingElectionReasonNotElected  = "非分组最优，关闭调度"
 	SupplierGroupSchedulingElectionReasonUntested    = "尚未测试，保持原状"
 	SupplierGroupSchedulingElectionReasonWriteFailed = "更新调度状态失败"
-	// SupplierGroupSchedulingElectionReasonOverCapacity 是「本组已开启账号数达上限、多出来的被收敛掉」的关闭原因。
-	// 与 ReasonNotElected 分开：被收敛掉的账号未必不是本组最优，只是本组已经开够了账号
-	// （多数情况是别的分组与它共用了这个账号，把它一并开启了），再留着就会突破「每组开启账号数」这个硬上限。
-	SupplierGroupSchedulingElectionReasonOverCapacity = "分组已开启账号数达上限，收敛关闭"
+	// SupplierGroupSchedulingElectionReasonOverCapacity 是「本组在任账号数超过上限、多出来的被收敛掉」的关闭原因。
+	// 措辞用「在任账号数」而不是「已开启账号数」：判据是「开着且未到失败阈值的在任者数 > 每组开启账号数」，
+	// 而 union 语义下同一个账号可能被别的分组一并开启，只报本组开启数会漏掉这种共用。
+	// 与 ReasonNotElected 分开：被收敛掉的账号未必不是本组最优，只是本组已经开够了账号，
+	// 再留着就会突破「每组开启账号数」这个硬上限。
+	SupplierGroupSchedulingElectionReasonOverCapacity = "分组在任账号数超过上限，收敛关闭"
 	// 下面两条是「失败不再立刻关」后的新出口：
 	// 未达阈值时保持原状等下一轮，或分组没有备选账号时保留调度（绝不把分组关成空组）。
 	// 未达阈值的理由带上进度（第几次/共几次），否则运维只看到"没关"却不知道还要等几轮。
@@ -726,7 +728,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 就把两个账号永久焊在一起（多活累积）——单在任者分组尤其致命：在任者一失败 scheduledHealthy 就空了，
 		// 若只看「有没有健康在任者」，锁根本合不上，故这里以「有没有未到阈值的在任者」为准。
 		locked := false
-		// convergedDropped 记录本组因「开启数已达上限」被收敛掉的账号，供明细标注关闭原因。
+		// convergedDropped 记录本组因「在任账号数超过上限」被收敛掉的账号，供明细标注关闭原因。
 		convergedDropped := make(map[int64]struct{})
 		if keepHealthyForGroup(groupID) {
 			scheduledHealthy := make([]SupplierGroupSchedulingElectionMember, 0) // 开着且测试成功的在任者，锁定时记为赢家

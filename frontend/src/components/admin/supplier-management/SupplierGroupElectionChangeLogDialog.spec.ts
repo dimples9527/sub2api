@@ -402,6 +402,9 @@ describe('调度切换日志的两个入口', () => {
     // 收敛关闭与在任者健康锁定是两回事（一个关、一个留），必须分开分类；
     // 且收敛判断排在锁定之前 —— 被收敛的在任者也带 locked，先判 locked 会把「关闭」标成「保留」。
     expect(source.indexOf("kind: 'converged'")).toBeLessThan(source.indexOf("kind: 'locked'"))
+    // 必需模型补选的顺序同理（方向相反）：补选跑在收敛之后、锁定组也执行，
+    // 补选进来的账号同样带 locked，先判 locked 会把「刚被开启」标成「本轮未换人」。
+    expect(source.indexOf("kind: 'required'")).toBeLessThan(source.indexOf("kind: 'locked'"))
     // 旧记录没有依据 ⇒ 不归类，降级回账号级原文。
     expect(source).toContain("if (!decision) return { badge: null, note: '' }")
     expect(source).toContain("fallback: log.reason || '—'")
