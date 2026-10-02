@@ -47,10 +47,13 @@ describe('recharge bonus hints on quick amounts', () => {
     { min_amount: 500, bonus_percent: 30 },
   ]
 
-  it('renders no badge or second line when no tiers are configured', () => {
+  it('renders no badge or recommendation but still shows the credited amount when no tiers are configured', () => {
     const wrapper = mount(AmountInput, { props: { modelValue: null, amounts: [50, 100, 500] } })
     expect(wrapper.find('[data-testid="quick-amount-bonus-badge"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="quick-amount-credited"]').exists()).toBe(false)
+    // 没有优惠就没有「最划算」的客观依据，不该硬编一个推荐角标出来
+    expect(wrapper.find('[data-testid="quick-amount-recommended"]').exists()).toBe(false)
+    // 到账行已改为常显：倍率与假日活动都可能抬高到账额，没有阶梯时也要让用户看到实得
+    expect(wrapper.get('[data-testid="quick-amount-50"] [data-testid="quick-amount-credited"]').text()).toContain('$50.00')
   })
 
   it('bonus mode: price tag only on amounts that hit a tier, credited totals on every button', () => {
@@ -65,6 +68,9 @@ describe('recharge bonus hints on quick amounts', () => {
     expect(first.get('[data-testid="quick-amount-credited"]').text()).toContain('$120.00')
     expect(second.get('[data-testid="quick-amount-bonus-badge"]').text()).toBe('+30%')
     expect(second.get('[data-testid="quick-amount-credited"]').text()).toContain('$650.00')
+    // 推荐角标只落在力度最大的那一档（500 → +30%），未命中档位的不出现
+    expect(second.find('[data-testid="quick-amount-recommended"]').exists()).toBe(true)
+    expect(below.find('[data-testid="quick-amount-recommended"]').exists()).toBe(false)
   })
 
   it('bonus mode: matches tiers by the entered amount but credits by the multiplier', () => {

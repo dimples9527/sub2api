@@ -396,6 +396,13 @@ export default {
       discountLabelWithPercent: '优惠 ({percent}% OFF)',
     },
     quickAmounts: '快捷金额',
+    // 快捷金额按列表位置分三档，标签用作卡片眉题；recommended 给优惠力度最大的那一档
+    amountTier: {
+      low: '入门',
+      mid: '常用',
+      high: '超值',
+      recommended: '推荐',
+    },
     customAmount: '自定义金额',
     enterAmount: '输入金额',
     paymentMethod: '支付方式',

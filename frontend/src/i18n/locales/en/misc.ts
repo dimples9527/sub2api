@@ -372,6 +372,14 @@ export default {
       discountLabelWithPercent: 'Discount ({percent}% OFF)',
     },
     quickAmounts: 'Quick Amounts',
+    // Quick amounts are split into three tiers by list position; these label the card eyebrow,
+    // and `recommended` badges the tier with the largest bonus.
+    amountTier: {
+      low: 'Starter',
+      mid: 'Popular',
+      high: 'Best value',
+      recommended: 'Recommended',
+    },
     rechargePayAmount: 'Recharge Amount',
     rechargeCreditAmount: 'Credited Balance',
     customAmount: 'Custom Amount',
