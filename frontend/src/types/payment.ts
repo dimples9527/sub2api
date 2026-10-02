@@ -66,6 +66,24 @@ export interface MethodLimitsResponse {
   global_max: number  // widest max across all methods; 0 = no maximum
 }
 
+/** 后台配置的充值金额预设：支付金额 + 按有效倍率算出的到账金额 */
+export interface RechargeAmountOption {
+  pay_amount: number
+  credit_amount: number
+}
+
+export interface HolidayPromoTier {
+  threshold: number
+  bonus_rate: number
+}
+
+/** Active holiday recharge promotion, present only while the promo window is live */
+export interface HolidayPromoInfo {
+  active: boolean
+  end_at?: number | null
+  tiers: HolidayPromoTier[]
+}
+
 /** Response from /payment/checkout-info API — single call for the payment page */
 export interface CheckoutInfoResponse {
   methods: Record<string, MethodLimit>
@@ -77,12 +95,16 @@ export interface CheckoutInfoResponse {
   /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
+  /** 充值金额预设（后台配置），快捷金额按钮的金额来源 */
+  recharge_options: RechargeAmountOption[]
   /** 充值赠送阶梯（按 min_amount 升序）；缺失/空数组 = 不赠送 */
   recharge_bonus_tiers?: RechargeBonusTier[]
   /** 阶梯模式：bonus 赠金 / discount 折扣；缺失按 bonus */
   recharge_bonus_mode?: string
   /** 充值页金额区顶部的 Markdown 活动文案；空 = 不展示 */
   recharge_bonus_notice?: string
+  /** Present only when a tiered holiday promo is currently active */
+  holiday_promo?: HolidayPromoInfo | null
   help_text: string
   help_image_url: string
   stripe_publishable_key: string

@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -278,7 +279,9 @@ func quoteRechargeBonus(cfg *PaymentConfig, paymentAmount float64, currency stri
 	var tiers []RechargeBonusTier
 	mode := RechargeBonusModeBonus
 	if cfg != nil {
-		multiplier = cfg.BalanceRechargeMultiplier
+		// 到账基数用含假日活动加成的有效倍率，与 BuildRechargeAmountOptions 展示的
+		// credit_amount 保持同一口径；只取 BalanceRechargeMultiplier 会让活动期间下单少到账。
+		multiplier = EffectiveRechargeMultiplier(cfg, paymentAmount, time.Now())
 		tiers = cfg.RechargeBonusTiers
 		mode, _ = NormalizeRechargeBonusMode(cfg.RechargeBonusMode)
 	}

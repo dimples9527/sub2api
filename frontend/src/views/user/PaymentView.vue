@@ -73,12 +73,12 @@
               ></div>
               <AmountInput
                 v-model="amount"
-                :options="checkout.recharge_options"
+                :amounts="rechargeAmountPresets"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
                 :bonus-tiers="rechargeBonusTiers"
                 :bonus-mode="rechargeBonusMode"
-                :multiplier="balanceRechargeMultiplier"
+                :multiplier="effectiveRechargeMultiplier"
                 :currency="selectedCurrency"
               />
               <p v-if="amountError" class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ amountError }}</p>
@@ -545,7 +545,7 @@ function onPaymentSettled() {
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
   plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
-  recharge_bonus_tiers: [], recharge_bonus_mode: 'bonus', recharge_bonus_notice: '',
+  recharge_options: [], recharge_bonus_tiers: [], recharge_bonus_mode: 'bonus', recharge_bonus_notice: '', holiday_promo: null,
 })
 
 const renderedHelpText = computed(() => DOMPurify.sanitize(
@@ -593,6 +593,48 @@ const subscriptionUsdToCnyRate = computed(() => {
 })
 const rechargeBonusTiers = computed(() => normalizeRechargeBonusTiers(checkout.value.recharge_bonus_tiers))
 const rechargeBonusMode = computed(() => normalizeRechargeBonusMode(checkout.value.recharge_bonus_mode))
+
+// 快捷金额取自后台配置的预设（recharge_options）。留 undefined 让 AmountInput 落到内置默认列表，
+// 后台没配过预设时行为与上游一致。
+const rechargeAmountPresets = computed(() => {
+  const presets = checkout.value.recharge_options
+  return presets?.length ? presets.map((option) => option.pay_amount) : undefined
+})
+
+// 分档假日促销（服务端只在活动时间窗内置 active）。仅用于展示：真实到账金额由后端下单时重算，
+// 且后端走的是同一个 EffectiveRechargeMultiplier，所以这里可以放心叠加。
+const holidayPromo = computed(() => {
+  const promo = checkout.value.holiday_promo
+  if (!promo || !promo.active || !promo.tiers?.length) return null
+  return promo
+})
+
+// 命中「阈值 ≤ 金额」的最高档，与后端 RechargePromo.BonusRateFor 一致。
+function holidayBonusRateFor(amount: number): number {
+  const promo = holidayPromo.value
+  if (!promo) return 0
+  let rate = 0
+  for (const tier of promo.tiers) {
+    if (amount + 1e-9 >= tier.threshold) rate = tier.bonus_rate
+    else break
+  }
+  return rate
+}
+
+// 基础倍率 + 活动加成；与后端 EffectiveRechargeMultiplier 严格镜像，充值报价、快捷金额第二行、
+// 「当前倍率」提示行都按这个值算。
+const effectiveRechargeMultiplier = computed(
+  () => balanceRechargeMultiplier.value + holidayBonusRateFor(validAmount.value),
+)
+
+function formatHolidayPromoEndAt(unix: number | null | undefined): string {
+  if (unix === null || unix === undefined || !Number.isFinite(unix)) return ''
+  return new Date(unix * 1000).toLocaleString()
+}
+
+function formatHolidayPromoBonus(rate: number): string {
+  return String(Math.round(rate * 10000) / 100)
+}
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {
@@ -677,7 +719,8 @@ function formatSelectedSubscriptionPaymentAmount(value: number): string {
 // 充值优惠：阈值按输入金额命中；赠金模式按到账基数（输入 × 倍率）加赠送，折扣模式按百分比减实付。
 // 与后端 quoteRechargeBonus 一致；渠道限额、手续费、实付都按折后基数（payBaseAmount）计算，提交仍发送输入金额。
 const bonusQuote = computed(() => quoteRechargeBonus(rechargeBonusTiers.value, validAmount.value, {
-  multiplier: balanceRechargeMultiplier.value,
+  // 含活动加成的倍率，与后端 EffectiveRechargeMultiplier 一致。
+  multiplier: effectiveRechargeMultiplier.value,
   mode: rechargeBonusMode.value,
   currencyDigits: currencyFractionDigits(selectedCurrency.value),
 }))
@@ -685,7 +728,8 @@ const payBaseAmount = computed(() => bonusQuote.value.payBase)
 const discountAmount = computed(() => roundPaymentAmount(validAmount.value - payBaseAmount.value, selectedCurrency.value))
 const creditedAmount = computed(() => bonusQuote.value.credited)
 const showBonusRow = computed(() => bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
-const showCreditedBalance = computed(() => balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
+// 活动加成同样会抬高到账额，所以判定要用有效倍率，只看基础倍率会漏掉纯活动（无阶梯）的情况。
+const showCreditedBalance = computed(() => effectiveRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {
