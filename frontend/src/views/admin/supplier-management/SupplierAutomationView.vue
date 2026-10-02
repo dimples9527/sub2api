@@ -991,17 +991,60 @@
                   empty-text="暂无供应商"
                 />
                 <Input v-model="healthGuardAccountSearch" placeholder="搜索账号名称或供应商来源" />
-                <button
-                  class="sp-health-guard-selected-toggle"
-                  :class="{ active: healthGuardSelectedOnly }"
-                  type="button"
-                  :aria-pressed="healthGuardSelectedOnly"
-                  @click="healthGuardSelectedOnly = !healthGuardSelectedOnly"
-                >
-                  <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
-                  仅看已选
-                  <strong>{{ healthGuardSelectionSummary.selected }}</strong>
-                </button>
+                <!-- 两个快捷过滤是同一维度的互斥方向（参与 / 未参与守护），共用一个 flex 容器
+                     塞进 grid 的第 3 列。不能把第二个按钮直接铺成 grid 子项：桌面端列数会被
+                     撑到 4，多出来的那个只能掉到第二行、被 minmax(160px, 0.42fr) 拉成一整块宽按钮。 -->
+                <div class="sp-health-guard-quick-filters" role="group" aria-label="健康守护账号快捷过滤">
+                  <button
+                    class="sp-health-guard-selected-toggle"
+                    :class="{ active: healthGuardSelectedOnly }"
+                    type="button"
+                    :aria-pressed="healthGuardSelectedOnly"
+                    @click="toggleHealthGuardSelectedOnly"
+                  >
+                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
+                    仅看已选
+                    <strong>{{ healthGuardSelectionSummary.selected }}</strong>
+                  </button>
+                  <button
+                    class="sp-health-guard-selected-toggle"
+                    :class="{ active: healthGuardUnselectedOnly }"
+                    type="button"
+                    :aria-pressed="healthGuardUnselectedOnly"
+                    @click="toggleHealthGuardUnselectedOnly"
+                  >
+                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
+                    仅看未开启
+                    <strong>{{ healthGuardUnselectedCount }}</strong>
+                  </button>
+                  <!-- 分隔线右侧是「供应商是否开启」维度：与左边那两个正交、可以叠加
+                       （例如「未参与守护 + 供应商已关闭」一起看），但这一对内部互斥。 -->
+                  <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
+                  <button
+                    class="sp-health-guard-selected-toggle"
+                    :class="{ active: healthGuardProviderEnabledOnly }"
+                    type="button"
+                    :aria-pressed="healthGuardProviderEnabledOnly"
+                    title="只显示上游供应商仍在启用的账号"
+                    @click="toggleHealthGuardProviderEnabledOnly"
+                  >
+                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
+                    仅看供应商开启
+                    <strong>{{ healthGuardProviderEnabledCount }}</strong>
+                  </button>
+                  <button
+                    class="sp-health-guard-selected-toggle"
+                    :class="{ active: healthGuardProviderClosedOnly }"
+                    type="button"
+                    :aria-pressed="healthGuardProviderClosedOnly"
+                    title="只显示上游供应商已停用的账号"
+                    @click="toggleHealthGuardProviderClosedOnly"
+                  >
+                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
+                    仅看供应商关闭
+                    <strong>{{ healthGuardProviderClosedCount }}</strong>
+                  </button>
+                </div>
               </div>
               <span class="sp-health-guard-filter-result">筛选结果 <strong>{{ healthGuardWorkspaceAccounts.length }}</strong> 个</span>
               <!-- 平台标签与两个分组弹窗共用同一套控件与配色语言，独占一行（flex-basis: 100%）。
@@ -1088,6 +1131,7 @@
                 :class="{
                   selected: healthGuardAccountIsSelected(mapping.localAccountID),
                   unavailable: !mapping.available,
+                  'provider-closed': healthGuardAccountProviderClosed(mapping),
                   'missing-model': healthGuardAccountIsSelected(mapping.localAccountID)
                     && mapping.available
                     && !supplierAccountHealthGuardModelForMapping(editForm.config, mapping),
@@ -1237,7 +1281,7 @@
               </article>
             </div>
             <div v-else class="sp-rate-guard-empty">
-              {{ healthGuardSelectedOnly ? '当前筛选条件下没有已选账号。' : '当前筛选条件下没有可配置账号。' }}
+              {{ healthGuardEmptyHint }}
             </div>
           </section>
         </div>
@@ -1785,6 +1829,8 @@ import {
   listSupplierAccounts,
   type SupplierProviderAccount,
 } from '@/api/admin/supplierProviderData'
+// 账号列表接口不带「供应商是否启用」，所以单独取一份供应商列表来判定「供应商已关闭」。
+import { list as listSupplierProviders } from '@/api/admin/supplierProviders'
 import { adminAPI } from '@/api/admin'
 import { getAllIncludingInactive as listAllGroups } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
@@ -1860,8 +1906,16 @@ const healthGuardAccountPlatformFilter = ref<string[]>([])
 const healthGuardAccountProviderFilter = ref('')
 const healthGuardAccountSearch = ref('')
 const healthGuardSelectedOnly = ref(false)
+// 与「仅看已选」是同一维度的两个互斥方向：同时开启只会得到空集，所以开一个必须关掉另一个。
+const healthGuardUnselectedOnly = ref(false)
+// 「供应商是否开启」是另一个维度，与上面两个正交，可以和它们叠加；
+// 但开启/关闭本身是一对互斥方向，所以这两个之间互斥。
+const healthGuardProviderClosedOnly = ref(false)
+const healthGuardProviderEnabledOnly = ref(false)
 const healthGuardBatchIntervalInput = ref<number | string>('')
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
+// 已关闭（停用）的供应商 ID。账号列表接口不返回这个状态，只能另取一份供应商列表。
+const disabledSupplierProviderIDs = ref<Set<number>>(new Set())
 const loadingHealthGuardSupplierAccounts = ref(false)
 const healthGuardModelOptionsByPlatform = ref<Record<string, { id: string; display_name?: string }[]>>({})
 const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
@@ -3098,6 +3152,9 @@ const healthGuardWorkspaceAccounts = computed(() => {
   const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
   const filtered = accounts.filter(mapping => {
     if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
+    if (healthGuardUnselectedOnly.value && healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
+    if (healthGuardProviderClosedOnly.value && !healthGuardAccountProviderClosed(mapping)) return false
+    if (healthGuardProviderEnabledOnly.value && healthGuardAccountProviderClosed(mapping)) return false
     if (!matchesPlatformFilter(mapping.platform, platformFilter)) return false
     if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
     if (!keyword) return true
@@ -3156,6 +3213,77 @@ const healthGuardSelectionSummary = computed(() => {
     intervals,
   }
 })
+
+// 「仅看未开启」按钮上的计数。只数**可用**账号：不可用且未参与的账号根本不进列表
+// （列表基集 = 可用账号 + 已选账号），算进来会出现「按钮说 2、点开只有 1 行」。
+// 与「仅看已选」一样取全局口径，不跟着平台/供应商/搜索变，否则数字一直跳。
+const healthGuardUnselectedCount = computed(() =>
+  healthGuardAvailableAccountMappings.value.filter(
+    mapping => !healthGuardAccountIDs.value.includes(mapping.localAccountID)
+  ).length
+)
+
+/**
+ * 账号的供应商是否已全部关闭。
+ *
+ * 一个本地账号可能有多个上游来源（`sources` 每项一个供应商），这里用 `every` 而不是 `some`：
+ * 只要还有一个来源的供应商是开启的，该账号就仍能正常工作，不该被标成「供应商已关闭」。
+ *
+ * 供应商列表没拿到、或某个 provider_id 不在列表里时一律按「开启」处理 ——
+ * 宁可漏标，也不要误标灰（误标会让人以为这个账号已经废了）。
+ */
+function healthGuardAccountProviderClosed(mapping: HealthGuardAccountMapping): boolean {
+  if (!mapping.sources.length) return false
+  return mapping.sources.every(source =>
+    disabledSupplierProviderIDs.value.has(Number(source.provider_id))
+  )
+}
+
+// 供应商维度的两个计数，口径与另外两个按钮一致（全局可用账号，不随其它筛选变）。
+// 「开启数」用「总数 - 关闭数」而不是再 filter 一遍：两者互斥且互补，
+// 写成减法不会出现「两个数字加起来不等于总数」的口径漂移。
+const healthGuardProviderClosedCount = computed(() =>
+  healthGuardAvailableAccountMappings.value.filter(
+    mapping => healthGuardAccountProviderClosed(mapping)
+  ).length
+)
+
+const healthGuardProviderEnabledCount = computed(() =>
+  healthGuardAvailableAccountMappings.value.length - healthGuardProviderClosedCount.value
+)
+
+// 空态文案按当前生效的快捷过滤给出 —— 筛出空列表时必须说清是哪条筛出来的，
+// 否则用户看到「没有可配置账号」会去查数据，而不是去关掉刚点的那个过滤。
+const healthGuardEmptyHint = computed(() => {
+  if (healthGuardSelectedOnly.value) return '当前筛选条件下没有已选账号。'
+  if (healthGuardUnselectedOnly.value) return '当前筛选条件下没有未参与守护的账号。'
+  if (healthGuardProviderClosedOnly.value) return '当前筛选条件下没有供应商已关闭的账号。'
+  if (healthGuardProviderEnabledOnly.value) return '当前筛选条件下没有供应商开启的账号。'
+  return '当前筛选条件下没有可配置账号。'
+})
+
+// 两个快捷过滤互斥：同时开启只会得到空集，所以开一个就关掉另一个。
+function toggleHealthGuardSelectedOnly() {
+  healthGuardSelectedOnly.value = !healthGuardSelectedOnly.value
+  if (healthGuardSelectedOnly.value) healthGuardUnselectedOnly.value = false
+}
+
+function toggleHealthGuardUnselectedOnly() {
+  healthGuardUnselectedOnly.value = !healthGuardUnselectedOnly.value
+  if (healthGuardUnselectedOnly.value) healthGuardSelectedOnly.value = false
+}
+
+// 供应商维度的互斥对：开一个就关掉另一个。与上面那对（参与守护）互不干扰 ——
+// 两个维度正交，用户要能同时看「未参与守护 + 供应商已关闭」。
+function toggleHealthGuardProviderClosedOnly() {
+  healthGuardProviderClosedOnly.value = !healthGuardProviderClosedOnly.value
+  if (healthGuardProviderClosedOnly.value) healthGuardProviderEnabledOnly.value = false
+}
+
+function toggleHealthGuardProviderEnabledOnly() {
+  healthGuardProviderEnabledOnly.value = !healthGuardProviderEnabledOnly.value
+  if (healthGuardProviderEnabledOnly.value) healthGuardProviderClosedOnly.value = false
+}
 function healthGuardSelectedRowsForConfig(config: SupplierAutomationConfig): HealthGuardAccountMapping[] {
   const mappings = new Map(healthGuardAccountMappings.value.map(mapping => [mapping.localAccountID, mapping]))
   return normalizePositiveAccountIDs(config.account_health_guard_account_ids).map(id => mappings.get(id) || {
@@ -3272,6 +3400,12 @@ function supplierAccountHealthGuardModelForMapping(
 async function ensureHealthGuardAccountCandidatesLoaded() {
   loadingHealthGuardSupplierAccounts.value = true
   try {
+    // 供应商状态与账号列表并行取，别串行加一轮等待。
+    // 失败时降级成「没有已关闭的供应商」而不是整体抛错：它是附加信息，
+    // 拿不到只影响标灰与那个快捷过滤，不该把账号列表一起拖垮、也不该弹一个
+    // 「加载健康守护账号失败」把用户引到错误的方向。
+    const providersPromise = listSupplierProviders({ page: 1, page_size: 200 }).catch(() => null)
+
     const items: SupplierProviderAccount[] = []
     let page = 1
     let result = await listSupplierAccounts({
@@ -3293,6 +3427,14 @@ async function ensureHealthGuardAccountCandidatesLoaded() {
       items.push(...(result.items || []))
     }
     healthGuardSupplierAccounts.value = items
+
+    const providers = await providersPromise
+    disabledSupplierProviderIDs.value = new Set(
+      (providers?.items || [])
+        .filter(provider => provider.enabled === false)
+        .map(provider => Number(provider.id))
+        .filter(id => Number.isSafeInteger(id) && id > 0)
+    )
   } finally {
     loadingHealthGuardSupplierAccounts.value = false
   }
@@ -3840,6 +3982,9 @@ async function openHealthGuardAccounts() {
   healthGuardAccountProviderFilter.value = ''
   healthGuardAccountSearch.value = ''
   healthGuardSelectedOnly.value = false
+  healthGuardUnselectedOnly.value = false
+  healthGuardProviderClosedOnly.value = false
+  healthGuardProviderEnabledOnly.value = false
   healthGuardBatchIntervalInput.value = ''
   // 勾选是「本次批量操作的选择」，每次打开都清空：否则上一次的勾选会静默参与下一次批量设置。
   healthGuardCheckedAccountIDs.value = []
@@ -7098,8 +7243,9 @@ function intervalSecondsToCron(seconds: number): string | null {
   padding: 10px 14px;
 }
 
-/* 三列：供应商下拉 / 搜索框 / 仅看已选。平台筛选已改成独占一行的标签组、移出这个 grid
-   （flex-basis 在 grid 里不生效，塞进来只会把列挤变形），所以列数从 4 减到 3。
+/* 三列：供应商下拉 / 搜索框 / 快捷过滤（仅看已选 + 仅看未开启）。平台筛选已改成独占一行的标签组、
+   移出这个 grid（flex-basis 在 grid 里不生效，塞进来只会把列挤变形），所以列数从 4 减到 3。
+   两个快捷过滤共用第 3 列的一个 flex 容器，不再各占一列 —— 否则列数会重新变回 4。
    ⚠️ 被移除的是**第 1 个**子节点 ⇒ 移动端跨列阈值 nth-child 的落点会整体前移一位，
    原来「搜索框 + 仅看已选通栏」会变成「只有仅看已选通栏」。移动端规则已按单列重写。 */
 .sp-health-guard-account-filters {
@@ -7107,6 +7253,16 @@ function intervalSecondsToCron(seconds: number): string | null {
   flex: 1 1 640px;
   grid-template-columns: minmax(160px, 0.42fr) minmax(220px, 1fr) auto;
   gap: 10px;
+  min-width: 0;
+}
+
+/* 两个快捷过滤按钮的容器：桌面端贴合内容宽度占住 grid 第 3 列，
+   移动端 grid 变单列后由 flex-wrap 自己换行。 */
+.sp-health-guard-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -7272,6 +7428,21 @@ function intervalSecondsToCron(seconds: number): string | null {
 .sp-health-guard-account-row.missing-model {
   background: color-mix(in srgb, var(--sp-amber) 6%, var(--sp-panel));
   box-shadow: inset 3px 0 0 var(--sp-amber);
+}
+
+/* 供应商已关闭：整行弱化成中性灰。
+   刻意不跟 .unavailable 共用琥珀警示色 —— 账号本身没坏（开关、模型、间隔都还能配），
+   只是上游供应商被停用了，用警示色会被读成「这个账号出错了」。
+   信息列降透明度表达「这条已经不活跃」；勾选框与开关保持原样，
+   整行一起变淡会被当成禁用，用户就不敢再点了。 */
+.sp-health-guard-account-row.provider-closed {
+  background: color-mix(in srgb, var(--sp-muted) 7%, var(--sp-panel));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-muted) 55%, var(--sp-line));
+}
+
+.sp-health-guard-account-row.provider-closed .sp-health-guard-account-choice-copy,
+.sp-health-guard-account-row.provider-closed .sp-health-guard-account-group-summary {
+  opacity: 0.55;
 }
 
 .sp-health-guard-account-row.unavailable {
@@ -8001,8 +8172,8 @@ function intervalSecondsToCron(seconds: number): string | null {
     grid-template-columns: 1fr;
   }
 
-  /* 健康守护账号筛选：手机端纵向堆叠，三个控件各占一行通栏。
-     这里原先是「平台/供应商 2 列，搜索与仅看已选通栏」—— 平台下拉改成
+  /* 健康守护账号筛选：手机端纵向堆叠，三个控件各占一行通栏（第 3 行是快捷过滤容器）。
+     这里原先是「平台/供应商 2 列，搜索与快捷过滤通栏」—— 平台下拉改成
      独占一行的标签组之后，剩下的下拉只剩一个，2 列配对的前提不再成立；
      若只把跨列阈值从 n+3 改成 n+2，会剩下「下拉占半列、右边空一格」的残缺行。 */
   .sp-health-guard-account-filters {
