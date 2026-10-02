@@ -1001,7 +1001,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		testErr = s.routeAntigravityTest(c, account, modelID, prompt)
 	} else if account.IsOpenCodeGo() {
 		testErr = s.testOpenCodeGoAccountConnection(c, account, modelID, prompt)
-	} else {
+	} else if account.IsTypeSafe() {
+     	testErr = s.testTypeSafeAccountConnection(c, account, prompt)
+    } else {
 		testErr = s.testClaudeAccountConnection(c, account, modelID)
 	}
 
