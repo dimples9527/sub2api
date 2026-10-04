@@ -534,6 +534,12 @@ export interface SupplierGroupElectionDecisionDetail {
   required_models?: string[]
   /** true 表示该组一个测试成功的账号都没有，失败账号因此保持原状待人工确认。 */
   no_alternative?: boolean
+  /**
+   * true 表示该账号在本组是被「分组保底」开启的：本组一个开启调度的账号都没有，兜底开它一个。
+   * 它与 elected 同时为真（保底也是一种入选），但综合分不是前 N —— 多数情况它压根没参选（全失败/全未测），
+   * 不单独标出来日志看起来像择优算错了。
+   */
+  keep_alive?: boolean
   /** true 表示该账号在该组当前是测试失败状态。 */
   test_failed?: boolean
 }

@@ -410,6 +410,11 @@ describe('调度切换日志的两个入口', () => {
     // 必需模型补选的顺序同理（方向相反）：补选跑在收敛之后、锁定组也执行，
     // 补选进来的账号同样带 locked，先判 locked 会把「刚被开启」标成「本轮未换人」。
     expect(source.indexOf("kind: 'required'")).toBeLessThan(source.indexOf("kind: 'locked'"))
+    // 分组保底同理，但方向是「先判保底、后判入选」：保底账号同样带 elected（保底也是一种入选），
+    // 可它的综合分不是前 N（多数情况压根没参选——全失败/全未测），
+    // 先判 elected 会把「兜底开启」标成「择优入选」，看起来像择优算错了。
+    expect(source).toContain("kind: 'keep-alive'")
+    expect(source.indexOf("kind: 'keep-alive'")).toBeLessThan(source.indexOf("kind: 'elected'"))
     // 旧记录没有依据 ⇒ 不归类，降级回账号级原文。
     expect(source).toContain("if (!decision) return { badge: null, note: '' }")
     expect(source).toContain("fallback: log.reason || '—'")
@@ -427,6 +432,9 @@ describe('调度切换日志的两个入口', () => {
     // 分类色必须真的落到样式上（扫读靠的就是颜色区分），不能只有类名没有配色。
     expect(cssBlock('.sp-election-log-reason-badge.is-elected')).toContain('color')
     expect(cssBlock('.sp-election-log-reason-badge.is-converged')).toContain('color')
+    // 分组保底是「兜底开启」而不是「凭成绩入选」，配色必须与 is-elected 的绿分开，
+    // 否则同一列里扫过去会把保底读成择优结果。
+    expect(cssBlock('.sp-election-log-reason-badge.is-keep-alive')).toContain('color')
     // 没归到分类的行（旧记录、账号级跳过原因）降级回原来的灰色原文，不硬塞徽标。
     expect(source).toContain('class="sp-election-log-reason"')
     expect(source).toContain('reasonView(section, log).fallback')

@@ -708,7 +708,7 @@ function decisionFor(section: LogSection, log: SupplierGroupElectionChangeLog) {
 
 // 原因列的分类结论：把散文收敛成一眼可辨的色标签。kind 决定颜色，label 是短标签。
 type ReasonBadgeKind =
-  | 'elected' | 'required' | 'locked' | 'converged' | 'not-elected' | 'test-failed' | 'no-election'
+  | 'elected' | 'required' | 'keep-alive' | 'locked' | 'converged' | 'not-elected' | 'test-failed' | 'no-election'
 interface ReasonBadge {
   kind: ReasonBadgeKind
   label: string
@@ -744,6 +744,9 @@ function classifyReason(
     return { badge: { kind: 'required', label: '必需模型补选' }, note: decision.required_models.join('、') }
   }
   if (decision.locked) return { badge: { kind: 'locked', label: '健康锁定' }, note: '在任者正常，本轮未换人' }
+  // 保底开启必须排在 elected 之前：它也带 elected（保底同样是一种入选），但综合分不是前 N ——
+  // 多数情况它压根没参选（全失败/全未测），标成「择优入选」会让日志看起来像择优算错了。
+  if (decision.keep_alive) return { badge: { kind: 'keep-alive', label: '分组保底' }, note: '本组无开启账号，兜底开启' }
   if (decision.elected) return { badge: { kind: 'elected', label: '择优入选' }, note: '' }
   // 「本该动却没动」行（before === after 且非锁定）：结论落在账号级 —— 无备选保留 /
   // 连续失败待观察 / 写库失败，这些是 union 语义下账号整体的裁决，交回 log.reason 才准，这里不硬归类。
@@ -1493,8 +1496,8 @@ watch(() => props.accountId, () => {
 }
 
 /* 原因列的分类色标签：把结论从灰色小字提成一眼可辨的色块，扫一列就能分堆
-   （入选 / 收敛关闭 / 健康锁定 / 必需模型补选 / 未入选 / 测试失败 / 未参与）。
-   配色由业务语义驱动，与方向列、批次状态徽标同一套取色（绿好 / 琥珀让位 / 蓝保留 / 红失败）。 */
+   （入选 / 收敛关闭 / 健康锁定 / 必需模型补选 / 分组保底 / 未入选 / 测试失败 / 未参与）。
+   配色由业务语义驱动，与方向列、批次状态徽标同一套取色（绿好 / 琥珀让位 / 蓝保留 / 紫补选 / 红失败 / 青兜底）。 */
 .sp-election-log-reason-head {
   display: flex;
   flex-wrap: wrap;
@@ -1539,6 +1542,14 @@ watch(() => props.accountId, () => {
   color: #7c3aed;
 }
 
+/* 分组保底：青。它是「兜底开启」而不是「凭成绩入选」，所以刻意避开 is-elected 的绿——
+   同一列里两者混在一起，扫过去会把保底读成择优结果。 */
+.sp-election-log-reason-badge.is-keep-alive {
+  border-color: color-mix(in srgb, #0d9488 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #0d9488 8%, var(--sp-election-log-panel));
+  color: #0d9488;
+}
+
 .sp-election-log-reason-badge.is-test-failed {
   border-color: color-mix(in srgb, #dc2626 35%, var(--sp-election-log-line));
   background: color-mix(in srgb, #dc2626 8%, var(--sp-election-log-panel));
@@ -1553,6 +1564,7 @@ watch(() => props.accountId, () => {
 .dark .sp-election-log-reason-badge.is-converged { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-locked { color: #60a5fa; border-color: color-mix(in srgb, #60a5fa 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-required { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-keep-alive { color: #2dd4bf; border-color: color-mix(in srgb, #2dd4bf 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-test-failed { color: #f87171; border-color: color-mix(in srgb, #f87171 35%, var(--sp-election-log-line)); }
 
 /* 名次/综合分：等宽数字，方便上下行对齐着比大小。 */
