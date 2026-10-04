@@ -60,6 +60,13 @@ const (
 	// 已由保留的账号覆盖」的原因。与 ReasonOverCapacity 分开：后者只说"开多了"，
 	// 而运维真正会问的是"为什么关的是它、留的是另一个"——答案就在这里。
 	SupplierGroupSchedulingElectionReasonOverCapacityRequiredModel = "分组在任账号数超过上限，本组必需模型由保留账号覆盖，收敛关闭"
+	// SupplierGroupSchedulingElectionReasonRequiredModelConsolidated 是「本组必需模型已能由单个账号完整覆盖」
+	// 的收敛关闭原因，与 ReasonOverCapacityRequiredModel 是两件事：
+	// 后者是"开多了、必需模型由被保留的那个兜着"；这条是"兜必需模型的那个账号自己就够，
+	// 另一个赢家的名额纯属多余"——必需模型是硬底线，但满足它的代价不该是两个账号。
+	// 措辞必须点明"单个账号完整覆盖"：运维看到的是一次「关旧开新」，
+	// 不写清楚会误以为是择优抖了一下、下一轮还会换回来。
+	SupplierGroupSchedulingElectionReasonRequiredModelConsolidated = "分组必需模型已由单个账号完整覆盖，收敛关闭"
 
 	// DefaultSupplierGroupSchedulingElectionCountScoreCap 是"连续成功次数"对综合分的贡献上限的默认值。
 	// 健康守护的连续成功计数只增不减（失败才归零），不封顶就会让现任赢家永久固化：
@@ -395,6 +402,10 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	// 这类账号的 last_test_status / 健康计数是上游停用后冻结的旧数据，日志上看起来一切正常，
 	// 不单独标出来，前端只能显示「未参与择优」，运维完全看不出是上游掉了。
 	UpstreamUnavailable bool `json:"upstream_unavailable,omitempty"`
+	// Consolidated 表示该账号在本组被「必需模型冗余收敛」关掉：本组必需模型已能由另一个账号
+	// 单独完整覆盖，而它不覆盖全部必需模型 —— 再开着不产生任何覆盖增量，只是多一份成本。
+	// 与 OverCapacity 分开：后者是"本组开多了"，这条是"必需模型那边一个账号就够，它的名额是多余的"。
+	Consolidated bool `json:"consolidated,omitempty"`
 }
 
 type SupplierGroupSchedulingElectionResult struct {
@@ -576,6 +587,14 @@ type supplierGroupElectionAccount struct {
 	// 也就是"本组必需模型已由保留的账号覆盖，它没有额外价值"。只影响关闭原因文案，
 	// 不改变裁决本身；它回答的正是运维必问的那句"为什么关的是它、留的是另一个"。
 	convergedRequiredModel bool
+	// winnerGroupCount 是该账号在几个分组里被记为赢家，是 winner 的计数投影。
+	// 必需模型冗余收敛要「撤销本组的赢家标记」，而 winner 是跨组 union ——
+	// 直接清 winner 会把它在其它分组里的赢家身份一并抹掉，把那些分组误关成空组，
+	// 所以这里必须按计数递减、归零才置 false。
+	winnerGroupCount int
+	// consolidatedOut 表示该账号本轮被「必需模型冗余收敛」关掉：本组必需模型已能由单个账号
+	// 完整覆盖，而它不覆盖全部必需模型。只影响关闭原因文案，不改变裁决本身。
+	consolidatedOut bool
 	// groupDecisions 是逐分组累积的裁决依据（见 SupplierGroupSchedulingElectionDecisionDetail），
 	// 最终原样写进运行明细，供切换日志展开「为什么是它」。
 	groupDecisions []SupplierGroupSchedulingElectionDecisionDetail
@@ -832,6 +851,9 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		recordWinner := func(accountID int64, requiredModel string) {
 			if account := accounts[accountID]; account != nil {
 				account.winner = true
+				// 计数与 winner 同步维护：收敛阶段要用 revoke 撤销本组赢家，
+				// 只认计数归零才能安全地把 winner 置回 false（见 winnerGroupCount 的说明）。
+				account.winnerGroupCount++
 				if requiredModel != "" {
 					if account.requiredModelsByGroup == nil {
 						account.requiredModelsByGroup = make(map[int64][]string)
@@ -895,6 +917,10 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		locked := false
 		// convergedDropped 记录本组因「在任账号数超过上限」被收敛掉的账号，供明细标注关闭原因。
 		convergedDropped := make(map[int64]struct{})
+		// consolidatedDropped 记录本组因「必需模型已能由单个账号完整覆盖」被收敛掉的账号。
+		// 与 convergedDropped 分开：前者是"本组开多了"，后者是"必需模型那边一个账号就够、它多余"，
+		// 两者在明细里都是"被关闭"，但运维要的关闭理由完全不同。
+		consolidatedDropped := make(map[int64]struct{})
 		// keepAlivePicked 记录本组因「一个开启账号都没有」被保底开启的账号，供明细标注开启原因。
 		// 与账号级的 keepAlive 分开：那是裁决用的账号属性，这里是逐组依据 ——
 		// 同一个账号在 A 组被保底开启、同时是 B 组的普通成员时，B 组那条依据不该标成保底。
@@ -1010,6 +1036,47 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			groupMembers, candidateMembers, electionScores, detail.WinnerIDs, recordWinner, &result,
 		)
 
+		// 必需模型冗余收敛：如果补选/保留之后，赢家里已经有一个账号能**单独**覆盖全部必需模型，
+		// 那些「不能覆盖全部必需模型」的赢家就是多余的 —— 它们存在的唯一理由（补上某个必需模型）
+		// 已被那个账号完整承担，再开着只是多一份成本。撤销它们，本组只留能完整覆盖的那个。
+		//
+		// 位置必须在必需模型覆盖之后：补选出来的支持者要先进入赢家集合，才可能被识别为完整覆盖者。
+		// 撤销的只是**本组**的赢家标记（按计数递减）：账号若在别的分组仍是赢家就照常开着，
+		// 重合导致的多活是允许的，本规则只消除"本组自己多开"。
+		groupRequiredModels := config.RequiredModelsByGroup[groupID]
+		if len(groupRequiredModels) > 0 && len(detail.WinnerIDs) > 1 {
+			memberByID := make(map[int64]SupplierGroupSchedulingElectionMember, len(groupMembers))
+			for _, member := range groupMembers {
+				memberByID[member.AccountID] = member
+			}
+			if dropped := consolidateSupplierGroupRequiredModelWinners(memberByID, detail.WinnerIDs, groupRequiredModels); len(dropped) > 0 {
+				droppedSet := make(map[int64]struct{}, len(dropped))
+				for _, accountID := range dropped {
+					droppedSet[accountID] = struct{}{}
+					if account := accounts[accountID]; account != nil {
+						account.winnerGroupCount--
+						if account.winnerGroupCount <= 0 {
+							account.winner = false
+						}
+						account.consolidatedOut = true
+						// 它若原本是「因补选必需模型」入选的，这个标记必须一并撤销：
+						// 否则 decide 会先命中补选文案，把一次收敛关闭写成"补选开启"。
+						delete(account.requiredModelsByGroup, groupID)
+					}
+					consolidatedDropped[accountID] = struct{}{}
+				}
+				kept := make([]int64, 0, len(detail.WinnerIDs))
+				for _, accountID := range detail.WinnerIDs {
+					if _, drop := droppedSet[accountID]; drop {
+						continue
+					}
+					kept = append(kept, accountID)
+				}
+				detail.WinnerIDs = kept
+				detail.WinnerCount = len(kept)
+			}
+		}
+
 		// 分组保底开启：走到这里本组一个开启调度的账号都没有（既没有在任者，也没选出赢家），
 		// 兜底开一个 —— 分组在调度上绝不能是空组。
 		//
@@ -1075,6 +1142,11 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			if _, dropped := convergedDropped[member.AccountID]; dropped {
 				decision.OverCapacity = true
 				decision.OverCapacityRequiredModel = account.convergedRequiredModel
+			}
+			// 必需模型冗余收敛同样必须单独标出来：这一行和「被容量收敛掉的」在明细里长得一样
+			// （都是关闭），但一个是"本组开多了"、一个是"必需模型一个账号就够"，关闭理由完全不同。
+			if _, dropped := consolidatedDropped[member.AccountID]; dropped {
+				decision.Consolidated = true
 			}
 			if _, elected := winnerSet[member.AccountID]; elected {
 				decision.Elected = true
@@ -1280,6 +1352,12 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 			return true, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonElected
 		}
 		if account.schedulableBefore {
+			// 必需模型冗余收敛的关闭原因最具体，排在容量收敛之前：它同样会走到这里
+			// （本组的赢家标记已被撤销），但"必需模型一个账号就够"比"开多了"更能回答
+			// "为什么关它、留另一个"——留下的那个能单独覆盖全部必需模型。
+			if account.consolidatedOut {
+				return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonRequiredModelConsolidated
+			}
 			// 关闭原因要能自解释：被容量收敛掉的账号未必不是本组最优（它可能是本组 top1，
 			// 只是本组已经开够了账号），记成「非分组最优」会让运维去翻配置找那个不存在的评分问题。
 			if account.convergedOut {
@@ -1528,12 +1606,8 @@ func supplierGroupElectionRequiredModelKeepers(members []SupplierGroupScheduling
 	}
 	// 小写 → 原始名：去空、按小写去重，与 applySupplierGroupRequiredModelCoverage 同口径。
 	uncovered := make(map[string]string, len(requiredModels))
-	for _, model := range requiredModels {
-		trimmed := strings.TrimSpace(model)
-		if trimmed == "" {
-			continue
-		}
-		uncovered[strings.ToLower(trimmed)] = trimmed
+	for _, model := range supplierGroupElectionNormalizeRequiredModels(requiredModels) {
+		uncovered[strings.ToLower(model)] = model
 	}
 	// TopN 名额里已经有人支持的模型算已覆盖，不必再额外保留。
 	for index := 0; index < limit; index++ {
@@ -1545,6 +1619,18 @@ func supplierGroupElectionRequiredModelKeepers(members []SupplierGroupScheduling
 	}
 	if len(uncovered) == 0 {
 		return nil
+	}
+	// 优先找一个能「一次补齐全部缺口」的在任者：只要它存在，额外保留一个就够了。
+	// 贪心逐个补会留下多个「各管一半」的账号，而本组的必需模型硬底线其实一个账号就能满足——
+	// 多出来的那个只是成本。members 已按综合分排好序，第一个命中的就是最优的那个。
+	uncoveredModels := make([]string, 0, len(uncovered))
+	for _, model := range uncovered {
+		uncoveredModels = append(uncoveredModels, model)
+	}
+	for index := limit; index < len(members); index++ {
+		if supplierGroupElectionMemberSupportsAllModels(members[index], uncoveredModels) {
+			return []int64{members[index].AccountID}
+		}
 	}
 	keepers := make([]int64, 0, len(uncovered))
 	for index := limit; index < len(members) && len(uncovered) > 0; index++ {
@@ -1614,6 +1700,16 @@ func applySupplierGroupRequiredModelCoverage(
 			continue
 		}
 
+		// 优先补选一个能单独覆盖**全部**必需模型的候选：一次补选就补齐所有缺口，
+		// 随后本组即可收敛掉那些不覆盖全部必需模型的旧赢家、只留它一个。
+		// 落在原来的"逐个模型补选"路径上时，补出来的往往只覆盖缺的那一项，
+		// 结果是新旧两个账号同时开着 —— 必需模型满足了，但代价翻倍。
+		if fullCoverer := supplierGroupElectionPickFullCoverer(candidateMembers, requiredModels, winnerSet, electionScores); fullCoverer != nil {
+			recordWinner(fullCoverer.AccountID, model)
+			winnerSet[fullCoverer.AccountID] = struct{}{}
+			continue
+		}
+
 		// 在有参选资格的账号里补选综合分最高的支持者（跳过已是赢家的）。
 		var best *SupplierGroupSchedulingElectionMember
 		for i := range candidateMembers {
@@ -1668,6 +1764,118 @@ func supplierGroupElectionMemberSupportsModel(member SupplierGroupSchedulingElec
 		account.Credentials = map[string]any{"model_mapping": member.ModelMapping}
 	}
 	return account.IsModelSupported(model)
+}
+
+// supplierGroupElectionNormalizeRequiredModels 把必需模型列表去空、按小写去重后返回原始名。
+// 「是否单独完整覆盖」这个判定必须对模型名归一化：同一组里配了 "Sonnet-5" 与 "sonnet-5"
+// 只算一个模型，否则会凭空多出一次"未覆盖"的判定，把本该收敛成一个账号的组拆成两个。
+func supplierGroupElectionNormalizeRequiredModels(models []string) []string {
+	seen := make(map[string]struct{}, len(models))
+	normalized := make([]string, 0, len(models))
+	for _, model := range models {
+		trimmed := strings.TrimSpace(model)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+// supplierGroupElectionMemberSupportsAllModels 判断成员是否**单独**覆盖了全部必需模型。
+// 必需模型为空（或全是空白）时返回 false —— 没配置就没有"完整覆盖"这个概念，
+// 调用方也绝不该据此收敛任何账号。
+func supplierGroupElectionMemberSupportsAllModels(member SupplierGroupSchedulingElectionMember, models []string) bool {
+	normalized := supplierGroupElectionNormalizeRequiredModels(models)
+	if len(normalized) == 0 {
+		return false
+	}
+	for _, model := range normalized {
+		if !supplierGroupElectionMemberSupportsModel(member, model) {
+			return false
+		}
+	}
+	return true
+}
+
+// consolidateSupplierGroupRequiredModelWinners 在必需模型覆盖完成后收敛「冗余赢家」。
+//
+// 规则：若赢家集合里存在一个账号能**单独**覆盖本组全部必需模型，那么赢家中那些
+// 「不能覆盖全部必需模型」的账号就是冗余的 —— 它们存在的唯一理由（补上某个必需模型）
+// 已被那个账号完整承担，再开着只是多一份成本。返回被收敛掉的账号 ID。
+//
+// 只剔除「不能覆盖全部必需模型」的账号：多个赢家都能完整覆盖时全部保留，
+// 那属于 TopN > 1 的容量配置，与必需模型无关，不该被本规则削掉。
+// 也不剔除唯一的赢家：至少要留一个账号，否则会把分组关成空组。
+func consolidateSupplierGroupRequiredModelWinners(
+	memberByID map[int64]SupplierGroupSchedulingElectionMember,
+	winnerIDs []int64,
+	requiredModels []string,
+) []int64 {
+	if len(supplierGroupElectionNormalizeRequiredModels(requiredModels)) == 0 || len(winnerIDs) <= 1 {
+		return nil
+	}
+	fullCoverers := make(map[int64]struct{}, len(winnerIDs))
+	for _, accountID := range winnerIDs {
+		member, ok := memberByID[accountID]
+		if !ok {
+			continue
+		}
+		if supplierGroupElectionMemberSupportsAllModels(member, requiredModels) {
+			fullCoverers[accountID] = struct{}{}
+		}
+	}
+	// 没有任何账号能单独覆盖全部必需模型（例如两个账号各管一半），
+	// 说明多开是必需模型硬底线的必要代价 —— 保持现状。
+	if len(fullCoverers) == 0 {
+		return nil
+	}
+	dropped := make([]int64, 0, len(winnerIDs)-len(fullCoverers))
+	for _, accountID := range winnerIDs {
+		if _, keep := fullCoverers[accountID]; keep {
+			continue
+		}
+		dropped = append(dropped, accountID)
+	}
+	return dropped
+}
+
+// supplierGroupElectionPickFullCoverer 在候选里挑一个能**单独覆盖全部必需模型**的账号，
+// 按综合分取最优（沿用与择优完全相同的排序口径），已入选者跳过。
+// 找不到（或没配必需模型）返回 nil，调用方回落到原有的逐个补选逻辑。
+//
+// 为什么要专门挑它：补选只解决"当前缺的那个模型"，选出来的账号往往只覆盖缺的那一项，
+// 于是本组仍要同时开着新旧两个账号。既然存在一个账号就能满足全部必需模型，
+// 就该优先用它 —— 这样后续的冗余收敛才能把旧的关掉，本组最终只留一个。
+func supplierGroupElectionPickFullCoverer(
+	candidates []SupplierGroupSchedulingElectionMember,
+	requiredModels []string,
+	winnerSet map[int64]struct{},
+	electionScores map[int64]supplierGroupSchedulingElectionScore,
+) *SupplierGroupSchedulingElectionMember {
+	if len(supplierGroupElectionNormalizeRequiredModels(requiredModels)) == 0 {
+		return nil
+	}
+	var best *SupplierGroupSchedulingElectionMember
+	for i := range candidates {
+		candidate := candidates[i]
+		if _, isWinner := winnerSet[candidate.AccountID]; isWinner {
+			continue
+		}
+		if !supplierGroupElectionMemberSupportsAllModels(candidate, requiredModels) {
+			continue
+		}
+		if best == nil || supplierGroupSchedulingElectionMemberLess(candidate, *best, electionScores) {
+			picked := candidate
+			best = &picked
+		}
+	}
+	return best
 }
 
 // supplierGroupElectionAccountRequiredModels 汇总该账号本轮「因覆盖必需模型被补选」的模型名
