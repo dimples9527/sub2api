@@ -708,7 +708,7 @@ function decisionFor(section: LogSection, log: SupplierGroupElectionChangeLog) {
 
 // 原因列的分类结论：把散文收敛成一眼可辨的色标签。kind 决定颜色，label 是短标签。
 type ReasonBadgeKind =
-  | 'elected' | 'required' | 'keep-alive' | 'locked' | 'converged' | 'not-elected' | 'test-failed' | 'no-election'
+  | 'elected' | 'required' | 'keep-alive' | 'locked' | 'converged' | 'upstream' | 'not-elected' | 'test-failed' | 'no-election'
 interface ReasonBadge {
   kind: ReasonBadgeKind
   label: string
@@ -734,9 +734,25 @@ function classifyReason(
   decision?: SupplierGroupElectionDecisionDetail,
 ): { badge: ReasonBadge | null; note: string } {
   if (!decision) return { badge: null, note: '' }
+  // 上游停用排在最前：这类账号的测试状态与健康计数是「上游停用那一刻」冻结下来的旧数据，
+  // 日志上看起来一切正常 —— 它不参选、不被补选、也不是锁定在任者，落进后面任何一档都会给出误导结论
+  // （实测会落到「未参与择优」，读起来像评分没算上它，实际是请求打过去必然失败）。
+  if (decision.upstream_unavailable) {
+    return {
+      badge: { kind: 'upstream', label: '上游停用' },
+      note: '该账号匹配的上游账号已不可用，因此关闭调度',
+    }
+  }
   // 收敛关闭必须排在锁定之前：被收敛掉的在任者也带 locked（本组本轮没做择优），
   // 但它是被「关闭」的，标成「健康锁定（保留）」会与同一行的「关闭调度」自相矛盾。
-  if (decision.over_capacity) return { badge: { kind: 'converged', label: '收敛关闭' }, note: '本组在任账号数超过上限' }
+  if (decision.over_capacity) {
+    // 叠加了必需模型这一层时必须说全：只写「超过上限」，用户解释不了
+    // 「我手动开的那个账号为什么被换掉、留下的是另一个」——那正是这条日志要回答的问题。
+    const note = decision.over_capacity_required_model
+      ? '本组在任账号数超过上限，且必需模型已由保留的账号覆盖'
+      : '本组在任账号数超过上限'
+    return { badge: { kind: 'converged', label: '收敛关闭' }, note }
+  }
   // 必需模型补选同理，只是方向相反：补选跑在收敛之后、锁定组也执行（必需模型是硬底线），
   // 所以被补选进来的账号同样带 locked —— 先判 locked 会把「刚被开启」标成「本轮未换人」，
   // 与同一行的「开启调度」自相矛盾。
@@ -1556,6 +1572,15 @@ watch(() => props.accountId, () => {
   color: #dc2626;
 }
 
+/* 上游停用：玫红。刻意避开 is-test-failed 的红 —— 两者都要人去处理，但动作完全不同：
+   测试失败等它自己翻盘（失败闸门会给缓冲轮次），上游停用则要先去恢复供应商，
+   账号自身再"健康"也没用。同色会让人按前者处置，白等。 */
+.sp-election-log-reason-badge.is-upstream {
+  border-color: color-mix(in srgb, #db2777 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #db2777 8%, var(--sp-election-log-panel));
+  color: #db2777;
+}
+
 /* 未入选 / 未参与择优：中性灰。它们不是错误也不是成绩，只是「这次没轮到」，
    染成红或绿都会误读，用默认的灰底灰字即可，不再单独上色。 */
 
@@ -1566,6 +1591,7 @@ watch(() => props.accountId, () => {
 .dark .sp-election-log-reason-badge.is-required { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-keep-alive { color: #2dd4bf; border-color: color-mix(in srgb, #2dd4bf 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-test-failed { color: #f87171; border-color: color-mix(in srgb, #f87171 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-upstream { color: #f472b6; border-color: color-mix(in srgb, #f472b6 35%, var(--sp-election-log-line)); }
 
 /* 名次/综合分：等宽数字，方便上下行对齐着比大小。 */
 .sp-election-log-reason-rank {

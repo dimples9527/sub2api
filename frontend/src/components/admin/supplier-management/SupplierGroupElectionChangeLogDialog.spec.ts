@@ -404,9 +404,18 @@ describe('调度切换日志的两个入口', () => {
     // 因必需模型补选要能与「择优入选」区分开：两者是不同的徽标分类。
     expect(source).toContain("kind: 'required'")
     expect(source).toContain("kind: 'elected'")
+    // 上游停用必须排在最前判定：这类账号的测试状态与健康计数是「上游停用那一刻」冻结的旧数据，
+    // 日志上看起来一切正常，落进后面任何一档都会给出误导结论（实测会落到「未参与择优」，
+    // 读起来像评分没算上它，实际是请求打过去必然失败）。
+    expect(source).toContain("kind: 'upstream'")
+    expect(source.indexOf("kind: 'upstream'")).toBeLessThan(source.indexOf("kind: 'converged'"))
     // 收敛关闭与在任者健康锁定是两回事（一个关、一个留），必须分开分类；
     // 且收敛判断排在锁定之前 —— 被收敛的在任者也带 locked，先判 locked 会把「关闭」标成「保留」。
     expect(source.indexOf("kind: 'converged'")).toBeLessThan(source.indexOf("kind: 'locked'"))
+    // 叠加了必需模型这一层时必须说全：只写「超过上限」，用户解释不了
+    // 「我手动开的那个账号为什么被换掉、留下的是另一个」——那正是这条日志要回答的问题。
+    expect(source).toContain('over_capacity_required_model')
+    expect(source).toContain('且必需模型已由保留的账号覆盖')
     // 必需模型补选的顺序同理（方向相反）：补选跑在收敛之后、锁定组也执行，
     // 补选进来的账号同样带 locked，先判 locked 会把「刚被开启」标成「本轮未换人」。
     expect(source.indexOf("kind: 'required'")).toBeLessThan(source.indexOf("kind: 'locked'"))
@@ -435,6 +444,9 @@ describe('调度切换日志的两个入口', () => {
     // 分组保底是「兜底开启」而不是「凭成绩入选」，配色必须与 is-elected 的绿分开，
     // 否则同一列里扫过去会把保底读成择优结果。
     expect(cssBlock('.sp-election-log-reason-badge.is-keep-alive')).toContain('color')
+    // 上游停用刻意避开 is-test-failed 的红：两者都要人去处理，但动作完全不同 ——
+    // 测试失败等它自己翻盘（失败闸门给缓冲轮次），上游停用要先去恢复供应商。同色会让人按前者处置、白等。
+    expect(cssBlock('.sp-election-log-reason-badge.is-upstream')).toContain('color')
     // 没归到分类的行（旧记录、账号级跳过原因）降级回原来的灰色原文，不硬塞徽标。
     expect(source).toContain('class="sp-election-log-reason"')
     expect(source).toContain('reasonView(section, log).fallback')

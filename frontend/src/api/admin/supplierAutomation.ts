@@ -530,6 +530,12 @@ export interface SupplierGroupElectionDecisionDetail {
    * 与 locked 的分工：locked 说明「本组本轮没做择优」，over_capacity 说明「这个账号是这次收敛的代价」。
    */
   over_capacity?: boolean
+  /**
+   * true 表示这次收敛关闭还叠加了「本组必需模型已由保留的账号覆盖」：该账号不覆盖本组任何一个必需模型。
+   * 它回答的是「同样超容量，为什么留下的是另一个账号」——只写 over_capacity 时，用户只能看到「超过上限」，
+   * 解释不了自己手动开的那个账号为什么被换掉。旧运行记录没有这个字段，缺省按普通收敛显示。
+   */
+  over_capacity_required_model?: boolean
   /** 非空表示该账号是因「分组要求这些模型、而赢家里没人支持」被补选开启的。 */
   required_models?: string[]
   /** true 表示该组一个测试成功的账号都没有，失败账号因此保持原状待人工确认。 */
@@ -542,6 +548,12 @@ export interface SupplierGroupElectionDecisionDetail {
   keep_alive?: boolean
   /** true 表示该账号在该组当前是测试失败状态。 */
   test_failed?: boolean
+  /**
+   * true 表示该账号按名字匹配到的上游账号当前不可用（供应商被停用 / 上游账号下线），它因此被关闭。
+   * 这类账号的 test_status / healthy_count 是上游停用后冻结的旧数据，日志上看起来一切正常 ——
+   * 不单独标出来，前端只能落到「未参与择优」，运维看不出真实原因是上游掉了。
+   */
+  upstream_unavailable?: boolean
 }
 
 // 一条「某账号的调度开关被拨动（或演练模式下被建议拨动）」的记录。
