@@ -1724,3 +1724,214 @@ func TestGroupElectionKeepAliveCandidateIsDeterministic(t *testing.T) {
 		require.Equal(t, true, store.calls[542])
 	}
 }
+
+// 上游已不可用的账号一律失去参选资格，无论它的测试状态与健康计数多好看。
+// 这两个字段在上游停用后是**冻结的旧数据**（健康守护的候选查询带 p.enabled = TRUE，不再刷新它们），
+// 拿它们当"健康"用，等于让一个请求必然打不通的账号继续占着 TopN 名额。
+func TestGroupElectionUpstreamUnavailableIsNotSelectable(t *testing.T) {
+	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "success", UpstreamUnavailable: true}),
+		"测试状态 success 也不能抵消「上游已停用」")
+	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{HealthyCount: 9, UpstreamUnavailable: true}),
+		"健康计数 > 0 也不能抵消「上游已停用」")
+}
+
+// 回归守卫（2026-10-04 生产故障）：僵尸账号占着 TopN 名额，真健康的账号反而开不出来。
+//
+// 生产现象：分组 136 的 580（wahaha）测试状态与健康计数一直是 success/健康，
+// 但它的上游账号所属供应商已停用 —— 健康守护自停用那刻起不再检查它，状态就此冻结。
+// 而选举成员查询**不带任何供应商过滤**，于是它仍被当成健康在任者记为赢家，
+// 挤掉了真正健康的 526，表现为「这个分组一个账号也没开启」。
+// 修复：这类账号失去资格、不再进候选池、并被主动关闭（请求打过去只会失败）。
+func TestGroupElectionUpstreamUnavailableClosesAndYieldsSeat(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 580 综合分更高（健康次数多、延迟低），修复前它必胜 —— 这正是它有区分力的原因。
+		{GroupID: 136, GroupName: "Kiro AWS", AccountID: 580, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 100, UpstreamUnavailable: true},
+		{GroupID: 136, GroupName: "Kiro AWS", AccountID: 526, Platform: "anthropic", Schedulable: false,
+			LastTestStatus: "success", HealthyCount: 2, LastTestLatencyMs: 2000},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{136},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, []int64{526}, result.Groups[0].WinnerIDs,
+		"僵尸账号不占名额后，真健康的 526 才轮得到当选")
+	// 用整表断言而不是逐个 store.calls[id]：map 取不存在的键返回 false，
+	// 「要求它是 false」的断言会被"压根没写过"假通过。
+	require.Equal(t, map[int64]bool{526: true, 580: false}, store.calls,
+		"526 必须被开启，上游已停用的 580 必须被关闭 —— 两者都要真的落库")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 1, result.DisabledCount)
+
+	items := map[int64]SupplierGroupSchedulingElectionAccountItem{}
+	for _, item := range result.Items {
+		items[item.AccountID] = item
+	}
+	require.Equal(t, SupplierGroupSchedulingElectionReasonUpstreamUnavailable, items[580].Reason,
+		"关闭原因要说明是上游不可用，否则运维会去查一个并不存在的评分或容量问题")
+	require.Equal(t, SupplierGroupSchedulingElectionActionDisabled, items[580].Action)
+	require.True(t, items[580].GroupDecisions[0].UpstreamUnavailable,
+		"逐组依据也要带上游停用标记：前端只按依据分类，缺了它只能显示「未参与择优」，等于没写清原因")
+	require.Equal(t, SupplierGroupSchedulingElectionReasonElected, items[526].Reason)
+}
+
+// 上游已不可用的账号也不能被「分组保底」挑中：保底的本意是"别让分组空着"，
+// 而把它开起来只会让这个分组在调度上看起来有账号、实际每个请求都失败 ——
+// 比空着更难发现，因为监控上它是"有开启账号"的。
+//
+// 形状刻意与 TestGroupElectionKeepAliveOpensOneInAllFailedGroup 完全一致（唯一失败账号、关着、未到阈值），
+// 只差 UpstreamUnavailable 这一个标志：那边必须开，这边必须不开。这样断言才有区分力。
+func TestGroupElectionUpstreamUnavailableNotPickedByKeepAlive(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 601, Schedulable: false,
+			LastTestStatus: "failed", FailedCount: 0, UpstreamUnavailable: true},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "保底候选必须排除上游已停用的账号")
+	require.Empty(t, result.Groups[0].WinnerIDs)
+	require.Equal(t, 0, result.EnabledCount)
+	require.Equal(t, 0, result.SkippedCount, "它是 failed，不该被当成「未测过」跳过")
+	// 它本就关着、也没有任何 hold 或锁定标记，因此按既有规则不计入运行明细 ——
+	// 这里如实断言，避免把「明细里没有它」误读成「本规则没生效」。
+	require.Equal(t, 1, result.UnchangedCount)
+	require.Empty(t, result.Items)
+}
+
+// 补选当选的原因必须写明「为覆盖哪个必需模型」，不能笼统写「分组内最优」。
+//
+// 生产现象：分组 143/155 每轮把 585 关掉、把 583 开起来。583 多半不是综合分前 N，
+// 它只是因为 585 的 model_mapping 不含本组必需模型才被补选 ——
+// 记成「分组内最优」，运维就会去翻评分找一个根本不存在的算法问题。
+func TestGroupElectionRequiredModelSupplementReason(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 585 综合分更高但在任，且不支持 claude-fable-5-1。
+		{GroupID: 143, GroupName: "cc长期稳定", AccountID: 585, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000, ModelMapping: map[string]any{"bbb": "bbb"}},
+		// 583 综合分略低，但支持必需模型 → 只能补选它。
+		{GroupID: 143, GroupName: "cc长期稳定", AccountID: 583, Platform: "anthropic", Schedulable: false,
+			LastTestStatus: "success", HealthyCount: 18, LastTestLatencyMs: 1200, ModelMapping: map[string]any{"claude-fable-5-1": "claude-fable-5-1"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{143},
+		RequiredModelsByGroup:        map[int64][]string{143: {"claude-fable-5-1"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[583], "必需模型只能由 583 提供 → 必须补选开启")
+	require.ElementsMatch(t, []int64{585, 583}, result.Groups[0].WinnerIDs,
+		"在任的 585 保持锁定不动，583 作为必需模型支持者额外开启")
+
+	items := map[int64]SupplierGroupSchedulingElectionAccountItem{}
+	for _, item := range result.Items {
+		items[item.AccountID] = item
+	}
+	require.Equal(t, "分组必需模型 claude-fable-5-1 无在任账号支持，补选开启", items[583].Reason,
+		"补选必须点名它覆盖的模型，否则日志读起来像打分算错了")
+	require.Equal(t, SupplierGroupSchedulingElectionActionEnabled, items[583].Action)
+	require.Equal(t, []string{"claude-fable-5-1"}, items[583].GroupDecisions[0].RequiredModels,
+		"逐组依据里也要留下该模型，供切换日志展开")
+}
+
+// 收敛关闭的原因要能区分两种情形：单纯「开多了」与「本组必需模型已由保留的账号覆盖」。
+//
+// 生产现象：用户手动开启 585 后，下一轮又被收敛关掉、583 被保留，日志只说「超过上限」——
+// 用户无法理解为什么留下的是 583。真实原因是 585 一个必需模型都不覆盖、而 583 覆盖，
+// 它被关掉是**必需模型这条硬底线**决定的，不是评分问题。
+func TestGroupElectionConvergenceReasonForNonCoveringAccount(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 583 综合分更高且覆盖必需模型 → 占住唯一的 TopN 名额。
+		{GroupID: 143, GroupName: "cc长期稳定", AccountID: 583, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000, ModelMapping: map[string]any{"claude-fable-5-1": "claude-fable-5-1"}},
+		// 585 被人工开启，但不覆盖必需模型 → 收敛时必须让位。
+		{GroupID: 143, GroupName: "cc长期稳定", AccountID: 585, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 3000, ModelMapping: map[string]any{"bbb": "bbb"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{143},
+		RequiredModelsByGroup:        map[int64][]string{143: {"claude-fable-5-1"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, []int64{583}, result.Groups[0].WinnerIDs)
+	// 整表断言：既要求 585 被真的关掉，也要求当选的 583 不产生任何调度写库（它本就开着）。
+	require.Equal(t, map[int64]bool{585: false}, store.calls,
+		"585 不覆盖必需模型 → 收敛关闭；583 本就开着 → 无写库")
+	require.Equal(t, 1, result.DisabledCount)
+
+	var item585 *SupplierGroupSchedulingElectionAccountItem
+	for index := range result.Items {
+		if result.Items[index].AccountID == 585 {
+			item585 = &result.Items[index]
+		}
+	}
+	require.NotNil(t, item585)
+	require.Equal(t, "分组在任账号数超过上限，本组必需模型由保留账号覆盖，收敛关闭", item585.Reason,
+		"必须点明「必需模型由保留账号覆盖」，否则用户只能看到「超过上限」，解释不了为什么留 583")
+
+	decision := item585.GroupDecisions[0]
+	require.True(t, decision.OverCapacity, "容量收敛标记照旧")
+	require.True(t, decision.OverCapacityRequiredModel, "还要单独标出叠加了必需模型这一层原因")
+	require.False(t, decision.Elected)
+}
+
+// 补选原因里的模型名必须去重且有序：requiredModelsByGroup 是 map，遍历顺序随机，
+// 不去重排序会让同一状态每次刷新换个说法（"aaa、bbb" 与 "bbb、aaa"），日志就没法拿来对比。
+func TestGroupElectionAccountRequiredModelsSortedDedup(t *testing.T) {
+	account := &supplierGroupElectionAccount{requiredModelsByGroup: map[int64][]string{
+		143: {"ccc", "aaa"},
+		155: {"aaa", "bbb"}, // aaa 与 143 重复，跨组只应出现一次
+	}}
+	require.Equal(t, []string{"aaa", "bbb", "ccc"}, supplierGroupElectionAccountRequiredModels(account),
+		"跨组去重 + 字典序，保证文案稳定")
+
+	require.Nil(t, supplierGroupElectionAccountRequiredModels(nil))
+	require.Nil(t, supplierGroupElectionAccountRequiredModels(&supplierGroupElectionAccount{}))
+}
+
+// 「本组配了必需模型」是收敛原因升级的前提：没配必需模型的分组不该出现新文案，
+// 否则所有容量收敛都会被写成"必需模型由保留账号覆盖"，把真实原因掩盖掉。
+func TestGroupElectionConvergenceReasonStaysPlainWithoutRequiredModels(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 301, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 1000},
+		{GroupID: 1, AccountID: 302, Platform: "anthropic", Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 3000},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{1},
+	}, time.Now())
+	require.NoError(t, err)
+
+	var item302 *SupplierGroupSchedulingElectionAccountItem
+	for index := range result.Items {
+		if result.Items[index].AccountID == 302 {
+			item302 = &result.Items[index]
+		}
+	}
+	require.NotNil(t, item302)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonOverCapacity, item302.Reason)
+	require.False(t, item302.GroupDecisions[0].OverCapacityRequiredModel,
+		"没配必需模型时不得出现该标记")
+}

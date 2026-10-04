@@ -43,6 +43,23 @@ const (
 	// 从不负责"开"；一个全失败、当前又全部关着的分组会一直停在 0 开启，直到人工介入。
 	// 这条负责把「一个开启调度账号都没有」的分组兜底开一个，保证分组在调度上不是空组。
 	SupplierGroupSchedulingElectionReasonKeepAlive = "分组内无开启调度账号，保底开启"
+	// SupplierGroupSchedulingElectionReasonUpstreamUnavailable 是「该账号匹配到的上游已不可用」的关闭原因。
+	//
+	// 判据是「按账号名匹配到了上游账号，但没有任何一条匹配是『上游账号 active 且供应商启用』」。
+	// 为什么必须单独处理：健康守护的候选查询要求 a.active = TRUE AND p.enabled = TRUE，
+	// 这类账号根本进不了候选 ⇒ 它的 last_test_status / 健康计数会**永久冻结**在最后一次成功的那一刻，
+	// 于是择优仍把它当健康账号，长期占着「每组开启账号数」的名额、把真正健康的账号挤掉
+	// （2026-10-04 生产实例：供应商被停用后 580 仍 schedulable=true，挤掉了健康的 526）。
+	// 措辞写「供应商已停用」而不是笼统的「上游不可用」：实际触发绝大多数是供应商被停用，写具体才查得动。
+	SupplierGroupSchedulingElectionReasonUpstreamUnavailable = "上游供应商已停用，关闭调度"
+	// SupplierGroupSchedulingElectionReasonRequiredModelFmt 是「因覆盖必需模型被补选」的开启原因。
+	// 与 ReasonElected（分组内最优）分开：补选账号的综合分往往进不了前 N，写「分组内最优」是错的，
+	// 运维会去翻评分找那个不存在的问题；带上模型名才能一眼看出"它是为了这个模型才被开的"。
+	SupplierGroupSchedulingElectionReasonRequiredModelFmt = "分组必需模型 %s 无在任账号支持，补选开启"
+	// SupplierGroupSchedulingElectionReasonOverCapacityRequiredModel 是「被容量收敛关闭、且本组必需模型
+	// 已由保留的账号覆盖」的原因。与 ReasonOverCapacity 分开：后者只说"开多了"，
+	// 而运维真正会问的是"为什么关的是它、留的是另一个"——答案就在这里。
+	SupplierGroupSchedulingElectionReasonOverCapacityRequiredModel = "分组在任账号数超过上限，本组必需模型由保留账号覆盖，收敛关闭"
 
 	// DefaultSupplierGroupSchedulingElectionCountScoreCap 是"连续成功次数"对综合分的贡献上限的默认值。
 	// 健康守护的连续成功计数只增不减（失败才归零），不封顶就会让现任赢家永久固化：
@@ -234,6 +251,10 @@ type SupplierGroupSchedulingElectionMember struct {
 	AccountType  string
 	ModelMapping map[string]any
 	Extra        map[string]any
+	// UpstreamUnavailable 表示「按账号名匹配到了上游账号，但没有任何一条匹配可用」
+	// （上游账号 active 且其供应商启用）。这类账号健康守护查不到、状态会冻结在最后一次成功，
+	// 不能再当健康账号参与择优，且应主动关闭它的调度。
+	UpstreamUnavailable bool
 }
 
 type SupplierGroupSchedulingElectionRepository interface {
@@ -354,6 +375,10 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	// 与 Locked 的分工：Locked 说明「本组本轮没做择优」，OverCapacity 说明「这个账号是这次收敛的代价」——
 	// 只有后者为 true 时才不能对着一行"被关闭"的记录写「未换人」。
 	OverCapacity bool `json:"over_capacity,omitempty"`
+	// OverCapacityRequiredModel 表示这次收敛关闭还叠加了「本组必需模型已由保留账号覆盖」：
+	// 该账号不覆盖本组任何一个必需模型，而本组配了必需模型 —— 这正是"为什么关它不关别人"的答案。
+	// 与 OverCapacity 分开：后者只说"开多了"，说明不了为什么留下的是另一个账号。
+	OverCapacityRequiredModel bool `json:"over_capacity_required_model,omitempty"`
 	// RequiredModels 非空表示该账号是因为「分组要求这些模型、而赢家里没人支持」被补选开启的。
 	// 它的综合分并不是 TopN，不写清楚日志看起来像择优算错了。
 	RequiredModels []string `json:"required_models,omitempty"`
@@ -365,6 +390,11 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	KeepAlive bool `json:"keep_alive,omitempty"`
 	// TestFailed 表示该账号在该组当前是测试失败状态。
 	TestFailed bool `json:"test_failed,omitempty"`
+	// UpstreamUnavailable 表示该账号按名字匹配到的上游账号当前不可用（供应商被停用 / 上游账号下线）。
+	// 它是账号级属性，但决定的是「本组为什么关它」，所以跟着逐组依据一起落库：
+	// 这类账号的 last_test_status / 健康计数是上游停用后冻结的旧数据，日志上看起来一切正常，
+	// 不单独标出来，前端只能显示「未参与择优」，运维完全看不出是上游掉了。
+	UpstreamUnavailable bool `json:"upstream_unavailable,omitempty"`
 }
 
 type SupplierGroupSchedulingElectionResult struct {
@@ -539,6 +569,13 @@ type supplierGroupElectionAccount struct {
 	// convergedOut 表示这个账号本轮是被「每组开启账号数」上限收敛掉的：它在某个分组里丢了名额，
 	// 而没有任何分组选它。它只影响关闭原因文案（"收敛关闭"而不是"非分组最优"），不改变裁决本身。
 	convergedOut bool
+	// upstreamUnavailable 表示该账号匹配到的上游已不可用（供应商停用 / 上游账号下线）。
+	// 它一旦为真就主动关闭调度：状态冻结的账号留在调度里，只会把请求路由到已经不通的通道。
+	upstreamUnavailable bool
+	// convergedRequiredModel 表示这个账号是被容量收敛关掉的，且**本组配了必需模型、而它一个都不覆盖**——
+	// 也就是"本组必需模型已由保留的账号覆盖，它没有额外价值"。只影响关闭原因文案，
+	// 不改变裁决本身；它回答的正是运维必问的那句"为什么关的是它、留的是另一个"。
+	convergedRequiredModel bool
 	// groupDecisions 是逐分组累积的裁决依据（见 SupplierGroupSchedulingElectionDecisionDetail），
 	// 最终原样写进运行明细，供切换日志展开「为什么是它」。
 	groupDecisions []SupplierGroupSchedulingElectionDecisionDetail
@@ -559,6 +596,11 @@ type supplierGroupElectionAccount struct {
 // 注意它与分组明细里的 SuccessCount 不是一个口径：SuccessCount 仍按原始 last_test_status 归类，
 // 只统计真正的 success，不把「健康计数 > 0 但状态是 failed」的账号算进去。
 func supplierGroupSchedulingElectionMemberSelectable(member SupplierGroupSchedulingElectionMember) bool {
+	// 上游已不可用的账号直接失去资格：它的「测试成功 / 健康计数」是冻结的旧数据，不是当前事实。
+	// 不排掉它，它就会被选为赢家（或被锁定路径当成健康的在任者保住），把名额占满。
+	if member.UpstreamUnavailable {
+		return false
+	}
 	return strings.TrimSpace(member.LastTestStatus) == SupplierGroupSchedulingElectionTestStatusSuccess ||
 		member.HealthyCount > 0
 }
@@ -594,7 +636,9 @@ func supplierGroupElectionHasScheduledMember(members []SupplierGroupSchedulingEl
 func supplierGroupElectionKeepAliveCandidate(members []SupplierGroupSchedulingElectionMember, failureThreshold int) (SupplierGroupSchedulingElectionMember, bool) {
 	candidates := make([]SupplierGroupSchedulingElectionMember, 0, len(members))
 	for _, member := range members {
-		if !member.Schedulable {
+		// 上游已不可用的账号不能当保底：开起来也只会把请求路由到不通的通道，
+		// 与本任务"绝不把分组关成空组"的初衷（要的是**可用**的账号）相悖。
+		if !member.Schedulable && !member.UpstreamUnavailable {
 			candidates = append(candidates, member)
 		}
 	}
@@ -750,6 +794,11 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			account.dryRun = true
 		} else if _, only := dryRunGroups[member.GroupID]; only {
 			account.dryRun = true
+		}
+		// 上游可用性是账号级属性（同名账号各行取值一致），这里仍取并集，
+		// 避免"某一行恰好没读到"把它当成可用。
+		if member.UpstreamUnavailable {
+			account.upstreamUnavailable = true
 		}
 		account.groupIDs = append(account.groupIDs, member.GroupID)
 	}
@@ -918,6 +967,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				for _, accountID := range supplierGroupElectionRequiredModelKeepers(scheduledHealthy, limit, config.RequiredModelsByGroup[groupID]) {
 					kept[accountID] = struct{}{}
 				}
+				groupRequiredModels := config.RequiredModelsByGroup[groupID]
 				for _, member := range scheduledHealthy {
 					if _, keep := kept[member.AccountID]; keep {
 						recordWinner(member.AccountID, "")
@@ -926,6 +976,13 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 					convergedDropped[member.AccountID] = struct{}{}
 					if account := accounts[member.AccountID]; account != nil {
 						account.convergedOut = true
+						// 本组配了必需模型、而这个账号一个都不覆盖 ⇒ 它被收敛掉的真实原因是
+						// 「必需模型已由保留的账号覆盖」，而不是单纯的"开多了"。
+						// 不区分的话，日志只会说"超过上限"，运维无法解释"为什么留另一个"。
+						if len(groupRequiredModels) > 0 &&
+							!supplierGroupElectionMemberSupportsAnyModel(member, groupRequiredModels) {
+							account.convergedRequiredModel = true
+						}
 					}
 				}
 				locked = true
@@ -1017,6 +1074,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			// （都带 Locked），但一个被关闭、一个被保留，不标就会把关闭写成「未换人」。
 			if _, dropped := convergedDropped[member.AccountID]; dropped {
 				decision.OverCapacity = true
+				decision.OverCapacityRequiredModel = account.convergedRequiredModel
 			}
 			if _, elected := winnerSet[member.AccountID]; elected {
 				decision.Elected = true
@@ -1030,6 +1088,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				decision.NoAlternative = true
 			}
 			decision.TestFailed = strings.TrimSpace(member.LastTestStatus) == SupplierGroupSchedulingElectionTestStatusFailed
+			decision.UpstreamUnavailable = account.upstreamUnavailable
 			// 只有测试成功的账号才进了择优，才有分可摊开；失败/未测的保持零值。
 			if score, ok := electionScores[member.AccountID]; ok {
 				decision.Scored = true
@@ -1195,8 +1254,26 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 		}
 		return true, SupplierGroupSchedulingElectionActionEnabled, SupplierGroupSchedulingElectionReasonKeepAlive
 	}
+	// 上游已不可用：直接关闭，排在资格判断之前 —— 它的「成功 / 健康计数」是冻结的旧数据，
+	// 既不该当选，也不该继续占着调度（请求会被路由到已经不通的上游）。
+	// 排在保底之后：保底候选已排除这类账号，这里只是保证"保底选中"的语义不被本规则反超。
+	if account.upstreamUnavailable {
+		if account.schedulableBefore {
+			return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonUpstreamUnavailable
+		}
+		return false, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonUpstreamUnavailable
+	}
 	if account.selectable {
 		if account.winner {
+			// 补选当选必须单独说明：它多半不是综合分前 N，写「分组内最优」是错的，
+			// 运维会去翻评分找那个并不存在的问题。带上模型名才解释得清"为什么开它"。
+			if models := supplierGroupElectionAccountRequiredModels(account); len(models) > 0 {
+				reason := fmt.Sprintf(SupplierGroupSchedulingElectionReasonRequiredModelFmt, strings.Join(models, "、"))
+				if !account.schedulableBefore {
+					return true, SupplierGroupSchedulingElectionActionEnabled, reason
+				}
+				return true, SupplierGroupSchedulingElectionActionNone, reason
+			}
 			if !account.schedulableBefore {
 				return true, SupplierGroupSchedulingElectionActionEnabled, SupplierGroupSchedulingElectionReasonElected
 			}
@@ -1206,6 +1283,11 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 			// 关闭原因要能自解释：被容量收敛掉的账号未必不是本组最优（它可能是本组 top1，
 			// 只是本组已经开够了账号），记成「非分组最优」会让运维去翻配置找那个不存在的评分问题。
 			if account.convergedOut {
+				// 再区分一层：如果本组配了必需模型、而这个账号一个都不覆盖，那它被关掉的
+				// 决定性原因是「必需模型已由保留的账号覆盖」，不是单纯的"开多了"。
+				if account.convergedRequiredModel {
+					return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonOverCapacityRequiredModel
+				}
 				return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonOverCapacity
 			}
 			return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonNotElected
@@ -1586,6 +1668,41 @@ func supplierGroupElectionMemberSupportsModel(member SupplierGroupSchedulingElec
 		account.Credentials = map[string]any{"model_mapping": member.ModelMapping}
 	}
 	return account.IsModelSupported(model)
+}
+
+// supplierGroupElectionAccountRequiredModels 汇总该账号本轮「因覆盖必需模型被补选」的模型名
+// （跨分组去重、字典序）。必须排序：map 遍历顺序随机，直接拼进原因文案会让同一状态每次刷新换个说法。
+func supplierGroupElectionAccountRequiredModels(account *supplierGroupElectionAccount) []string {
+	if account == nil || len(account.requiredModelsByGroup) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(account.requiredModelsByGroup))
+	models := make([]string, 0, len(account.requiredModelsByGroup))
+	for _, list := range account.requiredModelsByGroup {
+		for _, model := range list {
+			if _, dup := seen[model]; dup {
+				continue
+			}
+			seen[model] = struct{}{}
+			models = append(models, model)
+		}
+	}
+	sort.Strings(models)
+	return models
+}
+
+// supplierGroupElectionMemberSupportsAnyModel 判断成员是否至少支持给定模型中的一个（空清单恒为 false）。
+// 用于区分「被收敛掉的账号到底有没有覆盖本组的必需模型」，决定关闭原因写哪一种。
+func supplierGroupElectionMemberSupportsAnyModel(member SupplierGroupSchedulingElectionMember, models []string) bool {
+	for _, model := range models {
+		if strings.TrimSpace(model) == "" {
+			continue
+		}
+		if supplierGroupElectionMemberSupportsModel(member, model) {
+			return true
+		}
+	}
+	return false
 }
 
 // appendUniqueString 追加一个去重后的字符串。同一账号可能因多个必需模型被补选，

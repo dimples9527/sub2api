@@ -30,6 +30,16 @@ func (r *supplierGroupSchedulingElectionRepository) ListGroupSchedulingElectionM
 	// 剔除失败/超时），但总样本数含 failed —— 失败要靠成功率在评分侧重新计入代价。
 	// 已有 idx_supplier_account_health_history_account_checked（account+checked_at）索引，聚合很便宜。
 	rows, err := r.db.QueryContext(ctx, `
+WITH upstream_availability AS (
+    -- 上游可用性按「规范化账号名」预聚合一次：本地账号名 = 供应商前缀 + 上游账号名（与健康守护候选同口径），
+    -- 只要有一条匹配是「上游账号 active 且其供应商启用」就算可用。
+    -- 预聚合而不是逐账号 LATERAL：成员每轮都要全量比对，没必要把同一份上游表反复扫一遍。
+    SELECT regexp_replace(lower(p.account_name_prefix || pa.name), '[^[:alnum:]]', '', 'g') AS normalized_name,
+           bool_or(pa.active = TRUE AND p.enabled = TRUE) AS available
+    FROM supplier_provider_accounts pa
+    JOIN supplier_providers p ON p.id = pa.provider_id
+    GROUP BY 1
+)
 SELECT g.id AS group_id,
        COALESCE(g.name, '') AS group_name,
        a.id AS account_id,
@@ -42,10 +52,15 @@ SELECT g.id AS group_id,
        COALESCE(a.credentials->'model_mapping', 'null'::jsonb)::text AS model_mapping,
        COALESCE(lat.avg_latency_ms, 0) AS avg_latency_ms,
        COALESCE(lat.success_count, 0) AS latency_success_count,
-       COALESCE(lat.total_count, 0) AS latency_total_count
+       COALESCE(lat.total_count, 0) AS latency_total_count,
+       -- 有上游关联、但没有任何一条可用（上游账号下线 或 供应商被停用）⇒ 该账号的上游已不可用。
+       -- 没有上游关联（ua 为空）判为"未知"，不关闭：本地手工建的账号本来就没有上游记录。
+       COALESCE(NOT ua.available, FALSE) AS upstream_unavailable
 FROM account_groups ag
 JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL AND g.status = $1
 JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL AND a.status = $1
+LEFT JOIN upstream_availability ua
+       ON ua.normalized_name = regexp_replace(lower(a.name), '[^[:alnum:]]', '', 'g')
 LEFT JOIN LATERAL (
     SELECT AVG(h.latency_ms) FILTER (
              WHERE h.status IN ('healthy', 'slow') AND h.latency_ms > 0
@@ -83,6 +98,7 @@ ORDER BY g.id ASC, a.id ASC`, service.StatusActive, latencyWindowMinutes)
 			&member.AvgLatencyMs,
 			&member.LatencySuccessCount,
 			&member.LatencyTotalCount,
+			&member.UpstreamUnavailable,
 		); err != nil {
 			return nil, fmt.Errorf("扫描分组择优调度成员失败: %w", err)
 		}
