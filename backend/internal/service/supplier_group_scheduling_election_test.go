@@ -1519,3 +1519,208 @@ func TestGroupElectionDryRunStillPersistsFailedCount(t *testing.T) {
 	require.Equal(t, 0, result.SuggestedDisabledCount)
 	require.Equal(t, 1, result.PendingCount)
 }
+
+// 参选资格判据：last_test_status = success，或健康守护连续成功计数 > 0。
+func TestGroupElectionMemberSelectablePredicate(t *testing.T) {
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "success"}))
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", HealthyCount: 1}),
+		"健康计数 > 0 的失败账号仍可参选")
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "", HealthyCount: 2}),
+		"状态为空但健康计数 > 0 也可参选")
+	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", HealthyCount: 0}))
+	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "", HealthyCount: 0}))
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: " success ", HealthyCount: 0}),
+		"状态两侧空白要归一后再比较")
+}
+
+// 候选集放宽：last_test_status = failed 但健康计数 > 0 的账号也能当选开启。
+// 它是本组唯一账号；不放宽的话它会落到「失败 + 无备选」分支被原地留着，
+// 结果是分组里开着的是个被判定失败的账号，而实际健康的账号反而开不出来。
+func TestGroupElectionSelectsHealthyAccountDespiteFailedStatus(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 401, Schedulable: false, LastTestStatus: "failed", HealthyCount: 6},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[401], "健康计数 > 0 即具备参选资格，应当当选开启")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount)
+	require.Equal(t, 0, result.PendingCount, "有资格的账号走健康分支，不该落进失败待观察")
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonElected, result.Items[0].Reason)
+	// 分组统计仍按原始 last_test_status 归类，它不算 success —— 候选口径与统计口径是两回事。
+	require.Equal(t, 0, result.Groups[0].SuccessCount)
+	require.Equal(t, 1, result.Groups[0].FailedCount)
+}
+
+// 有参选资格的账号不累计「连续失败轮次」：它本轮按健康账号裁决，不是一次失败。
+// 否则它一旦资格失效（健康计数归零），之前攒下的轮次会立刻把它推到阈值之上被关掉。
+func TestGroupElectionSelectableAccountDoesNotChargeFailedCount(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 411, Schedulable: true, LastTestStatus: "failed", HealthyCount: 3, FailedCount: 1},
+		{GroupID: 1, GroupName: "G1", AccountID: 412, Schedulable: false, LastTestStatus: "success", HealthyCount: 9},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	// 412 连续成功更多当选；411 有资格但落选 → 按"非分组最优"关闭，而不是走失败闸门。
+	require.Equal(t, true, store.calls[412])
+	require.Equal(t, false, store.calls[411])
+	require.Equal(t, 0, store.extraUpdates[411][supplierGroupElectionFailedCountExtraKey],
+		"有参选资格的账号失败轮次要清零，不能继续累计")
+	require.Equal(t, 0, result.PendingCount)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonNotElected, result.Items[0].Reason)
+}
+
+// 锁定分组里的在任者具备参选资格（健康计数 > 0）但 last_test_status 是 failed 时，必须按健康在任者对待。
+// 否则它拿不到赢家标记、进不了 scheduledHealthy，却会在裁决里走健康分支被判成"落选"关掉——
+// 而锁定的全部意义就是不动它。
+func TestGroupElectionKeepHealthyIncumbentTreatsSelectableFailedAsHealthy(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, AccountID: 421, Platform: "openai", Schedulable: true, LastTestStatus: "failed", HealthyCount: 4},
+		{GroupID: 1, AccountID: 422, Platform: "openai", Schedulable: false, LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 50},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1, KeepHealthyIncumbentGroupIDs: []int64{1}}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "锁定分组不产生任何调度写库，在任者 421 不该被关")
+	require.Equal(t, []int64{421}, result.Groups[0].WinnerIDs, "有资格的在任者按健康在任者记为赢家")
+	require.Equal(t, 0, result.DisabledCount)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(421), result.Items[0].AccountID)
+	require.True(t, result.Items[0].SchedulableAfter, "在任者 421 必须保持开着")
+}
+
+// 分组保底：一个全失败、当前又全部关着的分组，必须兜底开一个账号。
+// 闸门一（noAlternative）只管"不关"，从不开人；没有这段逻辑，这种分组会永远停在 0 开启。
+func TestGroupElectionKeepAliveOpensOneInAllFailedGroup(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 501, Platform: "openai", Schedulable: false, LastTestStatus: "failed", FailedCount: 0},
+		{GroupID: 1, GroupName: "G1", AccountID: 502, Platform: "openai", Schedulable: false, LastTestStatus: "failed", FailedCount: 0},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[501], "全失败分组必须兜底开一个")
+	require.NotContains(t, store.calls, int64(502), "保底只开一个，其余账号不该被顺带拨动")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 0, result.DisabledCount)
+	require.Equal(t, []int64{501}, result.Groups[0].WinnerIDs, "保底当选也要记进分组明细")
+	require.Equal(t, 1, result.Groups[0].WinnerCount)
+
+	require.Len(t, result.Items, 2)
+	require.Equal(t, int64(501), result.Items[0].AccountID)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepAlive, result.Items[0].Reason)
+	require.Equal(t, SupplierGroupSchedulingElectionActionEnabled, result.Items[0].Action)
+	// 未入选的那个仍按闸门一"保持现状"，不该被保底顺带开启。
+	require.Equal(t, int64(502), result.Items[1].AccountID)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepLastOne, result.Items[1].Reason)
+	require.Equal(t, 1, result.KeptCount)
+
+	// 逐组依据要能区分"保底开启"与"择优入选"，否则日志看起来像择优算错了。
+	decision := result.Items[0].GroupDecisions[0]
+	require.True(t, decision.KeepAlive)
+	require.True(t, decision.Elected)
+}
+
+// 保底账号不受失败闸门约束：连续失败已到阈值、且组内没有备选，它仍必须被开起来。
+// 这条是最容易漏的一环——若不特判，它会先命中闸门一（noAlternative）并原样返回
+// schedulableBefore = false，保底就成了空操作。
+func TestGroupElectionKeepAliveOverridesFailureGates(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 511, Schedulable: false, LastTestStatus: "failed", FailedCount: 9},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[511], "已到失败阈值的账号仍要被保底开起来")
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepAlive, result.Items[0].Reason)
+	require.NotEqual(t, SupplierGroupSchedulingElectionReasonFailed, result.Items[0].Reason)
+}
+
+// 保底只挑一个：组内已有一个开启账号时，不得再顺带多开。
+func TestGroupElectionKeepAliveSkippedWhenGroupAlreadyServed(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 521, Schedulable: true, LastTestStatus: "success", HealthyCount: 5},
+		{GroupID: 1, GroupName: "G1", AccountID: 522, Schedulable: false, LastTestStatus: "failed", FailedCount: 0},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "本组已有开启账号，不该产生任何拨动")
+	require.Equal(t, []int64{521}, result.Groups[0].WinnerIDs)
+	require.Equal(t, 0, result.EnabledCount)
+	// 522 走失败闸门（未达阈值）保持原状，而不是被保底开启。
+	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(522), result.Items[0].AccountID)
+	require.Equal(t, 1, result.PendingCount)
+	require.False(t, result.Items[0].GroupDecisions[0].KeepAlive)
+}
+
+// 全未测过的分组同样要保底：这类账号默认会被"未测过不产生变更"跳过，
+// 不特判就会落到 SkippedCount 里、永远开不起来。
+func TestGroupElectionKeepAliveOpensUntestedAccount(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 531, Schedulable: false, LastTestStatus: ""},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, true, store.calls[531], "全未测过的分组也必须兜底开一个")
+	require.Equal(t, 0, result.SkippedCount, "保底账号不能被当作未测过而跳过")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepAlive, result.Items[0].Reason)
+}
+
+// 保底候选必须完全确定：同一组失败轮次更少的账号优先，且不受输入顺序影响。
+// 否则每轮换一个人开，日志上就是毫无理由地来回横跳。
+func TestGroupElectionKeepAliveCandidateIsDeterministic(t *testing.T) {
+	members := []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 541, Schedulable: false, LastTestStatus: "failed", FailedCount: 1},
+		{GroupID: 1, GroupName: "G1", AccountID: 542, Schedulable: false, LastTestStatus: "failed", FailedCount: 0},
+		{GroupID: 1, GroupName: "G1", AccountID: 543, Schedulable: false, LastTestStatus: "failed", FailedCount: 0},
+	}
+	// 正序与逆序各跑一次，结论必须一致。
+	for _, input := range [][]SupplierGroupSchedulingElectionMember{members, {members[2], members[1], members[0]}} {
+		repo := &fakeGroupElectionRepo{members: input}
+		store := newFakeGroupElectionStore()
+		svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+		result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+		require.NoError(t, err)
+
+		require.Equal(t, []int64{542}, result.Groups[0].WinnerIDs,
+			"失败轮次最少（离阈值最远）者优先，同级按账号 ID 升序")
+		require.Equal(t, true, store.calls[542])
+	}
+}
