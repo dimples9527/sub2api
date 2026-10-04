@@ -412,6 +412,11 @@ describe('调度切换日志的两个入口', () => {
     // 收敛关闭与在任者健康锁定是两回事（一个关、一个留），必须分开分类；
     // 且收敛判断排在锁定之前 —— 被收敛的在任者也带 locked，先判 locked 会把「关闭」标成「保留」。
     expect(source.indexOf("kind: 'converged'")).toBeLessThan(source.indexOf("kind: 'locked'"))
+    // 必需模型冗余收敛排在容量收敛之前：两者都是「被关闭」，但它是「必需模型一个账号就够」，
+    // 比「本组开多了」更能回答「为什么关它、留另一个」——留下的那个能单独覆盖全部必需模型。
+    expect(source).toContain("kind: 'consolidated'")
+    expect(source.indexOf("kind: 'consolidated'")).toBeLessThan(source.indexOf("kind: 'converged'"))
+    expect(source).toContain('本组必需模型已能由单个账号完整覆盖')
     // 叠加了必需模型这一层时必须说全：只写「超过上限」，用户解释不了
     // 「我手动开的那个账号为什么被换掉、留下的是另一个」——那正是这条日志要回答的问题。
     expect(source).toContain('over_capacity_required_model')
@@ -447,6 +452,9 @@ describe('调度切换日志的两个入口', () => {
     // 上游停用刻意避开 is-test-failed 的红：两者都要人去处理，但动作完全不同 ——
     // 测试失败等它自己翻盘（失败闸门给缓冲轮次），上游停用要先去恢复供应商。同色会让人按前者处置、白等。
     expect(cssBlock('.sp-election-log-reason-badge.is-upstream')).toContain('color')
+    // 必需模型收敛用焦橙，与 is-converged 的琥珀分开：前者是「必需模型一个账号就够、旧的那个让位」，
+    // 后者是「本组开多了」，两者要能一眼区分，否则会把一次换人读成单纯超容。
+    expect(cssBlock('.sp-election-log-reason-badge.is-consolidated')).toContain('color')
     // 没归到分类的行（旧记录、账号级跳过原因）降级回原来的灰色原文，不硬塞徽标。
     expect(source).toContain('class="sp-election-log-reason"')
     expect(source).toContain('reasonView(section, log).fallback')

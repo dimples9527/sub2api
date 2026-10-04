@@ -708,7 +708,7 @@ function decisionFor(section: LogSection, log: SupplierGroupElectionChangeLog) {
 
 // 原因列的分类结论：把散文收敛成一眼可辨的色标签。kind 决定颜色，label 是短标签。
 type ReasonBadgeKind =
-  | 'elected' | 'required' | 'keep-alive' | 'locked' | 'converged' | 'upstream' | 'not-elected' | 'test-failed' | 'no-election'
+  | 'elected' | 'required' | 'keep-alive' | 'locked' | 'converged' | 'consolidated' | 'upstream' | 'not-elected' | 'test-failed' | 'no-election'
 interface ReasonBadge {
   kind: ReasonBadgeKind
   label: string
@@ -741,6 +741,15 @@ function classifyReason(
     return {
       badge: { kind: 'upstream', label: '上游停用' },
       note: '该账号匹配的上游账号已不可用，因此关闭调度',
+    }
+  }
+  // 必需模型冗余收敛必须排在 over_capacity 之前：两者都是「被关闭」，但它不是"本组开多了"，
+  // 而是"本组必需模型一个账号就够"——留下的那个能单独覆盖全部必需模型，被关的这个不产生覆盖增量。
+  // 只写「收敛关闭」的话，用户看到「关旧开新」会以为是择优抖了一下，下一轮还会换回来。
+  if (decision.consolidated) {
+    return {
+      badge: { kind: 'consolidated', label: '必需模型收敛' },
+      note: '本组必需模型已能由单个账号完整覆盖，该账号不再产生覆盖增量',
     }
   }
   // 收敛关闭必须排在锁定之前：被收敛掉的在任者也带 locked（本组本轮没做择优），
@@ -1581,12 +1590,22 @@ watch(() => props.accountId, () => {
   color: #db2777;
 }
 
+/* 必需模型收敛：焦橙。与 is-converged 的琥珀分开 —— 两者都是关闭，但处置动作不同：
+   容量收敛是「本组开多了」，运维不用管；这条是「必需模型一个账号就够、旧的那个让位」，
+   要能一眼看出换人的依据是必需模型，而不是评分抖动。 */
+.sp-election-log-reason-badge.is-consolidated {
+  border-color: color-mix(in srgb, #c2410c 35%, var(--sp-election-log-line));
+  background: color-mix(in srgb, #c2410c 8%, var(--sp-election-log-panel));
+  color: #c2410c;
+}
+
 /* 未入选 / 未参与择优：中性灰。它们不是错误也不是成绩，只是「这次没轮到」，
    染成红或绿都会误读，用默认的灰底灰字即可，不再单独上色。 */
 
 /* 暗色下把语义色亮一档，否则深底上对比不足（与批次状态徽标同样处理）。 */
 .dark .sp-election-log-reason-badge.is-elected { color: #4ade80; border-color: color-mix(in srgb, #4ade80 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-converged { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 35%, var(--sp-election-log-line)); }
+.dark .sp-election-log-reason-badge.is-consolidated { color: #fb923c; border-color: color-mix(in srgb, #fb923c 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-locked { color: #60a5fa; border-color: color-mix(in srgb, #60a5fa 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-required { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 35%, var(--sp-election-log-line)); }
 .dark .sp-election-log-reason-badge.is-keep-alive { color: #2dd4bf; border-color: color-mix(in srgb, #2dd4bf 35%, var(--sp-election-log-line)); }

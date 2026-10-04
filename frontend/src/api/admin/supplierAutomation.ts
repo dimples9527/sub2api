@@ -554,6 +554,13 @@ export interface SupplierGroupElectionDecisionDetail {
    * 不单独标出来，前端只能落到「未参与择优」，运维看不出真实原因是上游掉了。
    */
   upstream_unavailable?: boolean
+  /**
+   * true 表示该账号在本组被「必需模型冗余收敛」关掉：本组必需模型已能由另一个账号单独完整覆盖，
+   * 而它不覆盖全部必需模型 —— 再开着不产生任何覆盖增量，只是多一份成本。
+   * 与 over_capacity 的分工：后者是「本组开多了」，这条是「必需模型那边一个账号就够、它的名额多余」。
+   * 旧运行记录没有这个字段，缺省按普通收敛显示。
+   */
+  consolidated?: boolean
 }
 
 // 一条「某账号的调度开关被拨动（或演练模式下被建议拨动）」的记录。
