@@ -614,6 +614,17 @@
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="openLocalAccountEditor(account)"
                 >编辑</button>
+                <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。放在「编辑」旁边，
+                     和「手动改」形成「快捷 / 完整」的对照。目标名算不出来（缺供应商名或密钥名）时整条不显示。 -->
+                <button
+                  v-if="conventionalLocalAccountName(account)"
+                  class="sp-button small sp-account-action-rename"
+                  type="button"
+                  :disabled="renamingLocalAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+                  :title="`按「供应商名称-上游密钥名称」规范改为：${conventionalLocalAccountName(account)}`"
+                  :data-test="`supplier-account-rename-${account.local_account_id}`"
+                  @click.stop="renameLocalAccountToConvention(account)"
+                >{{ renamingLocalAccountID === account.local_account_id ? '改名中' : '快捷改名' }}</button>
                 <button
                   v-if="canDuplicateLocalAccount(account)"
                   class="sp-button small sp-account-action-copy"
@@ -1908,6 +1919,7 @@ const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
 const deletingSupplierAccountRecordID = ref<number | null>(null)
 const recoveringAccountID = ref<number | null>(null)
+const renamingLocalAccountID = ref<number | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
 const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
 const deleteSupplierAccountRecordTarget = ref<SupplierProviderAccount | null>(null)
@@ -3347,6 +3359,19 @@ function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean {
   )
 }
 
+// 本地账号名的规范写法：`供应商名称-上游密钥名称`。
+// 「上游密钥名称」取 account.name（New API 的令牌名 / Sub2API 的 items[].name），
+// 不是 upstream_account_key —— 那是 key/ID，拿它拼出来的名字不可读。
+// 这个形状和后端自动匹配里 `providerName || '-' || upstreamName` 那一支同构
+// （supplier_provider_data_repo.go 的 supplierProviderLocalAccountMatchCondition），
+// 所以按规范改名后仍然匹配得上，不会把已匹配的行改散。
+function conventionalLocalAccountName(account: SupplierProviderAccount): string {
+  const providerName = (account.provider_name || '').trim()
+  const upstreamName = (account.name || '').trim()
+  if (!providerName || !upstreamName) return ''
+  return `${providerName}-${upstreamName}`
+}
+
 const duplicateConfirmMessage = computed(() => {
   const account = duplicateConfirmAccount.value
   if (!account) return ''
@@ -3822,6 +3847,40 @@ async function recoverLocalAccountState(account: SupplierProviderAccount) {
     appStore.showError(extractApiErrorMessage(err, '恢复账号状态失败'))
   } finally {
     recoveringAccountID.value = null
+  }
+}
+
+// 快捷改名：把本地账号名改成规范写法（见 conventionalLocalAccountName）。
+// 只传 name —— 后端 UpdateAccount 里 `if input.Name != ""` 才落库（admin_account.go），
+// 所以不会连带清空其它字段。
+async function renameLocalAccountToConvention(account: SupplierProviderAccount) {
+  const localAccountID = manageableLocalAccountID(account)
+  const nextName = conventionalLocalAccountName(account)
+  if (localAccountID === null || !nextName || renamingLocalAccountID.value === localAccountID) return
+
+  const currentName = (account.local_account_name || '').trim()
+  // 已经是规范写法就不发请求，避免一次无意义的写库。
+  if (currentName === nextName) {
+    appStore.showSuccess(`本地账号名已是规范写法：${nextName}`)
+    return
+  }
+  if (!window.confirm(`确认把本地账号「${currentName || `#${localAccountID}`}」改名为「${nextName}」？`)) return
+
+  renamingLocalAccountID.value = localAccountID
+  try {
+    await adminAPI.accounts.update(localAccountID, { name: nextName })
+    accountSourceItems.value = accountSourceItems.value.map(item => item.local_account_id === localAccountID
+      ? { ...item, local_account_name: nextName }
+      : item)
+    applyAccountQuickFilterPage()
+    if (selected.value?.local_account_id === localAccountID) {
+      selected.value = { ...selected.value, local_account_name: nextName }
+    }
+    appStore.showSuccess(`本地账号已改名为 ${nextName}`)
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '修改本地账号名称失败'))
+  } finally {
+    renamingLocalAccountID.value = null
   }
 }
 
@@ -5747,6 +5806,18 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-violet);
 }
 
+/* 快捷改名用玫红 #db2777。不能用 --sp-cyan：本页里 --sp-cyan 的值是 #3b82f6（蓝），
+   与「测试账号」的 --sp-blue #2563eb 几乎同色，两者又同在 canManageLocalAccount 分支里，
+   会紧挨着出现，等于让新按钮跟一个不相关的按钮撞色。
+   该按钮在动作列里的实际位置是「编辑」与「复制账号」之间，所以取一个跟左右邻居都拉得开的色相；
+   常见色相（蓝/琥珀/紫/橙/绿/红/青/靛）都已被同列其它按钮占掉，玫红是剩下的最优解。
+   硬编码色值与本列 recover(#0d9488)、platform(#4f46e5) 的写法一致。 */
+.sp-account-row-actions .sp-account-action-rename {
+  border-color: color-mix(in srgb, #db2777 42%, var(--sp-line));
+  background: color-mix(in srgb, #db2777 9%, var(--sp-panel));
+  color: #db2777;
+}
+
 /* 与工具栏、分组管理页、任务中心的同名入口同色（橙）。 */
 .sp-account-row-actions .sp-account-action-election-log {
   border-color: color-mix(in srgb, var(--sp-orange) 42%, var(--sp-line));
@@ -5776,6 +5847,7 @@ button.sp-guard-failure-hint:hover {
 .sp-account-row-actions .sp-account-action-recover:hover,
 .sp-account-row-actions .sp-account-action-edit:hover,
 .sp-account-row-actions .sp-account-action-copy:hover,
+.sp-account-row-actions .sp-account-action-rename:hover,
 .sp-account-row-actions .sp-account-action-election-log:hover,
 .sp-account-row-actions .sp-account-action-platform:hover,
 .sp-account-row-actions .sp-account-action-binding:hover,
