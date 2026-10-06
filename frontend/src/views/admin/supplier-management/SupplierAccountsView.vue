@@ -334,6 +334,23 @@
                     {{ account.upstream_account_key || '—' }}
                   </span>
                 </div>
+                <!-- 密钥归属的上游分组名。令牌名（account.name）是建密钥时随手起的名字，
+                     分组才说明这条上游账号实际挂在哪个池子里；「账号绑定的分组」列展示的是
+                     本地账号绑定的本地分组，两者语义不同，所以这里必须带上「上游分组」标签。 -->
+                <div
+                  v-if="account.group_name || account.group_key"
+                  class="sp-sub sp-account-upstream-group"
+                  :class="{ 'is-mismatch': upstreamGroupNameMismatch(account) }"
+                  :title="account.group_name || account.group_key"
+                >
+                  <span class="sp-account-upstream-group-label">上游分组</span>
+                  <span class="sp-account-upstream-group-name">{{ account.group_name || account.group_key }}</span>
+                  <span
+                    v-if="upstreamGroupNameMismatch(account)"
+                    class="sp-account-upstream-group-warn"
+                    :title="UPSTREAM_GROUP_NAME_MISMATCH_HINT"
+                  >与账号名不一致</span>
+                </div>
               </div>
             </div>
           </template>
@@ -4095,6 +4112,32 @@ function accountInitial(account: SupplierProviderAccount): string {
   return value.slice(0, 1).toUpperCase()
 }
 
+// 上游账号名（建令牌时起的名字）与它所属的上游分组名对不上，通常是上游那边把令牌挪了分组、
+// 或者改名时没同步。这种漂移扫列表看不出来，所以在行内标警告色。
+// 比对口径（用户指定）：归一化后「完全相等」才算一致。归一化 = NFKC（全角转半角）
+// + 忽略大小写 + 剥掉所有非字母非数字字符（空格、连字符、下划线、括号、emoji、
+// 变体选择符、零宽连接符都落在这个范围里）。所以 `Claude Pro`、`claude-pro`、`claude_pro`、
+// `（claude pro）`、`claude pro 🔥` 互相都算一致。
+// ⚠️ 但带编号/后缀的名字仍然会报：`claude-pro-1` 归一化后是 `claudepro1`，与 `claudepro` 不等。
+// 这是口径本身的结果（按定义它们确实是两个不同的名字），不是漏归一化。
+const UPSTREAM_GROUP_NAME_MISMATCH_HINT = '上游账号名与上游分组名不一致：忽略大小写、空格、符号和图标后仍不相等。通常是上游已把该令牌挪到别的分组，或改名时没同步。'
+
+function normalizeUpstreamGroupCompareName(value?: string | null): string {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function upstreamGroupNameMismatch(account: SupplierProviderAccount): boolean {
+  // 只比 group_name，不退回 group_key：group_key 常是数字 ID，拿它比令牌名必然全红。
+  const accountName = normalizeUpstreamGroupCompareName(account.name)
+  const groupName = normalizeUpstreamGroupCompareName(account.group_name)
+  // 任一侧为空就没有可比性，不报。
+  if (!accountName || !groupName) return false
+  return accountName !== groupName
+}
+
 function formatRate(value?: number | null): string {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—'
   return `× ${String(value)}`
@@ -4854,6 +4897,46 @@ function formatTime(value?: string): string {
   overflow: hidden;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 上游账号列第三行的「上游分组」。它是辅助信息，字号压到 11px、标签用 --sp-muted，
+   分组名保持正文色以便一眼扫到；长分组名交给 name 元素省略号截断，完整值挂在 title 上。 */
+.sp-account-upstream-group {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  font-size: 0.6875rem;
+  line-height: 1.15rem;
+}
+
+.sp-account-upstream-group-label {
+  flex: 0 0 auto;
+  color: var(--sp-muted);
+}
+
+.sp-account-upstream-group-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sp-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 上游账号名与分组名对不上：只把分组名和那句提示染成警告色，标签保持 --sp-muted。
+   整行全染会在宽表格里糊成一片色块，反而不容易扫到是哪一行出问题。
+   提示文字 flex: 0 0 auto 保证它不被长分组名挤掉（分组名那边才负责省略号）。 */
+.sp-account-upstream-group.is-mismatch .sp-account-upstream-group-name,
+.sp-account-upstream-group-warn {
+  color: var(--sp-amber);
+}
+
+.sp-account-upstream-group-warn {
+  flex: 0 0 auto;
+  font-weight: 700;
+  /* CJK 默认允许字间换行，这里必须锁死：否则列一窄就会断成「与账号名不 / 一致」两行。 */
   white-space: nowrap;
 }
 
