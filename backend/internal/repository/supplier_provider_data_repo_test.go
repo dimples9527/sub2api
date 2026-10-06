@@ -57,13 +57,14 @@ func TestSupplierProviderDataRepositoryListGroupHealthTrendsUsesHealthGuardHisto
 func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsResolvesAccountToEveryBoundLocalGroup(t *testing.T) {
 	repo, mock := newSupplierProviderDataRepoMock(t)
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*NULLIF\(item->>'local_account_id', ''\)::bigint AS account_id,.*FROM supplier_automation_runs run.*JOIN supplier_provider_accounts account.*JOIN account_groups account_group.*result_detail->'supplier_monitor'->'items'.*account_group\.group_id = ANY\(\$5\)`).
+	mock.ExpectQuery(`(?s)SELECT account_group\.group_id AS group_id,.*NULLIF\(item->>'local_account_id', ''\)::bigint AS account_id,.*FROM supplier_automation_runs run.*JOIN supplier_provider_accounts account.*JOIN account_groups account_group.*result_detail->'supplier_monitor'->'items'.*account_group\.group_id = ANY\(\$5\).*JOIN accounts schedulable_account.*schedulable`).
 		WithArgs(
 			service.SupplierAutomationTaskAccountHealthGuard,
 			service.SupplierAutomationTaskMonitorSync,
 			now.Add(-24*time.Hour),
 			now,
 			"{101,202}",
+			service.StatusActive,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-time.Minute), service.SupplierProviderGroupHealthTrendSource).
@@ -98,6 +99,7 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsAllHistoryOmits
 			service.SupplierAutomationTaskMonitorSync,
 			now,
 			"{101}",
+			service.StatusActive,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusHealthy, int64(140), now.Add(-30*24*time.Hour), service.SupplierProviderGroupHealthTrendSource))
@@ -131,6 +133,7 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesSupplie
 			now.Add(-10*time.Minute),
 			now,
 			"{101}",
+			service.StatusActive,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(101), int64(98), service.SupplierAccountHealthGuardStatusSlow, int64(10122), checkedAt, service.SupplierProviderGroupHealthTrendMonitorSource))
@@ -165,6 +168,7 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsTreatsNullTimel
 			now.Add(-24*time.Hour),
 			now,
 			"{101}",
+			service.StatusActive,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}))
 
@@ -195,6 +199,7 @@ func TestSupplierProviderDataRepositoryListLocalGroupHealthTrendsIncludesStructu
 			now.Add(-10*time.Minute),
 			now,
 			"{81}",
+			service.StatusActive,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "account_id", "status", "latency_ms", "finished_at", "source"}).
 			AddRow(int64(81), int64(777), service.SupplierAccountHealthGuardStatusHealthy, int64(880), checkedAt, service.SupplierProviderGroupHealthTrendMonitorSource))

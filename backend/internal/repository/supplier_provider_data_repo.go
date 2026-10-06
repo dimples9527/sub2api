@@ -759,8 +759,9 @@ func (r *supplierProviderDataRepository) ListLocalGroupHealthTrends(ctx context.
 	if err != nil {
 		return nil, err
 	}
-	// 趋势线（历史桶）保持按样本聚合的原样，只把「最新一刻」换成当时开启调度的账号的那条记录：
-	// 历史该是谁就是谁，不会因为现在换了调度账号就被改写。
+	// 采样已在 SQL 里按「当前开启调度的账号」过滤（见 listHealthTrends），可用率与趋势柱只统计在接客的账号，
+	// 历史桶因此也随当前调度状态变化，不再保留「当时是谁在跑」。
+	// 这里再把「最新一刻」对齐到快照表里那条仍然开启调度的最新记录，保证状态灯与趋势同源、不会停在旧绿灯上。
 	snapshots, err := listLatestGroupMonitorSnapshots(ctx, r.db, params.GroupIDs)
 	if err != nil {
 		return nil, err
@@ -875,6 +876,17 @@ WHERE sample.checked_at >= $3
   AND account_group.group_id = ANY($5)
 `
 		}
+		// 只统计「当前开启调度」的账号：本地模型监控页的可用率与趋势柱必须和状态灯同源，
+		// 反映真正在接客的那条账号。否则组里已经失败、已经被关掉调度的历史账号会一直参与平均，
+		// 把可用率长期压在很低的位置，与「状态灯是绿的」自相矛盾。
+		// 过滤条件与分组监控快照读侧保持一致：未删除 + active + schedulable。
+		args = append(args, service.StatusActive)
+		schedulableAccountJoinSQL := fmt.Sprintf(`
+JOIN accounts schedulable_account
+  ON schedulable_account.id = trend_samples.account_id
+ AND schedulable_account.deleted_at IS NULL
+ AND schedulable_account.status = $%d
+ AND COALESCE(schedulable_account.schedulable, FALSE) = TRUE`, len(args))
 		query := fmt.Sprintf(`
 WITH latest_monitor_run AS (
   SELECT run.result_detail, run.finished_at
@@ -954,8 +966,10 @@ WITH latest_monitor_run AS (
     ON account_group.account_id = binding.local_account_id
   %s
 )
-SELECT group_id, account_id, status, latency_ms, finished_at, source
-FROM trend_samples`, latestMonitorRunWhereSQL, healthGuardWhereSQL, monitorWhereSQL, structuredMonitorWhereSQL)
+SELECT trend_samples.group_id, trend_samples.account_id, trend_samples.status,
+       trend_samples.latency_ms, trend_samples.finished_at, trend_samples.source
+FROM trend_samples
+%s`, latestMonitorRunWhereSQL, healthGuardWhereSQL, monitorWhereSQL, structuredMonitorWhereSQL, schedulableAccountJoinSQL)
 		rows, err := r.db.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("query supplier provider group health trends: %w", err)
