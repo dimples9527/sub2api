@@ -778,7 +778,20 @@ function classifyReason(
   if (log.schedulable_before === log.schedulable_after) return { badge: null, note: '' }
   // 本组没选它、账号却开着（靠别的分组当选）：必须点破，否则「开启调度」与「未入选」并列会读成自相矛盾。
   if (log.direction === 'enabled') return { badge: { kind: 'not-elected', label: '本组未入选' }, note: '该账号在其它分组当选' }
-  if (decision.test_failed) return { badge: { kind: 'test-failed', label: '测试失败' }, note: '' }
+  if (decision.test_failed) {
+    // 失败闸门是按「连续失败轮次」说话的：只标「测试失败」，看不出这是第几次失败、
+    // 还要几次才关 —— 而它正是「为什么是现在关、不是上一轮」的答案。
+    // 次数取自后端逐组依据（failed_count 含本轮），阈值同源给出，读起来与
+    // 「连续失败 N/M 次，未达阈值，暂不关闭」那条口径一致。
+    // ⚠️ 旧运行记录里没有这两个字段，此时不能显示成「失败 0 次」；但也别退回空白 ——
+    // 能走到这一行说明 before !== after（「本该动却没动」在上面已降级返回），
+    // 而测试失败且真的动了只有「关」这一种，所以「已达阈值」是必然结论，只是给不出具体第几次。
+    const failed = decision.failed_count
+    const note = typeof failed === 'number' && failed > 0
+      ? `连续失败 ${failed}${decision.failure_threshold ? `/${decision.failure_threshold}` : ''} 次`
+      : '连续失败已达阈值'
+    return { badge: { kind: 'test-failed', label: '测试失败' }, note }
+  }
   if (decision.scored) return { badge: { kind: 'not-elected', label: '未入选' }, note: '' }
   return { badge: { kind: 'no-election', label: '未参与择优' }, note: '' }
 }

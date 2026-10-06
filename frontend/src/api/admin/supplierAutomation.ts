@@ -549,6 +549,13 @@ export interface SupplierGroupElectionDecisionDetail {
   /** true 表示该账号在该组当前是测试失败状态。 */
   test_failed?: boolean
   /**
+   * 连续失败到第几轮（含本轮）与关闭阈值。仅 test_failed 为真时有值。
+   * 失败闸门是按次数说话的：只标「测试失败」看不出这是第几次、还要几次才关。
+   * ⚠️ 旧运行记录没有这两个字段，缺省时展示必须降级成不带次数的标签。
+   */
+  failed_count?: number
+  failure_threshold?: number
+  /**
    * true 表示该账号按名字匹配到的上游账号当前不可用（供应商被停用 / 上游账号下线），它因此被关闭。
    * 这类账号的 test_status / healthy_count 是上游停用后冻结的旧数据，日志上看起来一切正常 ——
    * 不单独标出来，前端只能落到「未参与择优」，运维看不出真实原因是上游掉了。

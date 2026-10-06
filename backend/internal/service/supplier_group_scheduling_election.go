@@ -397,6 +397,15 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	KeepAlive bool `json:"keep_alive,omitempty"`
 	// TestFailed 表示该账号在该组当前是测试失败状态。
 	TestFailed bool `json:"test_failed,omitempty"`
+	// FailedCount / FailureThreshold 是失败闸门的进度：连续失败到第几轮、到第几轮才关。
+	// 只标 TestFailed 时，运维看不出这是第几次失败、还要几次才关 —— 而这道闸门恰恰是按次数说话的
+	// （默认 2，可配 1~100），「为什么是现在关而不是上一轮」只能靠这两个数回答。
+	// 与 TestFailed 一样是账号级属性却放在逐组依据里：同一个账号在各组的连续失败次数相同，
+	// 前端按分节取本组那条依据即可，不必再回账号级字段。
+	// ⚠️ 只在真的失败时才填 —— 成功账号的连续失败计数已被清零，填出来的「1 次」是假数。
+	// ⚠️ 旧运行记录里没有这两个字段，前端必须能降级成不带次数的标签。
+	FailedCount      int `json:"failed_count,omitempty"`
+	FailureThreshold int `json:"failure_threshold,omitempty"`
 	// UpstreamUnavailable 表示该账号按名字匹配到的上游账号当前不可用（供应商被停用 / 上游账号下线）。
 	// 它是账号级属性，但决定的是「本组为什么关它」，所以跟着逐组依据一起落库：
 	// 这类账号的 last_test_status / 健康计数是上游停用后冻结的旧数据，日志上看起来一切正常，
@@ -1160,6 +1169,14 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				decision.NoAlternative = true
 			}
 			decision.TestFailed = strings.TrimSpace(member.LastTestStatus) == SupplierGroupSchedulingElectionTestStatusFailed
+			// 失败闸门的进度只对失败账号有意义，所以跟着 TestFailed 一起填：
+			// 成功账号的连续失败计数已被清零，填出来的「1 次」是假数，前端也没机会显示它。
+			// +1 与 decide 的进度口径对齐（pending = failedCount + 1，见 ReasonFailedPendingFmt 的用法）——
+			// member.FailedCount 是「本轮之前」的累计值，含本轮的次数要加一。
+			if decision.TestFailed {
+				decision.FailedCount = member.FailedCount + 1
+				decision.FailureThreshold = config.FailureThreshold
+			}
 			decision.UpstreamUnavailable = account.upstreamUnavailable
 			// 只有测试成功的账号才进了择优，才有分可摊开；失败/未测的保持零值。
 			if score, ok := electionScores[member.AccountID]; ok {
