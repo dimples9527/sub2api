@@ -212,9 +212,12 @@ func TestGroupElectionDisabledGroupSkipped(t *testing.T) {
 }
 
 // 并列打破：连续成功次数相同，最近测试者优先。
+// 时间戳必须相对 now 生成：写死绝对日期的话，过了 24 小时它们就都成了"过期结果"，
+// 用例会静默退化成在测另一件事（保底/闸门一），不再验证 tie-break 本身。
 func TestGroupElectionTieBreakByLastTested(t *testing.T) {
-	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	older := now.Add(-2 * time.Hour)
+	newer := now.Add(-time.Hour)
 	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
 		{GroupID: 1, AccountID: 41, Schedulable: false, LastTestStatus: "success", HealthyCount: 4, LastTestedAt: older},
 		{GroupID: 1, AccountID: 42, Schedulable: false, LastTestStatus: "success", HealthyCount: 4, LastTestedAt: newer},
@@ -222,7 +225,7 @@ func TestGroupElectionTieBreakByLastTested(t *testing.T) {
 	store := newFakeGroupElectionStore()
 	svc := NewSupplierGroupSchedulingElectionService(repo, store)
 
-	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, now)
 	require.NoError(t, err)
 	require.Equal(t, true, store.calls[42], "并列时最近测试者(42)胜出")
 	_, touched41 := store.calls[41]
@@ -231,9 +234,11 @@ func TestGroupElectionTieBreakByLastTested(t *testing.T) {
 
 // 黏性 tie-break：次数并列时，优先保留当前已开启调度的账号，避免赢家在两者间横跳。
 // 这里 61 已开、62 未开，两者次数都是 5、且 62 的 last_tested_at 更新（若无黏性会被 62 抢走）。
+// 与上一条同理，时间戳相对 now 生成，避免它们变成"过期结果"后本条用例失去区分力。
 func TestGroupElectionTieBreakPrefersSchedulable(t *testing.T) {
-	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	older := now.Add(-2 * time.Hour)
+	newer := now.Add(-time.Hour)
 	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
 		{GroupID: 1, AccountID: 61, Schedulable: true, LastTestStatus: "success", HealthyCount: 5, LastTestedAt: older},
 		{GroupID: 1, AccountID: 62, Schedulable: false, LastTestStatus: "success", HealthyCount: 5, LastTestedAt: newer},
@@ -241,7 +246,7 @@ func TestGroupElectionTieBreakPrefersSchedulable(t *testing.T) {
 	store := newFakeGroupElectionStore()
 	svc := NewSupplierGroupSchedulingElectionService(repo, store)
 
-	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, time.Now())
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, now)
 	require.NoError(t, err)
 
 	// 61 黏住名额：本就开着且未被严格超过 → 保持不变、不写库。
@@ -1540,23 +1545,69 @@ func TestGroupElectionDryRunStillPersistsFailedCount(t *testing.T) {
 	require.Equal(t, 1, result.PendingCount)
 }
 
-// 参选资格判据：last_test_status = success，或健康守护连续成功计数 > 0。
+// 参选资格判据：last_test_status = success 且结果未过期，或健康守护连续成功计数 > 0。
 func TestGroupElectionMemberSelectablePredicate(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	// 不带 LastTestedAt 即零值 = 时间戳缺失，按「不判过期」处理（早期测试结果没有这个字段）。
 	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: "success"}))
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "success"}, now))
 	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", HealthyCount: 1}),
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", HealthyCount: 1}, now),
 		"健康计数 > 0 的失败账号仍可参选")
 	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: "", HealthyCount: 2}),
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "", HealthyCount: 2}, now),
 		"状态为空但健康计数 > 0 也可参选")
 	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", HealthyCount: 0}))
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", HealthyCount: 0}, now))
 	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: "", HealthyCount: 0}))
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "", HealthyCount: 0}, now))
 	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: " success ", HealthyCount: 0}),
+		SupplierGroupSchedulingElectionMember{LastTestStatus: " success ", HealthyCount: 0}, now),
 		"状态两侧空白要归一后再比较")
+}
+
+// 参选资格的新鲜度判据：只有「测试成功」要看过期，健康计数是健康守护持续刷新的当前数据、不看时间戳。
+// 时限本身写死在 supplierGroupElectionTestResultMaxAge，这里把边界（正好卡上/刚超过）钉住。
+func TestGroupElectionMemberSelectableRequiresFreshTestResult(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	success := func(testedAt time.Time) SupplierGroupSchedulingElectionMember {
+		return SupplierGroupSchedulingElectionMember{LastTestStatus: "success", LastTestedAt: testedAt}
+	}
+
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(success(now.Add(-time.Hour)), now),
+		"一小时前测出的成功仍是当前事实")
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
+		success(now.Add(-supplierGroupElectionTestResultMaxAge)), now),
+		"正好卡在时限上不算过期（判据是严格大于）")
+	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
+		success(now.Add(-supplierGroupElectionTestResultMaxAge-time.Minute)), now),
+		"超过时限的 success 不再是当前事实，不能参选")
+	require.True(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "success", HealthyCount: 5,
+			LastTestedAt: now.Add(-30 * 24 * time.Hour)}, now),
+		"健康计数 > 0 与测试结果旧不旧无关：健康守护在持续刷新它")
+	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", LastTestedAt: now.Add(-30 * 24 * time.Hour)}, now),
+		"过期判据只作用于 success；失败账号仍走失败闸门，不能被这条规则改道")
+
+	require.False(t, supplierGroupSchedulingElectionMemberTestStale(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "failed", LastTestedAt: now.Add(-30 * 24 * time.Hour)}, now),
+		"非 success 一律不算过期")
+	require.False(t, supplierGroupSchedulingElectionMemberTestStale(
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "success"}, now),
+		"时间戳缺失时没有任何依据判定过期，按原样处理")
+}
+
+// 保底分档：过期账号是 rank 2（「没有当前有效的证据」），不是 rank 0（有参选资格）。
+// 分错档会让保底优先开一个数据已经冻结的账号，把还没测过的新账号排在后面。
+func TestGroupElectionKeepAliveRankTreatsStaleSuccessAsUntested(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, 0, supplierGroupElectionKeepAliveRank(SupplierGroupSchedulingElectionMember{
+		LastTestStatus: "success", LastTestedAt: now.Add(-time.Minute)}, 2, now),
+		"新鲜的测试成功仍是首选保底（防御性兜底）")
+	require.Equal(t, 2, supplierGroupElectionKeepAliveRank(SupplierGroupSchedulingElectionMember{
+		LastTestStatus: "success", LastTestedAt: now.Add(-30 * 24 * time.Hour)}, 2, now),
+		"过期的测试成功降级到「未测过」同档，而不是留在首选档")
 }
 
 // 候选集放宽：last_test_status = failed 但健康计数 > 0 的账号也能当选开启。
@@ -1749,11 +1800,12 @@ func TestGroupElectionKeepAliveCandidateIsDeterministic(t *testing.T) {
 // 这两个字段在上游停用后是**冻结的旧数据**（健康守护的候选查询带 p.enabled = TRUE，不再刷新它们），
 // 拿它们当"健康"用，等于让一个请求必然打不通的账号继续占着 TopN 名额。
 func TestGroupElectionUpstreamUnavailableIsNotSelectable(t *testing.T) {
+	now := time.Now()
 	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{LastTestStatus: "success", UpstreamUnavailable: true}),
+		SupplierGroupSchedulingElectionMember{LastTestStatus: "success", UpstreamUnavailable: true}, now),
 		"测试状态 success 也不能抵消「上游已停用」")
 	require.False(t, supplierGroupSchedulingElectionMemberSelectable(
-		SupplierGroupSchedulingElectionMember{HealthyCount: 9, UpstreamUnavailable: true}),
+		SupplierGroupSchedulingElectionMember{HealthyCount: 9, UpstreamUnavailable: true}, now),
 		"健康计数 > 0 也不能抵消「上游已停用」")
 }
 
@@ -1800,6 +1852,97 @@ func TestGroupElectionUpstreamUnavailableClosesAndYieldsSeat(t *testing.T) {
 	require.True(t, items[580].GroupDecisions[0].UpstreamUnavailable,
 		"逐组依据也要带上游停用标记：前端只按依据分类，缺了它只能显示「未参与择优」，等于没写清原因")
 	require.Equal(t, SupplierGroupSchedulingElectionReasonElected, items[526].Reason)
+}
+
+// 回归守卫（2026-10-07 生产现象）：分组 45「Codex 稳定（不降智）」的可用率趋势长期全红。
+//
+// 生产现象：唯一在任账号的 last_test_status 停在两个月前的 success，它又不在健康守护白名单里
+// （健康计数恒为 0），所以它既没有任何当前数据、又靠这个陈旧 success 占着席位；
+// 在任者健康锁定还主动把它锁住，连择优都不做 —— 有健康数据的账号一直开不出来，
+// 分组的健康趋势没有任何数据源，只能回退到全红的上游外部监控。
+// 修复：过期的 success 不再算参选资格，锁定合不上、走正常择优把有当前数据的账号换上来。
+func TestGroupElectionStaleTestResultYieldsSeatToVerifiedAccount(t *testing.T) {
+	now := time.Now()
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 183 型：状态是 success，但最近一次测试停在两个月前，且没有健康数据（不在健康守护白名单里）。
+		{GroupID: 45, GroupName: "Codex 稳定（不降智）", AccountID: 183, Platform: "openai", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 0, LastTestedAt: now.Add(-60 * 24 * time.Hour)},
+		// 527 型：健康守护在持续刷新它，是当前事实。
+		{GroupID: 45, GroupName: "Codex 稳定（不降智）", AccountID: 527, Platform: "openai", Schedulable: false,
+			LastTestStatus: "success", HealthyCount: 8, LastTestedAt: now.Add(-time.Minute)},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	// 明确打开在任者健康锁定：修复前正是它把陈旧的 183 焊在席位上，这条用例必须覆盖锁定路径。
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{45},
+	}, now)
+	require.NoError(t, err)
+
+	// 整表断言：map 取不存在的键返回 false，"要求它是 false"会被"压根没写过"假通过。
+	require.Equal(t, map[int64]bool{183: false, 527: true}, store.calls,
+		"结果过期的在任者必须让出席位，有当前健康数据的账号必须被换上来 —— 两者都要真的落库")
+	require.Equal(t, []int64{527}, result.Groups[0].WinnerIDs)
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 1, result.DisabledCount)
+
+	items := map[int64]SupplierGroupSchedulingElectionAccountItem{}
+	for _, item := range result.Items {
+		items[item.AccountID] = item
+	}
+	require.Contains(t, items[183].Reason, "已超过 24 小时未复测",
+		"关闭原因要写明是测试结果过期；写「非分组最优」会让运维去翻一个并不存在的评分问题")
+	require.Equal(t, SupplierGroupSchedulingElectionActionDisabled, items[183].Action)
+	require.False(t, items[183].GroupDecisions[0].Scored,
+		"过期账号没进择优，逐组依据不能带评分，否则前端会显示一个无意义的综合分")
+	require.Equal(t, SupplierGroupSchedulingElectionReasonElected, items[527].Reason)
+}
+
+// 过期账号是「不该参选」，不是「该被关掉」：它往往是本组唯一开着的账号，
+// 直接关掉就把分组关成了空组 —— 空组是确定的故障，数据旧但可能还能用至少还有恢复的可能。
+// 这条与「失败账号过闸门一」是同一个取舍，所以必须显式守住，不能靠调用顺序碰巧成立。
+func TestGroupElectionStaleTestResultKeepsLastOpenAccount(t *testing.T) {
+	now := time.Now()
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 45, GroupName: "Codex 稳定（不降智）", AccountID: 183, Platform: "openai", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 0, LastTestedAt: now.Add(-60 * 24 * time.Hour)},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, now)
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "本组没有别的可开启账号，过期账号也不能被关掉——空组比数据旧更糟")
+	require.Equal(t, 0, result.DisabledCount)
+	require.Equal(t, 1, result.KeptCount, "命中闸门一，记在「无备选保留」上而不是静默不动")
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepLastOne, result.Items[0].Reason)
+	require.True(t, result.Items[0].SchedulableAfter)
+}
+
+// 过期账号当前关着、且本组一个开启账号都没有时，保底仍要把它开起来。
+// 它与上一条是一对：上一条守「不关」，这一条守「能开」——只把过期账号从保底候选里剔掉的话，
+// 这种分组会永远停在 0 开启（"数据旧"不是"不能用"，比空组强）。
+func TestGroupElectionStaleTestResultStillEligibleForKeepAlive(t *testing.T) {
+	now := time.Now()
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 45, GroupName: "Codex 稳定（不降智）", AccountID: 183, Platform: "openai", Schedulable: false,
+			LastTestStatus: "success", HealthyCount: 0, LastTestedAt: now.Add(-60 * 24 * time.Hour)},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{TopN: 1}, now)
+	require.NoError(t, err)
+
+	require.Equal(t, map[int64]bool{183: true}, store.calls, "保底必须真的把它开起来")
+	require.Equal(t, 1, result.EnabledCount)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepAlive, result.Items[0].Reason,
+		"开启原因要说明是保底，否则日志看起来像择优算错了")
 }
 
 // 上游已不可用的账号也不能被「分组保底」挑中：保底的本意是"别让分组空着"，

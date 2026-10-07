@@ -52,6 +52,13 @@ const (
 	// （2026-10-04 生产实例：供应商被停用后 580 仍 schedulable=true，挤掉了健康的 526）。
 	// 措辞写「供应商已停用」而不是笼统的「上游不可用」：实际触发绝大多数是供应商被停用，写具体才查得动。
 	SupplierGroupSchedulingElectionReasonUpstreamUnavailable = "上游供应商已停用，关闭调度"
+	// SupplierGroupSchedulingElectionReasonTestStaleFmt 是「最近一次测试成功已过期」的关闭原因。
+	//
+	// 与 ReasonUpstreamUnavailable 是同一类问题的两个入口：那一条处理「上游没了、数据冻结」，
+	// 这一条处理「上游还在、但根本没人再测过」。判据与时限见 supplierGroupElectionTestResultMaxAge。
+	// 带上小时数（而不是只写"结果过期"）：运维看到这一条的第一反应是"凭什么算过期"，
+	// 把阈值写在文案里，他才能直接判断是该去补一次测试、还是该把账号加进健康守护白名单。
+	SupplierGroupSchedulingElectionReasonTestStaleFmt = "最近一次测试已超过 %d 小时未复测，结果失效，关闭调度"
 	// SupplierGroupSchedulingElectionReasonRequiredModelFmt 是「因覆盖必需模型被补选」的开启原因。
 	// 与 ReasonElected（分组内最优）分开：补选账号的综合分往往进不了前 N，写「分组内最优」是错的，
 	// 运维会去翻评分找那个不存在的问题；带上模型名才能一眼看出"它是为了这个模型才被开的"。
@@ -131,6 +138,22 @@ const (
 	// 有效延迟 = 窗口均值 / max(成功率, floor)：只算成功样本会掩盖「偶尔快一下、实则一直在失败」
 	// 的账号，用成功率把失败重新计入代价。floor 0.2 表示失败惩罚最多放大 5 倍，防止成功率趋 0 时除爆。
 	supplierGroupElectionSuccessRateFloor = 0.2
+
+	// supplierGroupElectionTestResultMaxAge 是「最近一次测试成功」还能当参选资格的最长时限。
+	//
+	// 为什么必须有这个时限：账号测试**只有人工点才会跑**，没有任何自动任务会跑它（见 decide 的说明），
+	// 所以一个没人再点测试的账号，它的 last_test_status / last_tested_at 会永久冻结在最后一次成功那一刻。
+	// 而参选资格原先只看「状态是不是 success」、不看它有多旧 ⇒ 这种账号能靠一个几个月前的结果
+	// 永久占住分组的在任席位（在任者健康锁定还会主动把它锁住、连择优都不做），
+	// 真正有健康数据的账号反而开不出来——表现为该分组的监控可用率趋势长期全红。
+	// 2026-10-07 生产实例：分组 45「Codex 稳定（不降智）」的唯一在任账号最后测试时间停在两个月前，
+	// 且不在健康守护白名单里（健康计数恒为 0），健康趋势因此没有任何数据源、只能回退到全红的上游外部监控。
+	//
+	// 取 24h 的依据：健康守护白名单内的账号是按小时级重测的（实测 140 条成员行里 118 条在 1 小时内），
+	// 所以「超过一整天没有任何验证」已经明显偏离正常节奏，足以把冻结数据和当前事实区分开；
+	// 同时它留足了一天的人工复测余量，不会因为一次漏测就把本来正常的账号踢出择优。
+	// 写死不做成配置：与成功惩罚下限同理，它是防「拿陈旧数据当真」的保护，不该被配置放大。
+	supplierGroupElectionTestResultMaxAge = 24 * time.Hour
 
 	// supplierGroupElectionFailedCountExtraKey 是本任务自己维护的「连续失败轮次」。
 	// 不能复用健康守护的 supplier_health_guard_failure_count：那个是健康守护自己检测周期里的计数，
@@ -336,7 +359,7 @@ type SupplierGroupSchedulingElectionAccountItem struct {
 type SupplierGroupSchedulingElectionDecisionDetail struct {
 	GroupID   int64  `json:"group_id"`
 	GroupName string `json:"group_name,omitempty"`
-	// Scored 为 false 表示该账号在这个分组里当前不具备参选资格（既非测试成功、健康计数也为 0），
+	// Scored 为 false 表示该账号在这个分组里当前不具备参选资格（既非未过期的测试成功、健康计数也为 0），
 	// 压根没进择优，下面那组评分字段全部无意义（零值），前端必须据此不显示评分。
 	Scored bool `json:"scored"`
 	// Elected 表示该账号在本组入选（择优前 N，或因覆盖必需模型被补选）。
@@ -558,12 +581,17 @@ type supplierGroupElectionAccount struct {
 	schedulableBefore bool
 	testStatus        string
 	healthyCount      int
-	// selectable 是「参选资格」：last_test_status = success，或健康守护连续成功计数 > 0。
+	// selectable 是「参选资格」：last_test_status = success 且结果未过期，或健康守护连续成功计数 > 0。
 	// 它比 testStatus 宽 —— 健康计数 > 0 只证明守护那一轮判过 healthy，last_test_status 之后
 	// 可能被一次手工账号测试覆盖成 failed；这种账号实际仍可用，不该失去参选资格，
 	// 否则它刚当选就会被失败分支关回去。裁决分支看它，不看 testStatus。
 	selectable   bool
 	lastTestedAt time.Time
+	// staleTest 表示这个账号「最近一次测试成功已过期」（判据见 supplierGroupElectionTestResultMaxAge）。
+	// 它与 selectable 的关系是：过期 ⇒ 一定不 selectable，但不 selectable 未必过期（failed、未测过也不是）。
+	// 之所以要单独记一位：不 selectable 的账号默认会落进裁决的「保持原状」分支（那条是给"未测过"用的），
+	// 而过期账号必须被**主动关闭**——它的状态是 success，留在"保持原状"里就等于永久占住席位。
+	staleTest bool
 	// latencyMs 是最近一次成功测试的耗时。同一账号跨多个分组时每行取值相同（都来自 accounts.extra），
 	// 但只在当前为 0 时补填，避免"某一行恰好没读到"就把已有值覆盖掉。
 	latencyMs   int64
@@ -617,20 +645,55 @@ type supplierGroupElectionAccount struct {
 
 // supplierGroupSchedulingElectionMemberSelectable 判断一条成员行是否具备「参选资格」。
 //
-// 判据是「最近一次测试成功」或「健康守护连续成功计数 > 0」。放宽到后者，是因为健康计数 > 0
+// 判据是「最近一次测试成功且未过期」或「健康守护连续成功计数 > 0」。放宽到后者，是因为健康计数 > 0
 // 只证明守护那一轮判过 healthy，而 last_test_status 可能随后被一次手工账号测试覆盖成 failed——
 // 这种账号实际仍可用，不该因为一次失败的测试就彻底失去参选资格（否则它刚当选又会被关回去）。
 //
 // 注意它与分组明细里的 SuccessCount 不是一个口径：SuccessCount 仍按原始 last_test_status 归类，
 // 只统计真正的 success，不把「健康计数 > 0 但状态是 failed」的账号算进去。
-func supplierGroupSchedulingElectionMemberSelectable(member SupplierGroupSchedulingElectionMember) bool {
+func supplierGroupSchedulingElectionMemberSelectable(member SupplierGroupSchedulingElectionMember, now time.Time) bool {
 	// 上游已不可用的账号直接失去资格：它的「测试成功 / 健康计数」是冻结的旧数据，不是当前事实。
 	// 不排掉它，它就会被选为赢家（或被锁定路径当成健康的在任者保住），把名额占满。
 	if member.UpstreamUnavailable {
 		return false
 	}
+	// 过期的「测试成功」同理不是当前事实，理由与时限见 supplierGroupElectionTestResultMaxAge。
+	// 放在这里（而不是只放在在任者锁定那一处）是有意的：参选资格是账号级属性，
+	// 只把锁定收紧的话，过期账号仍会进参选池、仍能靠陈旧的「连续成功次数」在择优里胜出，
+	// 而且它落选后会被当成"未测过"保持原状，反而永远关不掉。
+	if supplierGroupSchedulingElectionMemberTestStale(member, now) {
+		return false
+	}
 	return strings.TrimSpace(member.LastTestStatus) == SupplierGroupSchedulingElectionTestStatusSuccess ||
 		member.HealthyCount > 0
+}
+
+// supplierGroupSchedulingElectionMemberTestStale 判断「该账号当前能依据的测试证据是否已过期」。
+//
+// 判据：没有健康计数（即没有更新的证据），且 last_test_status = success 的时间戳早于 now - MaxAge。
+//
+// 健康计数 > 0 直接不算过期：它是健康守护在持续刷新的当前数据（实测绝大多数在 1 小时内），
+// 远比人工测试结果新鲜。它一旦 > 0，那个陈旧的 success 就不再是"唯一依据"，也就无所谓过不过期——
+// 先判它，是为了不让这条规则把有当前证据的账号一起误伤。
+//
+// 只对 success 生效：failed / 未测过的账号本来就没有"结果是否新鲜"这回事，
+// 它们各自有失败闸门与保持原状两条出路，不该被这条规则改道。
+//
+// 时间戳缺失（零值）不算过期，这是刻意的向后兼容：last_tested_at 是后加的字段，
+// 更早写入的测试结果没有它；把"没有时间戳"直接判成过期，等于凭缺失的字段一次性关掉一批账号。
+// 与 upstreamUnavailable 的区别也在这里——那一条有明确的当前事实可依据（上游表查得到），
+// 这一条在时间戳缺失时没有任何依据，只能按原样处理。
+func supplierGroupSchedulingElectionMemberTestStale(member SupplierGroupSchedulingElectionMember, now time.Time) bool {
+	if member.HealthyCount > 0 {
+		return false
+	}
+	if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusSuccess {
+		return false
+	}
+	if member.LastTestedAt.IsZero() {
+		return false
+	}
+	return now.Sub(member.LastTestedAt) > supplierGroupElectionTestResultMaxAge
 }
 
 // supplierGroupElectionHasScheduledMember 判断本组当前是否已经有「开启调度」的账号。
@@ -654,14 +717,14 @@ func supplierGroupElectionHasScheduledMember(members []SupplierGroupSchedulingEl
 // 只挑当前**未开启**的账号：挑已开启的 before == after，落进 UnchangedCount，等于什么都没做。
 //
 // 优先级（越靠前越优先）：
-//  1. 有参选资格（测试成功 / 健康计数 > 0）—— 正常择优本该已选它，这里是防御性兜底；
+//  1. 有参选资格（测试成功且未过期 / 健康计数 > 0）—— 正常择优本该已选它，这里是防御性兜底；
 //  2. 失败但未到关闭阈值 —— 失败闸门刻意留它等翻盘，说明还值得一试；
-//  3. 未测过 —— 没有证据说它坏，只是还没有数据；
+//  3. 未测过，或测试结果已过期 —— 没有"当前有效"的证据说它坏，只是证据旧了/还没有；
 //  4. 失败且已达阈值 —— 最差的选择，但也好过让分组空着。
 //
 // 同级内先比健康计数（多者优先），再比最近成功耗时（有数据者优先、快者优先），最后按账号 ID 升序。
 // 排序必须完全确定：否则同一个全失败分组每轮换一个人开，日志上看就是毫无理由地来回横跳。
-func supplierGroupElectionKeepAliveCandidate(members []SupplierGroupSchedulingElectionMember, failureThreshold int) (SupplierGroupSchedulingElectionMember, bool) {
+func supplierGroupElectionKeepAliveCandidate(members []SupplierGroupSchedulingElectionMember, failureThreshold int, now time.Time) (SupplierGroupSchedulingElectionMember, bool) {
 	candidates := make([]SupplierGroupSchedulingElectionMember, 0, len(members))
 	for _, member := range members {
 		// 上游已不可用的账号不能当保底：开起来也只会把请求路由到不通的通道，
@@ -674,8 +737,8 @@ func supplierGroupElectionKeepAliveCandidate(members []SupplierGroupSchedulingEl
 		return SupplierGroupSchedulingElectionMember{}, false
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
-		rankI := supplierGroupElectionKeepAliveRank(candidates[i], failureThreshold)
-		rankJ := supplierGroupElectionKeepAliveRank(candidates[j], failureThreshold)
+		rankI := supplierGroupElectionKeepAliveRank(candidates[i], failureThreshold, now)
+		rankJ := supplierGroupElectionKeepAliveRank(candidates[j], failureThreshold, now)
 		if rankI != rankJ {
 			return rankI < rankJ
 		}
@@ -696,8 +759,8 @@ func supplierGroupElectionKeepAliveCandidate(members []SupplierGroupSchedulingEl
 }
 
 // supplierGroupElectionKeepAliveRank 给保底候选分档，越小越优先。分档理由见 keepAliveCandidate 的注释。
-func supplierGroupElectionKeepAliveRank(member SupplierGroupSchedulingElectionMember, failureThreshold int) int {
-	if supplierGroupSchedulingElectionMemberSelectable(member) {
+func supplierGroupElectionKeepAliveRank(member SupplierGroupSchedulingElectionMember, failureThreshold int, now time.Time) int {
+	if supplierGroupSchedulingElectionMemberSelectable(member, now) {
 		return 0
 	}
 	if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusFailed {
@@ -795,7 +858,8 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 
 		// 显示用延迟：窗口成功样本足够就用平均，否则回退最近单值——同一账号跨分组取值一致。
 		baseLatency, _ := supplierGroupSchedulingElectionLatency(member, config.LatencyMinSamples)
-		selectable := supplierGroupSchedulingElectionMemberSelectable(member)
+		selectable := supplierGroupSchedulingElectionMemberSelectable(member, now)
+		staleTest := supplierGroupSchedulingElectionMemberTestStale(member, now)
 		account := accounts[member.AccountID]
 		if account == nil {
 			account = &supplierGroupElectionAccount{
@@ -806,14 +870,21 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				testStatus:        strings.TrimSpace(member.LastTestStatus),
 				healthyCount:      member.HealthyCount,
 				selectable:        selectable,
+				staleTest:         staleTest,
 				lastTestedAt:      member.LastTestedAt,
 				latencyMs:         baseLatency,
 				failedCount:       member.FailedCount,
 			}
 			accounts[member.AccountID] = account
-		} else if selectable && !account.selectable {
-			// 资格是账号级属性，各行取值一致；这里仍取并集，避免"第一行恰好读空"把资格抹掉。
-			account.selectable = true
+		} else {
+			if selectable && !account.selectable {
+				// 资格是账号级属性，各行取值一致；这里仍取并集，避免"第一行恰好读空"把资格抹掉。
+				account.selectable = true
+			}
+			// 过期标记同样取并集：它一旦为真就要把账号关掉，漏读一行会让它继续占着席位。
+			if staleTest {
+				account.staleTest = true
+			}
 		}
 		if account.latencyMs == 0 {
 			account.latencyMs = baseLatency
@@ -875,7 +946,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		}
 
 		// candidateMembers 是本轮的参选池：判据见 supplierGroupSchedulingElectionMemberSelectable，
-		// 即「测试成功」或「健康守护连续成功计数 > 0」。它比下面按原始状态统计的 SuccessCount 宽，
+		// 即「测试成功且未过期」或「健康守护连续成功计数 > 0」。它比下面按原始状态统计的 SuccessCount 宽，
 		// 两者不要互相替代：前者决定谁能当选，后者只是给运维看的分布。
 		candidateMembers := make([]SupplierGroupSchedulingElectionMember, 0)
 		for _, member := range groupMembers {
@@ -888,17 +959,22 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			default:
 				detail.UntestedCount++
 			}
-			if supplierGroupSchedulingElectionMemberSelectable(member) {
+			if supplierGroupSchedulingElectionMemberSelectable(member, now) {
 				candidateMembers = append(candidateMembers, member)
 			}
 		}
 		// 闸门一：一个可参选账号都没有的分组里，失败账号一个都不能关——
 		// 关掉最后一个等于把这个分组关成空组，落到调度上就是请求全量失败；
 		// 留着一个坏账号至少还有恢复的可能，所以交给人工确认而不是自动关。
+		//
+		// 「测试结果已过期」的账号同样要过这道闸：它虽然不该再参选，但它往往正是本组当前唯一开着的账号，
+		// 按过期规则直接关掉就落进"空组"了。不把它算进来的话，还会和保底开启形成振荡：
+		// 本轮关掉 → 下一轮分组空了、保底又把它开起来 → 再下一轮再关，每轮一开一关、日志上毫无理由。
 		if len(candidateMembers) == 0 {
 			for _, member := range groupMembers {
-				// 只保底"失败"账号：可参选的账号本就在池子里，不需要靠闸门一留住。
-				if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusFailed {
+				// 只保底"失败"与"结果已过期"两类账号：可参选的账号本就在池子里，不需要靠闸门一留住。
+				if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusFailed &&
+					!supplierGroupSchedulingElectionMemberTestStale(member, now) {
 					continue
 				}
 				if account := accounts[member.AccountID]; account != nil {
@@ -947,7 +1023,11 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				}
 				// 参选资格优先于原始状态：健康计数 > 0 的成员按健康在任者对待，与 decide 的裁决口径一致。
 				// 否则它进不了 scheduledHealthy、拿不到赢家标记，却会在 decide 里走健康分支被判成"落选"关掉。
-				if supplierGroupSchedulingElectionMemberSelectable(member) {
+				//
+				// 过期的「测试成功」不算资格，所以它既进不了 scheduledHealthy、也不会被计进 scheduledIncumbentCount
+				// （下面那条只放行 failed）—— 这正是本判据要的效果：数据冻结的账号不再能靠锁定把席位焊死，
+				// 锁定会因此合不上，走正常择优把有当前数据的账号换上来。
+				if supplierGroupSchedulingElectionMemberSelectable(member, now) {
 					scheduledHealthy = append(scheduledHealthy, member)
 					scheduledIncumbentCount++
 					continue
@@ -1097,7 +1177,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 本组就不算空组、不必再保底；而依据是按 WinnerIDs 组装的，保底当选必须记进去，
 		// 否则明细里看不到它，前端会把这一行读成"没入选却开着"。
 		if len(detail.WinnerIDs) == 0 && !supplierGroupElectionHasScheduledMember(groupMembers) {
-			if keepAliveMember, ok := supplierGroupElectionKeepAliveCandidate(groupMembers, config.FailureThreshold); ok {
+			if keepAliveMember, ok := supplierGroupElectionKeepAliveCandidate(groupMembers, config.FailureThreshold, now); ok {
 				if account := accounts[keepAliveMember.AccountID]; account != nil {
 					account.keepAlive = true
 				}
@@ -1322,8 +1402,9 @@ func supplierGroupElectionItemHasLockedIncumbent(item SupplierGroupSchedulingEle
 // supplierGroupSchedulingElectionDecide 给出账号的目标调度状态。
 // 规则（复用 last_test_status 与 healthy_count，不重测）：
 //   - 被分组保底选中（本组一个开启账号都没有） → 一定开，优先于下面所有规则
-//   - 有参选资格（success，或健康计数 > 0） → 在任一所属分组是最优则开；否则关（落选）
+//   - 有参选资格（success 且未过期，或健康计数 > 0） → 在任一所属分组是最优则开；否则关（落选）
 //   - 无资格且 failed → 两道闸门都过了才关：先确认分组不会被关成空组，再确认连续失败已达阈值
+//   - 无资格但「测试成功已过期」 → 同上：先过闸门一（本组无备选则留着），否则关闭
 //   - 其它（未测过） → 保持原状
 //
 // 资格判据放在最前面、而不是继续按 testStatus 分派：健康计数 > 0 只证明守护那一轮判过 healthy，
@@ -1351,6 +1432,24 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 			return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonUpstreamUnavailable
 		}
 		return false, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonUpstreamUnavailable
+	}
+	// 测试成功已过期：必须**主动关闭**，不能落进最后那条"保持原状"。
+	//
+	// 这是本规则唯一容易写错的地方：过期账号的 testStatus 仍是 success，而"保持原状"分支是按
+	// "既不是 success 也不是 failed"来理解的（那是给未测过的账号用的）。不单独处理它，
+	// 它就永远不会被关掉——哪怕本组已经有健康数据齐全的账号在等着上位，席位也换不动。
+	if account.staleTest {
+		// 闸门一：关掉它之后本组一个可开启的账号都不剩 —— 绝不关。
+		// 与失败账号同一取舍：空组是确定的故障，留着一个"数据旧但可能还能用"的账号至少还有恢复的可能。
+		if account.noAlternative {
+			account.hold = supplierGroupElectionHoldNoAlternative
+			return account.schedulableBefore, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonKeepLastOne
+		}
+		reason := fmt.Sprintf(SupplierGroupSchedulingElectionReasonTestStaleFmt, int(supplierGroupElectionTestResultMaxAge.Hours()))
+		if account.schedulableBefore {
+			return false, SupplierGroupSchedulingElectionActionDisabled, reason
+		}
+		return false, SupplierGroupSchedulingElectionActionNone, reason
 	}
 	if account.selectable {
 		if account.winner {
