@@ -356,8 +356,22 @@
           </template>
 
           <template #cell-local_account_name="{ row: account }">
+            <!-- 上游改了密钥名后本地旧名对不上，行会变成未匹配。后端能唯一确定「疑似就是它」时
+                 就把本地账号名显示出来，否则这一列只剩一个「未匹配」徽标，用户无从知道该改哪个账号。 -->
+            <div
+              v-if="account.local_account_match_status === 'unmatched' && suspectedLocalAccountName(account)"
+              class="sp-local-account-cell"
+            >
+              <span
+                class="sp-match-badge unmatched"
+                :title="SUSPECTED_LOCAL_ACCOUNT_HINT"
+              >
+                疑似未匹配
+              </span>
+              <strong :title="SUSPECTED_LOCAL_ACCOUNT_HINT">{{ suspectedLocalAccountName(account) }}</strong>
+            </div>
             <span
-              v-if="account.local_account_match_status === 'unmatched'"
+              v-else-if="account.local_account_match_status === 'unmatched'"
               class="sp-match-badge unmatched"
               :title="UNBINDABLE_ACCOUNT_HINT"
             >
@@ -614,17 +628,21 @@
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="openLocalAccountEditor(account)"
                 >编辑</button>
-                <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。放在「编辑」旁边，
-                     和「手动改」形成「快捷 / 完整」的对照。目标名算不出来（缺供应商名或密钥名）时整条不显示。 -->
-                <button
-                  v-if="conventionalLocalAccountName(account)"
-                  class="sp-button small sp-account-action-rename"
-                  type="button"
-                  :disabled="renamingLocalAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-                  :title="`按「供应商名称-上游密钥名称」规范改为：${conventionalLocalAccountName(account)}`"
-                  :data-test="`supplier-account-rename-${account.local_account_id}`"
-                  @click.stop="renameLocalAccountToConvention(account)"
-                >{{ renamingLocalAccountID === account.local_account_id ? '改名中' : '快捷改名' }}</button>
+              </template>
+              <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。放在「编辑」旁边，
+                   和「手动改」形成「快捷 / 完整」的对照。目标名算不出来（缺供应商名或密钥名）时整条不显示。
+                   刻意留在 canManageLocalAccount 之外：上游改了密钥名导致断链时行会变成未匹配，
+                   而改名恰恰是唯一能把名字对齐回去的动作，不能跟着其它本地账号按钮一起消失。 -->
+              <button
+                v-if="renameTargetLocalAccountID(account) !== null"
+                class="sp-button small sp-account-action-rename"
+                type="button"
+                :disabled="renamingLocalAccountID === renameTargetLocalAccountID(account) || accountActionLoadingID === renameTargetLocalAccountID(account) || testingAccountID === renameTargetLocalAccountID(account) || duplicatingAccountID === renameTargetLocalAccountID(account)"
+                :title="renameLocalAccountTitle(account)"
+                :data-test="`supplier-account-rename-${renameTargetLocalAccountID(account)}`"
+                @click.stop="renameLocalAccountToConvention(account)"
+              >{{ renamingLocalAccountID === renameTargetLocalAccountID(account) ? '改名中' : '快捷改名' }}</button>
+              <template v-if="canManageLocalAccount(account)">
                 <button
                   v-if="canDuplicateLocalAccount(account)"
                   class="sp-button small sp-account-action-copy"
@@ -1883,7 +1901,7 @@ type SupplierAccountFilterSnapshot = {
   summary: string
 }
 
-type AccountQuickFilterKey = 'all' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed' | 'group_deleted' | 'upstream_deleted'
+type AccountQuickFilterKey = 'all' | 'unmatched' | 'bound' | 'unbound' | 'schedulable' | 'paused' | 'failed' | 'group_deleted' | 'upstream_deleted'
 
 type AccountQuickFilterOption = {
   key: AccountQuickFilterKey
@@ -2004,6 +2022,10 @@ const selectedBindableAccounts = computed(() =>
 // 未匹配 / 匹配冲突的行没有可绑定的本地账号。这句话在两处复用：
 // 表格行内匹配状态徽标的 title，以及勾选框的无障碍标签。
 const UNBINDABLE_ACCOUNT_HINT = '没有匹配到唯一的本地账号，无法绑定分组'
+
+// 上游改过密钥名时本地旧名会对不上，行会变成未匹配。后端在能唯一确定时给出「疑似」账号，
+// 提示里必须说清这是按名字推断的，别让用户把它当成已确认的匹配。
+const SUSPECTED_LOCAL_ACCOUNT_HINT = '上游可能改过密钥名，本地账号名还没同步。这是按名字推断出的疑似账号，可点「快捷改名」把名字对齐回去。'
 
 const selectedUnbindableAccountCount = computed(
   () => selectedAccounts.value.length - selectedBindableAccounts.value.length
@@ -2542,6 +2564,11 @@ const localGroupOptions = computed<SelectOption[]>(() => [
 const accountQuickFilterOptions = computed<AccountQuickFilterOption[]>(() => [
   { key: 'all', label: '全部', count: accountSourceItems.value.length },
   {
+    key: 'unmatched',
+    label: '未匹配本地账号',
+    count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'unmatched')).length,
+  },
+  {
     key: 'bound',
     label: '已绑定分组',
     count: accountSourceItems.value.filter(account => accountMatchesQuickFilter(account, 'bound')).length,
@@ -2871,6 +2898,7 @@ function accountMatchesQuickFilter(
   filter: AccountQuickFilterKey
 ): boolean {
   if (filter === 'all') return true
+  if (filter === 'unmatched') return account.local_account_match_status === 'unmatched'
   if (filter === 'bound') return account.binding_groups.length > 0
   if (filter === 'unbound') return account.binding_groups.length === 0
   if (filter === 'failed') return account.local_account_last_test_status === 'failed'
@@ -2911,6 +2939,14 @@ function selectAccountQuickFilter(filter: AccountQuickFilterKey) {
   if (accountQuickFilter.value === filter) return
   accountQuickFilter.value = filter
   page.value = 1
+  // 「未匹配」筛的是本地账号匹配状态，而「本地分组 / 平台」这两个服务端筛选同样建立在
+  // 「已匹配到本地账号」之上 —— 断链的行压根不会被返回，chip 就永远筛不出东西。
+  // 所以选中它时先把这两个筛选清掉，重新拉取交给它们各自的 watcher。
+  if (filter === 'unmatched' && (groupID.value !== 0 || platformFilter.value !== '')) {
+    groupID.value = 0
+    platformFilter.value = ''
+    return
+  }
   applyAccountQuickFilterPage()
 }
 
@@ -3350,6 +3386,33 @@ function manageableLocalAccountID(account: SupplierProviderAccount): number | nu
 
 function canManageLocalAccount(account: SupplierProviderAccount): boolean {
   return manageableLocalAccountID(account) !== null
+}
+
+// 上游改了密钥名后，本地旧名对不上（匹配候选全部由上游「当前名」派生），行会变成未匹配。
+// 后端在能唯一确定时给一个「疑似就是它」的本地账号，这里按 id 再兜一道底，两个字段必须同时有值才算数。
+function suspectedLocalAccountID(account: SupplierProviderAccount): number | null {
+  const suspected = Number(account.suspected_local_account_id)
+  return Number.isInteger(suspected) && suspected > 0 ? suspected : null
+}
+
+function suspectedLocalAccountName(account: SupplierProviderAccount): string {
+  return suspectedLocalAccountID(account) === null ? '' : (account.suspected_local_account_name || '').trim()
+}
+
+// 「快捷改名」的目标本地账号：已匹配时就是匹配到的那个；断链时用后端给的「疑似」账号。
+// 两者都没有（确实没有对应的本地账号）时返回 null，此时按钮不显示。
+// 目标名算不出来（缺供应商名或上游密钥名）也返回 null —— 没有目标名就没有可执行的改名。
+function renameTargetLocalAccountID(account: SupplierProviderAccount): number | null {
+  if (!conventionalLocalAccountName(account)) return null
+  const matched = manageableLocalAccountID(account)
+  return matched !== null ? matched : suspectedLocalAccountID(account)
+}
+
+function renameLocalAccountTitle(account: SupplierProviderAccount): string {
+  const nextName = conventionalLocalAccountName(account)
+  if (!nextName) return ''
+  if (isMatchedLocalAccount(account)) return `按「供应商名称-上游密钥名称」规范改为：${nextName}`
+  return `上游可能改过密钥名，本地账号「${suspectedLocalAccountName(account)}」已对不上。改名为：${nextName}`
 }
 
 function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean {
@@ -3854,11 +3917,12 @@ async function recoverLocalAccountState(account: SupplierProviderAccount) {
 // 只传 name —— 后端 UpdateAccount 里 `if input.Name != ""` 才落库（admin_account.go），
 // 所以不会连带清空其它字段。
 async function renameLocalAccountToConvention(account: SupplierProviderAccount) {
-  const localAccountID = manageableLocalAccountID(account)
+  const localAccountID = renameTargetLocalAccountID(account)
   const nextName = conventionalLocalAccountName(account)
   if (localAccountID === null || !nextName || renamingLocalAccountID.value === localAccountID) return
 
-  const currentName = (account.local_account_name || '').trim()
+  // 断链时本地账号名是空的（本地列不显示），确认框里退回用「疑似」账号的名字。
+  const currentName = (account.local_account_name || suspectedLocalAccountName(account)).trim()
   // 已经是规范写法就不发请求，避免一次无意义的写库。
   if (currentName === nextName) {
     appStore.showSuccess(`本地账号名已是规范写法：${nextName}`)
@@ -3869,12 +3933,18 @@ async function renameLocalAccountToConvention(account: SupplierProviderAccount) 
   renamingLocalAccountID.value = localAccountID
   try {
     await adminAPI.accounts.update(localAccountID, { name: nextName })
-    accountSourceItems.value = accountSourceItems.value.map(item => item.local_account_id === localAccountID
-      ? { ...item, local_account_name: nextName }
-      : item)
-    applyAccountQuickFilterPage()
-    if (selected.value?.local_account_id === localAccountID) {
-      selected.value = { ...selected.value, local_account_name: nextName }
+    if (isMatchedLocalAccount(account)) {
+      accountSourceItems.value = accountSourceItems.value.map(item => item.local_account_id === localAccountID
+        ? { ...item, local_account_name: nextName }
+        : item)
+      applyAccountQuickFilterPage()
+      if (selected.value?.local_account_id === localAccountID) {
+        selected.value = { ...selected.value, local_account_name: nextName }
+      }
+    } else {
+      // 断链行改名后匹配状态会从「未匹配」翻成「已匹配」，本地账号列和整组操作按钮都要跟着变，
+      // 只有重新拉一次才算得准（就地改 local_account_name 会让这行一直停在「疑似未匹配」）。
+      await loadAccounts()
     }
     appStore.showSuccess(`本地账号已改名为 ${nextName}`)
   } catch (err) {
@@ -4762,40 +4832,43 @@ function formatTime(value?: string): string {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-cyan) 8%, transparent);
 }
 
-.sp-account-quick-filter:nth-child(2).active,
-.sp-account-quick-filter:nth-child(4).active {
+/* 下面这组 nth-child 是按「快捷筛选按钮的排列位置」上色的，插入 / 删除 chip 时必须同步平移。
+   当前顺序：1 全部 / 2 未匹配本地账号 / 3 已绑定分组 / 4 未绑定分组 / 5 可参与调度 /
+   6 暂停调度 / 7 测试失败 / 8 上游分组已删除 / 9 上游密钥已删除。 */
+.sp-account-quick-filter:nth-child(3).active,
+.sp-account-quick-filter:nth-child(5).active {
   border-color: color-mix(in srgb, var(--sp-green) 52%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
   color: var(--sp-green);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-green) 7%, transparent);
 }
 
-.sp-account-quick-filter:nth-child(5).active {
+.sp-account-quick-filter:nth-child(6).active {
   border-color: color-mix(in srgb, var(--sp-amber) 55%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
   color: var(--sp-amber);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-amber) 7%, transparent);
 }
 
-.sp-account-quick-filter:nth-child(6).active {
+.sp-account-quick-filter:nth-child(7).active {
   border-color: color-mix(in srgb, var(--sp-red) 52%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
   color: var(--sp-red);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--sp-red) 6%, transparent);
 }
 
-.sp-account-quick-filter:nth-child(2) strong,
-.sp-account-quick-filter:nth-child(4) strong {
+.sp-account-quick-filter:nth-child(3) strong,
+.sp-account-quick-filter:nth-child(5) strong {
   background: color-mix(in srgb, var(--sp-green) 13%, transparent);
   color: var(--sp-green);
 }
 
-.sp-account-quick-filter:nth-child(5) strong {
+.sp-account-quick-filter:nth-child(6) strong {
   background: color-mix(in srgb, var(--sp-amber) 14%, transparent);
   color: var(--sp-amber);
 }
 
-.sp-account-quick-filter:nth-child(6) strong {
+.sp-account-quick-filter:nth-child(7) strong {
   background: color-mix(in srgb, var(--sp-red) 12%, transparent);
   color: var(--sp-red);
 }

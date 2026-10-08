@@ -476,6 +476,15 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
          ELSE 'conflict'
        END AS local_account_match_status,
        local_match.match_count AS local_account_match_count,
+       CASE
+         WHEN suspected_match.orphan_count = 1 AND unmatched_upstream.unmatched_upstream_count = 1
+         THEN suspected_account.id
+       END AS suspected_local_account_id,
+       CASE
+         WHEN suspected_match.orphan_count = 1 AND unmatched_upstream.unmatched_upstream_count = 1
+         THEN COALESCE(suspected_account.name, '')
+         ELSE ''
+       END AS suspected_local_account_name,
        matched_account.id AS local_account_id,
        COALESCE(matched_account.name, '') AS local_account_name,
        COALESCE(matched_account.platform, '') AS local_account_platform,
@@ -553,6 +562,7 @@ LEFT JOIN LATERAL (
   WHERE local_account.deleted_at IS NULL
     AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
 ) local_match ON TRUE
+`+supplierProviderSuspectedLocalAccountMatchSQL()+`
 LEFT JOIN accounts matched_account
   ON matched_account.id = local_match.local_account_id
  AND local_match.match_count = 1
@@ -2397,6 +2407,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	var item service.SupplierProviderAccount
 	var inactiveAt sql.NullTime
 	var localAccountID sql.NullInt64
+	var suspectedLocalAccountID sql.NullInt64
 	var localAccountPriority sql.NullInt64
 	var localAccountSchedulable sql.NullBool
 	var bindingGroupsJSON []byte
@@ -2406,6 +2417,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.GroupStatus, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
+		&suspectedLocalAccountID, &item.SuspectedLocalAccountName,
 		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.LocalAccountType, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
 		&item.LocalAccountLastTestStatus,
@@ -2435,6 +2447,10 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 	if localAccountID.Valid {
 		value := localAccountID.Int64
 		item.LocalAccountID = &value
+	}
+	if suspectedLocalAccountID.Valid {
+		value := suspectedLocalAccountID.Int64
+		item.SuspectedLocalAccountID = &value
 	}
 	if localAccountPriority.Valid {
 		value := int(localAccountPriority.Int64)
@@ -2613,6 +2629,71 @@ func supplierProviderReorderedAccountNameAliasSQL(value string) string {
   ELSE %s
 END`, normalized, normalized, normalized, normalized, normalized)
 }
+
+// supplierProviderSuspectedLocalAccountSuffixSQL 取本地账号名归一化后去掉供应商名前缀的剩余部分。
+// 例如供应商「2Chat」下的本地账号「2Chat-GPT Plus - 混池」→「gptplus混池」。
+// 用 left/substring 而不是正则，是因为归一化只保证去掉非字母数字，中文会被保留，前缀里可能有正则元字符。
+func supplierProviderSuspectedLocalAccountSuffixSQL(localAccountNameSQL string) string {
+	normalize := supplierProviderLocalAccountNormalizeSQL
+	normalizedLocal := normalize(localAccountNameSQL)
+	normalizedProvider := normalize("COALESCE(p.name, '')")
+	return fmt.Sprintf(
+		"CASE WHEN left(%s, length(%s)) = %s THEN substring(%s from length(%s) + 1) ELSE %s END",
+		normalizedLocal, normalizedProvider, normalizedProvider, normalizedLocal, normalizedProvider, normalizedLocal)
+}
+
+// supplierProviderSuspectedLocalAccountMatchSQL 推导「疑似就是它」的本地账号，供列表页在断链时
+// 仍能显示本地账号名、并把「快捷改名」开出来。
+//
+// 上游账号一改密钥名，supplierProviderLocalAccountMatchCondition 的 6 个候选（全部由上游「当前名」
+// 派生）就整体失效，本地旧名必然断链 —— 行变成未匹配、本地账号列空白，而「快捷改名」又挂在
+// canManageLocalAccount 下，于是没有任何入口能把本地名对齐回去，形成死锁。
+//
+// 这里只开一条很窄的通道：该供应商名下「没有被任何上游账号匹配到」的本地账号（下称孤儿）里，
+// 名字去掉供应商名前缀后与上游当前名互为前缀的那一个。为了不改错账号，同时要求该供应商
+// 「未匹配的上游账号」也恰好只有 1 个 —— 否则无法确定这个孤儿对应的是哪一行。
+func supplierProviderSuspectedLocalAccountMatchSQL() string {
+	normalize := supplierProviderLocalAccountNormalizeSQL
+	normalizedOrphan := normalize("orphan.name")
+	normalizedProvider := normalize("COALESCE(p.name, '')")
+	normalizedPrefix := normalize("COALESCE(p.account_name_prefix, '')")
+	normalizedUpstream := normalize("a.name")
+	suffix := supplierProviderSuspectedLocalAccountSuffixSQL("orphan.name")
+	return fmt.Sprintf(`LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS orphan_count,
+         MIN(orphan.id) AS orphan_id
+  FROM accounts orphan
+  WHERE local_match.match_count = 0
+    AND orphan.deleted_at IS NULL
+    AND (%s LIKE %s || '%%' OR (%s <> '' AND %s LIKE %s || '%%'))
+    AND NOT EXISTS (
+      SELECT 1 FROM supplier_provider_accounts sibling
+      WHERE sibling.provider_id = a.provider_id
+        AND %s
+    )
+    AND length(%s) >= 2
+    AND (%s LIKE %s || '%%' OR %s LIKE %s || '%%')
+) suspected_match ON TRUE
+LEFT JOIN accounts suspected_account
+  ON suspected_account.id = suspected_match.orphan_id
+ AND suspected_match.orphan_count = 1
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS unmatched_upstream_count
+  FROM supplier_provider_accounts sibling
+  WHERE sibling.provider_id = a.provider_id
+    AND NOT EXISTS (
+      SELECT 1 FROM accounts sibling_match
+      WHERE sibling_match.deleted_at IS NULL
+        AND %s
+    )
+) unmatched_upstream ON TRUE`,
+		normalizedOrphan, normalizedProvider, normalizedPrefix, normalizedOrphan, normalizedPrefix,
+		supplierProviderLocalAccountMatchCondition("orphan.name", "sibling.name"),
+		suffix,
+		normalizedUpstream, suffix, suffix, normalizedUpstream,
+		supplierProviderLocalAccountMatchCondition("sibling_match.name", "sibling.name"))
+}
+
 func (r *supplierProviderDataRepository) GetLocalAccountEffectivePlatform(ctx context.Context, localAccountID int64) (string, error) {
 	if localAccountID <= 0 {
 		return "", fmt.Errorf("local account id must be positive")

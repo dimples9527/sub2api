@@ -29,6 +29,11 @@ type SupplierProviderAccountBindingGroup struct {
 	SubscriptionType string  `json:"subscription_type"`
 }
 
+// SupplierProviderAccount 是供应商上游账号在列表页的一行。
+// SuspectedLocalAccountID / SuspectedLocalAccountName：上游改了密钥名后，本地旧名会对不上
+// （匹配候选全部由上游「当前名」派生），行会变成未匹配、本地账号列空白。这两个字段给出
+// 「疑似就是它」的本地账号，让页面仍能显示本地账号名、并允许快捷改名把它对齐。
+// 只在未匹配、且能唯一确定（该供应商未匹配上游账号与孤儿本地账号都恰好 1 个、名字互为前缀）时有值。
 type SupplierProviderAccount struct {
 	ID                                   int64                                 `json:"id"`
 	ProviderID                           int64                                 `json:"provider_id"`
@@ -46,6 +51,8 @@ type SupplierProviderAccount struct {
 	InactiveAt                           *time.Time                            `json:"inactive_at,omitempty"`
 	LocalAccountMatchStatus              string                                `json:"local_account_match_status"`
 	LocalAccountMatchCount               int                                   `json:"local_account_match_count"`
+	SuspectedLocalAccountID              *int64                                `json:"suspected_local_account_id,omitempty"`
+	SuspectedLocalAccountName            string                                `json:"suspected_local_account_name,omitempty"`
 	LocalAccountID                       *int64                                `json:"local_account_id,omitempty"`
 	LocalAccountName                     string                                `json:"local_account_name,omitempty"`
 	LocalAccountPlatform                 string                                `json:"local_account_platform,omitempty"`

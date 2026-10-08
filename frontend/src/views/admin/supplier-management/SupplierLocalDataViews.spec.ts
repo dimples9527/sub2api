@@ -554,6 +554,7 @@ describe('supplier local data views component usage', () => {
 
     expect(quickFilters.map(button => button.text())).toEqual([
       '全部5',
+      '未匹配本地账号1',
       '已绑定分组1',
       '未绑定分组4',
       '可参与调度1',

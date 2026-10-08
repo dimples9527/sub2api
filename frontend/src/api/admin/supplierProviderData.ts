@@ -107,6 +107,10 @@ export interface SupplierProviderAccount {
   inactive_at?: string
   local_account_match_status: 'unmatched' | 'matched' | 'conflict'
   local_account_match_count: number
+  // 上游改了密钥名后本地旧名对不上，行会变成未匹配。后端在能唯一确定时给出「疑似就是它」的本地账号，
+  // 让页面仍能显示本地账号名、并允许「快捷改名」把它对齐。只在未匹配时有值。
+  suspected_local_account_id?: number
+  suspected_local_account_name?: string
   local_account_id?: number
   local_account_name?: string
   local_account_platform?: string
