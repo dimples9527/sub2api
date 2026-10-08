@@ -106,8 +106,6 @@ const runtimeCellKeys = [
   'local_account_schedulable',
   'local_account_last_test_status',
   'local_account_last_tested_at',
-  'supplier_current_balance',
-  'supplier_today_cost',
   'actions',
 ]
 
@@ -495,10 +493,6 @@ describe('supplier local data views component usage', () => {
     expect(wrapper.get('.runtime-cell-local_account_priority[data-row-index="0"]').text()).toBe('0')
     expect(wrapper.get('.runtime-cell-local_account_schedulable[data-row-index="0"] button').attributes('title'))
       .toBe('当前不参与调度，点击启用')
-    expect(wrapper.get('.runtime-cell-supplier_current_balance[data-row-index="0"]').text())
-      .toContain('0.00')
-    expect(wrapper.get('.runtime-cell-supplier_today_cost[data-row-index="0"]').text())
-      .toContain('0.00')
     expect(wrapper.get('.runtime-cell-rate_multiplier[data-row-index="0"]').text())
       .toBe('× 1.23456')
 
@@ -594,24 +588,21 @@ describe('supplier local data views component usage', () => {
       'local_account_schedulable',
       'local_account_last_test_status',
       'local_account_last_tested_at',
-      'supplier_current_balance',
-      'supplier_today_cost',
     ]) {
       expect(accountsSource).toMatch(
         new RegExp(`\\{ key: '${key}', label: '[^']+', sortable: true`)
       )
     }
     expect(accountsSource).toContain("{ key: 'provider_name', label: '供应商', sortable: true")
-    expect(accountsSource).toContain("{ key: 'supplier_today_cost', label: '今日消费', sortable: true")
     expect(accountsSource).not.toContain("{ key: 'group_name', label: '账号绑定的分组', sortable: true")
     expect(accountsSource).not.toContain("{ key: 'actions', label: '操作', sortable: true")
 
     const table = wrapper.findComponent(DataTableStub)
-    table.vm.$emit('sort', 'supplier_today_cost', 'desc')
+    table.vm.$emit('sort', 'rate_multiplier', 'desc')
     await flushPromises()
 
     expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
-      sort_by: 'supplier_today_cost',
+      sort_by: 'rate_multiplier',
       sort_order: 'desc',
       page: 1,
     }))
@@ -1035,7 +1026,7 @@ describe('supplier local data views component usage', () => {
 
 
 
-  it('uses a compact account workbench with the required 14-column order', () => {
+  it('uses a compact account workbench with the required 12-column order', () => {
     const accountColumnsSource = accountsSource.match(
       /const accountColumns: Column\[\] = \[([\s\S]*?)\n\]/
     )?.[1]
@@ -1055,8 +1046,6 @@ describe('supplier local data views component usage', () => {
       { key: 'local_account_schedulable', label: '是否调度' },
       { key: 'local_account_last_test_status', label: '测试结果' },
       { key: 'local_account_last_tested_at', label: '上次测试时间' },
-      { key: 'supplier_current_balance', label: '余额' },
-      { key: 'supplier_today_cost', label: '今日消费' },
       { key: 'actions', label: '操作' },
     ])
     expect(accountColumnsSource).not.toContain("{ key: 'platform'")
@@ -1219,8 +1208,9 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('isMatchedLocalAccount(account)')
     expect(accountsSource).toContain('handleToggleSchedulable(account)')
     expect(accountsSource).toContain('adminAPI.accounts.setSchedulable')
-    expect(accountsSource).toContain('formatCNY(account.supplier_current_balance)')
-    expect(accountsSource).toContain('formatCNY(account.supplier_today_cost)')
+    // 余额 / 今日消费已从表格列撤掉，只在查看抽屉里保留供应商汇总口径
+    expect(accountsSource).toContain('formatCNY(selected.supplier_current_balance)')
+    expect(accountsSource).toContain('formatCNY(selected.supplier_today_cost)')
     expect(accountsSource).toContain("currency: 'CNY'")
     expect(accountsSource.match(/供应商汇总/g)?.length).toBeGreaterThanOrEqual(2)
     expect(accountsSource).toContain("if (value === null || value === undefined || value === '') return '—'")

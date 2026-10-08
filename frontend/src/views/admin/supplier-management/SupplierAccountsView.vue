@@ -559,20 +559,6 @@
             <span v-else class="sp-account-muted">—</span>
           </template>
 
-          <template #cell-supplier_current_balance="{ row: account }">
-            <div class="sp-money-cell">
-              <strong>{{ formatCNY(account.supplier_current_balance) }}</strong>
-              <small>供应商汇总</small>
-            </div>
-          </template>
-
-          <template #cell-supplier_today_cost="{ row: account }">
-            <div class="sp-money-cell cost">
-              <strong>{{ formatCNY(account.supplier_today_cost) }}</strong>
-              <small>供应商汇总</small>
-            </div>
-          </template>
-
           <template #cell-actions="{ row: account }">
             <div class="sp-account-row-actions" @click.stop>
               <button
@@ -2820,8 +2806,6 @@ const accountColumns: Column[] = [
   { key: 'local_account_schedulable', label: '是否调度', sortable: true, class: 'min-w-[104px]' },
   { key: 'local_account_last_test_status', label: '测试结果', sortable: true, class: 'min-w-[120px]' },
   { key: 'local_account_last_tested_at', label: '上次测试时间', sortable: true, class: 'min-w-[210px]' },
-  { key: 'supplier_current_balance', label: '余额', sortable: true, class: 'min-w-[142px]' },
-  { key: 'supplier_today_cost', label: '今日消费', sortable: true, class: 'min-w-[142px]' },
   { key: 'actions', label: '操作', class: 'min-w-[300px]' },
 ]
 
@@ -5145,8 +5129,7 @@ function formatTime(value?: string): string {
 
 .sp-account-code,
 .sp-account-number,
-.sp-account-rate,
-.sp-money-cell strong {
+.sp-account-rate {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -5170,8 +5153,7 @@ function formatTime(value?: string): string {
   color: var(--sp-amber);
 }
 
-.sp-local-account-cell,
-.sp-money-cell {
+.sp-local-account-cell {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -5842,21 +5824,6 @@ button.sp-guard-failure-hint:hover {
 .sp-account-muted {
   color: var(--sp-muted);
   font-size: 0.8125rem;
-}
-
-.sp-money-cell strong {
-  color: var(--sp-green);
-  font-size: 0.8125rem;
-}
-
-.sp-money-cell.cost strong {
-  color: var(--sp-amber);
-}
-
-.sp-money-cell small {
-  color: var(--sp-muted);
-  font-size: 0.625rem;
-  letter-spacing: 0.04em;
 }
 
 .sp-account-view-button {
