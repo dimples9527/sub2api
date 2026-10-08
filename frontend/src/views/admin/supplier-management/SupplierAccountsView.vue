@@ -561,28 +561,6 @@
 
           <template #cell-actions="{ row: account }">
             <div class="sp-account-row-actions" @click.stop>
-              <button
-                class="sp-button small ghost sp-account-view-button sp-account-action-view"
-                type="button"
-                @click.stop="openDrawer(account)"
-              >查看</button>
-              <button
-                class="sp-button small danger sp-account-action-delete"
-                type="button"
-                :disabled="deletingSupplierAccountRecordID === account.id"
-                title="删除上游账号记录"
-                @click.stop="requestDeleteSupplierAccountRecord(account)"
-              >{{ deletingSupplierAccountRecordID === account.id ? '删除中' : '删除上游账号记录' }}</button>
-              <button
-                v-if="account.local_account_match_status === 'matched' && account.local_account_id"
-                class="sp-button small ghost sp-account-action-health"
-                type="button"
-                :data-test="'supplier-account-health-' + account.local_account_id"
-                @click.stop="router.push({
-                  name: 'SupplierAccountHealth',
-                  query: { account_id: String(account.local_account_id) },
-                })"
-              >查看健康趋势</button>
               <!-- 未匹配到本地账号的行没有可用的 account_id，传上去会静默查不到数据，所以整条不显示。 -->
               <button
                 v-if="canManageLocalAccount(account)"
@@ -600,61 +578,28 @@
                   @click.stop="openLocalAccountTest(account)"
                 >{{ testingAccountID === account.local_account_id ? '加载中…' : '测试账号' }}</button>
                 <button
-                  class="sp-button small sp-account-action-recover"
-                  type="button"
-                  :disabled="recoveringAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-                  title="恢复错误、限流和临时不可调度等可恢复状态"
-                  :data-test="`supplier-account-recover-${account.local_account_id}`"
-                  @click.stop="recoverLocalAccountState(account)"
-                >{{ recoveringAccountID === account.local_account_id ? '恢复中' : '恢复状态' }}</button>
-                <button
-                  class="sp-button small sp-account-action-edit"
-                  type="button"
-                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-                  @click.stop="openLocalAccountEditor(account)"
-                >编辑</button>
-              </template>
-              <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。放在「编辑」旁边，
-                   和「手动改」形成「快捷 / 完整」的对照。目标名算不出来（缺供应商名或密钥名）时整条不显示。
-                   刻意留在 canManageLocalAccount 之外：上游改了密钥名导致断链时行会变成未匹配，
-                   而改名恰恰是唯一能把名字对齐回去的动作，不能跟着其它本地账号按钮一起消失。 -->
-              <button
-                v-if="renameTargetLocalAccountID(account) !== null"
-                class="sp-button small sp-account-action-rename"
-                type="button"
-                :disabled="renamingLocalAccountID === renameTargetLocalAccountID(account) || accountActionLoadingID === renameTargetLocalAccountID(account) || testingAccountID === renameTargetLocalAccountID(account) || duplicatingAccountID === renameTargetLocalAccountID(account)"
-                :title="renameLocalAccountTitle(account)"
-                :data-test="`supplier-account-rename-${renameTargetLocalAccountID(account)}`"
-                @click.stop="renameLocalAccountToConvention(account)"
-              >{{ renamingLocalAccountID === renameTargetLocalAccountID(account) ? '改名中' : '快捷改名' }}</button>
-              <template v-if="canManageLocalAccount(account)">
-                <button
-                  v-if="canDuplicateLocalAccount(account)"
-                  class="sp-button small sp-account-action-copy"
-                  type="button"
-                  :disabled="duplicatingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || deletingAccountID === account.local_account_id"
-                  @click.stop="requestDuplicateLocalAccount(account)"
-                  data-test="supplier-account-duplicate"
-                >{{ duplicatingAccountID === account.local_account_id ? '复制中' : '复制账号' }}</button>
-                <button
-                  class="sp-button small sp-account-action-platform"
-                  type="button"
-                  :disabled="savingBusinessPlatform || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-                  @click.stop="openBusinessPlatformDialog(account)"
-                >配置业务平台</button>
-                <button
                   class="sp-button small sp-account-action-binding"
                   type="button"
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   @click.stop="openAccountBindingEditor(account)"
                 >编辑绑定</button>
-                <button
-                  class="sp-button small danger sp-account-action-delete"
-                  type="button"
-                  :disabled="deletingAccountID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-                  @click.stop="deleteLocalAccount(account)"
-                >{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</button>
               </template>
+              <!--
+                其余动作收进「更多」下拉。操作栏原本最多并排 12 个按钮，每一行都把列宽顶到需要横向滚动，
+                而「查看」「恢复状态」这类低频动作夹在中间，找起来比按分组展开更慢。
+                这里只留调度切换 / 测试 / 绑定三个高频动作，其余按需展开。
+              -->
+              <button
+                class="sp-button small ghost sp-account-more"
+                type="button"
+                title="更多操作"
+                :aria-expanded="accountActionMenu.open && accountActionMenu.account?.id === account.id"
+                :data-test="`supplier-account-more-${account.id}`"
+                @click.stop="openAccountActionMenu(account, $event)"
+              >
+                <Icon name="more" size="sm" />
+                <span>更多</span>
+              </button>
             </div>
           </template>
 
@@ -1782,10 +1727,132 @@
         <button class="sp-button" type="button" @click="goToAccountManagement">去账号管理</button>
       </template>
     </BaseDialog>
+
+    <!--
+      「更多」下拉：操作栏只留调度切换 / 测试 / 绑定三个高频动作，其余在这里按需展开。
+      必须 Teleport 到 body —— 表格容器带 overflow，面板若留在单元格里会被裁掉，
+      所以沿用分组管理页的做法：全屏遮罩 + fixed 定位 + 由点击位置换算坐标。
+    -->
+    <Teleport to="body">
+      <div v-if="accountActionMenu.open">
+        <div class="fixed inset-0 z-[9998]" @click="closeAccountActionMenu"></div>
+        <!--
+          面板 Teleport 之后脱离了行插槽作用域，用一个只装当前行账号的数组做 v-for 别名：
+          面板里的判断与回调因此能继续沿用行内按钮的 `account` 写法，也避开了可空类型。
+        -->
+        <div
+          v-for="account in accountActionMenuTargets"
+          :key="account.id"
+          class="sp-account-action-menu fixed z-[9999]"
+          :style="{ top: `${accountActionMenu.top}px`, left: `${accountActionMenu.left}px` }"
+        >
+          <button
+            type="button"
+            class="sp-account-action-item sp-account-action-view"
+            @click="runAccountActionMenuAction(openDrawer)"
+          >
+            <Icon name="eye" size="sm" />
+            <span>查看</span>
+          </button>
+          <button
+            v-if="account.local_account_match_status === 'matched' && account.local_account_id"
+            type="button"
+            class="sp-account-action-item sp-account-action-health"
+            :data-test="'supplier-account-health-' + account.local_account_id"
+            @click="runAccountActionMenuAction(openHealthTrend)"
+          >
+            <Icon name="trendingUp" size="sm" />
+            <span>查看健康趋势</span>
+          </button>
+          <template v-if="canManageLocalAccount(account)">
+            <button
+              type="button"
+              class="sp-account-action-item sp-account-action-recover"
+              :disabled="recoveringAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+              title="恢复错误、限流和临时不可调度等可恢复状态"
+              :data-test="`supplier-account-recover-${account.local_account_id}`"
+              @click="runAccountActionMenuAction(recoverLocalAccountState)"
+            >
+              <Icon name="refresh" size="sm" />
+              <span>{{ recoveringAccountID === account.local_account_id ? '恢复中' : '恢复状态' }}</span>
+            </button>
+            <button
+              type="button"
+              class="sp-account-action-item sp-account-action-edit"
+              :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+              @click="runAccountActionMenuAction(openLocalAccountEditor)"
+            >
+              <Icon name="edit" size="sm" />
+              <span>编辑</span>
+            </button>
+          </template>
+          <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。紧跟「编辑」，
+               和「手动改」形成「快捷 / 完整」的对照。目标名算不出来（缺供应商名或密钥名）时整条不显示。
+               刻意留在 canManageLocalAccount 之外：上游改了密钥名导致断链时行会变成未匹配，
+               而改名恰恰是唯一能把名字对齐回去的动作，不能跟着其它本地账号按钮一起消失。 -->
+          <button
+            v-if="renameTargetLocalAccountID(account) !== null"
+            type="button"
+            class="sp-account-action-item sp-account-action-rename"
+            :disabled="renamingLocalAccountID === renameTargetLocalAccountID(account) || accountActionLoadingID === renameTargetLocalAccountID(account) || testingAccountID === renameTargetLocalAccountID(account) || duplicatingAccountID === renameTargetLocalAccountID(account)"
+            :title="renameLocalAccountTitle(account)"
+            :data-test="`supplier-account-rename-${renameTargetLocalAccountID(account)}`"
+            @click="runAccountActionMenuAction(renameLocalAccountToConvention)"
+          >
+            <Icon name="swap" size="sm" />
+            <span>{{ renamingLocalAccountID === renameTargetLocalAccountID(account) ? '改名中' : '快捷改名' }}</span>
+          </button>
+          <template v-if="canManageLocalAccount(account)">
+            <button
+              v-if="canDuplicateLocalAccount(account)"
+              type="button"
+              class="sp-account-action-item sp-account-action-copy"
+              :disabled="duplicatingAccountID === account.local_account_id || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || deletingAccountID === account.local_account_id"
+              data-test="supplier-account-duplicate"
+              @click="runAccountActionMenuAction(requestDuplicateLocalAccount)"
+            >
+              <Icon name="copy" size="sm" />
+              <span>{{ duplicatingAccountID === account.local_account_id ? '复制中' : '复制账号' }}</span>
+            </button>
+            <button
+              type="button"
+              class="sp-account-action-item sp-account-action-platform"
+              :disabled="savingBusinessPlatform || accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+              @click="runAccountActionMenuAction(openBusinessPlatformDialog)"
+            >
+              <Icon name="cog" size="sm" />
+              <span>配置业务平台</span>
+            </button>
+          </template>
+          <!-- 删除类动作统一压在面板底部，避免误点。 -->
+          <div class="sp-account-action-divider"></div>
+          <button
+            type="button"
+            class="sp-account-action-item danger sp-account-action-delete"
+            :disabled="deletingSupplierAccountRecordID === account.id"
+            title="删除上游账号记录"
+            @click="runAccountActionMenuAction(requestDeleteSupplierAccountRecord)"
+          >
+            <Icon name="trash" size="sm" />
+            <span>{{ deletingSupplierAccountRecordID === account.id ? '删除中' : '删除上游账号记录' }}</span>
+          </button>
+          <button
+            v-if="canManageLocalAccount(account)"
+            type="button"
+            class="sp-account-action-item danger sp-account-action-delete"
+            :disabled="deletingAccountID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+            @click="runAccountActionMenuAction(deleteLocalAccount)"
+          >
+            <Icon name="trash" size="sm" />
+            <span>{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</span>
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierHealthGuardRunDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
@@ -3394,6 +3461,55 @@ function handlePageSizeChange(value: string | number | boolean | null) {
 
 function openDrawer(account: SupplierProviderAccount) {
   selected.value = account
+}
+
+// 操作栏「更多」下拉。面板 Teleport 到 body，所以位置要在打开时按点击坐标算一次，
+// 并夹在视口内，避免贴近窗口边缘的行把面板顶出屏幕。
+const accountActionMenu = reactive<{
+  open: boolean
+  account: SupplierProviderAccount | null
+  top: number
+  left: number
+}>({ open: false, account: null, top: 0, left: 0 })
+
+// 面板脱离行插槽作用域后需要一个非空的 `account`，用只装当前行账号的数组做模板别名。
+const accountActionMenuTargets = computed(() =>
+  accountActionMenu.account ? [accountActionMenu.account] : []
+)
+
+function openAccountActionMenu(account: SupplierProviderAccount, event: MouseEvent) {
+  const menuWidth = 200
+  const menuHeight = 380
+  const viewportPadding = 8
+  accountActionMenu.open = true
+  accountActionMenu.account = account
+  accountActionMenu.top = Math.max(
+    viewportPadding,
+    Math.min(event.clientY, window.innerHeight - menuHeight - viewportPadding)
+  )
+  accountActionMenu.left = Math.max(
+    viewportPadding,
+    Math.min(event.clientX, window.innerWidth - menuWidth - viewportPadding)
+  )
+}
+
+function closeAccountActionMenu() {
+  accountActionMenu.open = false
+  accountActionMenu.account = null
+}
+
+// 先收起面板再执行动作：面板里的入口会打开各种弹窗，留着面板会压在弹窗上面。
+function runAccountActionMenuAction(action: (account: SupplierProviderAccount) => void) {
+  const account = accountActionMenu.account
+  closeAccountActionMenu()
+  if (account) action(account)
+}
+
+function openHealthTrend(account: SupplierProviderAccount) {
+  void router.push({
+    name: 'SupplierAccountHealth',
+    query: { account_id: String(account.local_account_id) },
+  })
 }
 
 function manageableLocalAccountID(account: SupplierProviderAccount): number | null {
@@ -5826,9 +5942,6 @@ button.sp-guard-failure-hint:hover {
   font-size: 0.8125rem;
 }
 
-.sp-account-view-button {
-  min-width: 3.5rem;
-}
 .sp-account-row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -5840,45 +5953,10 @@ button.sp-guard-failure-hint:hover {
   flex: 0 0 auto;
 }
 
-.sp-account-row-actions .sp-account-action-view {
-  border-color: var(--sp-line);
-  color: var(--sp-muted);
-}
-
 .sp-account-row-actions .sp-account-action-test {
   border-color: color-mix(in srgb, var(--sp-blue) 42%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel));
   color: var(--sp-blue);
-}
-
-.sp-account-row-actions .sp-account-action-recover {
-  border-color: color-mix(in srgb, #0d9488 42%, var(--sp-line));
-  background: color-mix(in srgb, #0d9488 9%, var(--sp-panel));
-  color: #0d9488;
-}
-
-.sp-account-row-actions .sp-account-action-edit {
-  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
-  color: var(--sp-amber);
-}
-
-.sp-account-row-actions .sp-account-action-copy {
-  border-color: color-mix(in srgb, var(--sp-violet) 42%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-violet) 9%, var(--sp-panel));
-  color: var(--sp-violet);
-}
-
-/* 快捷改名用玫红 #db2777。不能用 --sp-cyan：本页里 --sp-cyan 的值是 #3b82f6（蓝），
-   与「测试账号」的 --sp-blue #2563eb 几乎同色，两者又同在 canManageLocalAccount 分支里，
-   会紧挨着出现，等于让新按钮跟一个不相关的按钮撞色。
-   该按钮在动作列里的实际位置是「编辑」与「复制账号」之间，所以取一个跟左右邻居都拉得开的色相；
-   常见色相（蓝/琥珀/紫/橙/绿/红/青/靛）都已被同列其它按钮占掉，玫红是剩下的最优解。
-   硬编码色值与本列 recover(#0d9488)、platform(#4f46e5) 的写法一致。 */
-.sp-account-row-actions .sp-account-action-rename {
-  border-color: color-mix(in srgb, #db2777 42%, var(--sp-line));
-  background: color-mix(in srgb, #db2777 9%, var(--sp-panel));
-  color: #db2777;
 }
 
 /* 与工具栏、分组管理页、任务中心的同名入口同色（橙）。 */
@@ -5888,34 +5966,146 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-orange);
 }
 
-.sp-account-row-actions .sp-account-action-platform {
-  border-color: color-mix(in srgb, #4f46e5 42%, var(--sp-line));
-  background: color-mix(in srgb, #4f46e5 9%, var(--sp-panel));
-  color: #4f46e5;
-}
-
 .sp-account-row-actions .sp-account-action-binding {
   border-color: color-mix(in srgb, var(--sp-green) 42%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
   color: var(--sp-green);
 }
 
-.sp-account-row-actions .sp-account-action-delete {
-  border-color: color-mix(in srgb, var(--sp-red) 42%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-red) 9%, var(--sp-panel));
+.sp-account-row-actions .sp-account-action-test:hover,
+.sp-account-row-actions .sp-account-action-election-log:hover,
+.sp-account-row-actions .sp-account-action-binding:hover,
+.sp-account-row-actions .sp-account-more:hover {
+  background: color-mix(in srgb, currentColor 14%, var(--sp-panel));
+}
+
+.sp-account-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* 展开中给触发器一个持续可见的状态：下拉面板是 fixed 定位、与按钮隔着整个表格，
+   没有这条的话用户点完就分不清当前展开的是哪一行。 */
+.sp-account-more[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--sp-blue) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-blue) 9%, var(--sp-panel));
+  color: var(--sp-blue);
+}
+
+/* 下拉面板 Teleport 到 body，页面根节点上的 --sp-* 在面板里取不到，
+   所以在面板自身上声明一套兜底变量（与 .sp-group-action-menu 保持同一套值）。 */
+:global(.sp-account-action-menu) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-panel-3: #f3f4f6;
+  --sp-line: #e5e7eb;
+  --sp-soft: #f1f5f9;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-dim: #94a3b8;
+  --sp-cyan: #3b82f6;
+  --sp-green: #16a34a;
+  --sp-amber: #d97706;
+  --sp-orange: #ea580c;
+  --sp-red: #dc2626;
+  --sp-blue: #2563eb;
+  --sp-violet: #7c3aed;
+  color: var(--sp-text);
+}
+
+:global(.dark .sp-account-action-menu) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-panel-3: #374151;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-dim: #6b7280;
+  color: var(--sp-text);
+}
+
+.sp-account-action-menu {
+  display: flex;
+  width: 12.5rem;
+  flex-direction: column;
+  padding: 0.375rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  background: var(--sp-panel);
+  box-shadow: 0 0.875rem 2.25rem rgba(15, 23, 42, 0.18);
+}
+
+.sp-account-action-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--sp-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.sp-account-action-item:hover {
+  background: color-mix(in srgb, var(--sp-cyan) 8%, transparent);
+  color: var(--sp-text);
+}
+
+.sp-account-action-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sp-account-action-item.danger {
   color: var(--sp-red);
 }
 
-.sp-account-row-actions .sp-account-action-test:hover,
-.sp-account-row-actions .sp-account-action-recover:hover,
-.sp-account-row-actions .sp-account-action-edit:hover,
-.sp-account-row-actions .sp-account-action-copy:hover,
-.sp-account-row-actions .sp-account-action-rename:hover,
-.sp-account-row-actions .sp-account-action-election-log:hover,
-.sp-account-row-actions .sp-account-action-platform:hover,
-.sp-account-row-actions .sp-account-action-binding:hover,
-.sp-account-row-actions .sp-account-action-delete:hover {
-  background: color-mix(in srgb, currentColor 14%, var(--sp-panel));
+.sp-account-action-item.danger:hover {
+  background: color-mix(in srgb, var(--sp-red) 9%, transparent);
+  color: var(--sp-red);
+}
+
+.sp-account-action-divider {
+  margin: 0.375rem 0;
+  border-top: 1px solid var(--sp-line);
+}
+
+/* 收进下拉的动作沿用原来的语义色：从描边按钮变成文字项后只保留文字颜色。
+   快捷改名用玫红 #db2777 —— 不能用 --sp-cyan：本页里 --sp-cyan 的值是 #3b82f6（蓝），
+   与「测试账号」的 --sp-blue #2563eb 几乎同色，而两者在面板里仍然相邻，
+   等于让新入口跟一个不相关的入口撞色。该入口在面板里的位置是「编辑」与「复制账号」之间，
+   取一个跟上下邻居都拉得开的色相；常见色相（蓝/琥珀/紫/橙/绿/红/青/靛）都已被其它入口占掉，
+   玫红是剩下的最优解。硬编码色值与本列 recover(#0d9488)、platform(#4f46e5) 的写法一致。 */
+.sp-account-action-menu .sp-account-action-recover {
+  color: #0d9488;
+}
+
+.sp-account-action-menu .sp-account-action-edit {
+  color: var(--sp-amber);
+}
+
+.sp-account-action-menu .sp-account-action-rename {
+  color: #db2777;
+}
+
+.sp-account-action-menu .sp-account-action-copy {
+  color: var(--sp-violet);
+}
+
+.sp-account-action-menu .sp-account-action-platform {
+  color: #4f46e5;
+}
+
+.sp-account-action-menu .sp-account-action-health {
+  color: var(--sp-cyan);
 }
 
 :global(.modal-content:has(.sp-guard-failure-dialog)),

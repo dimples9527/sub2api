@@ -836,7 +836,13 @@ describe('supplier local data views component usage', () => {
 
     const actionWrapper = await mountSupplierAccounts()
     expect(actionWrapper.find('.supplier-drawer-stub').exists()).toBe(false)
-    await actionWrapper.get('.sp-account-view-button').trigger('click')
+    // 「查看」已收进操作栏的「更多」下拉，而面板 Teleport 到 body：
+    // wrapper 查不到 Teleport 之后的内容，所以先展开，再从 document.body 里取面板项。
+    await actionWrapper.get('[data-test="supplier-account-more-1"]').trigger('click')
+    const viewAction = document.body.querySelector<HTMLButtonElement>('.sp-account-action-view')
+    expect(viewAction).not.toBeNull()
+    viewAction!.click()
+    await flushPromises()
     expect(actionWrapper.get('.supplier-drawer-stub').text()).toContain('上游账号 A')
     actionWrapper.unmount()
   })
@@ -1136,7 +1142,8 @@ describe('supplier local data views component usage', () => {
 
   it('provides a separate supplier-only business platform configuration action', () => {
     expect(accountsSource).toContain('配置业务平台')
-    expect(accountsSource).toContain('@click.stop="openBusinessPlatformDialog(account)"')
+    // 配置业务平台已收进「更多」下拉，回调统一走先收起面板再执行的分发函数。
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(openBusinessPlatformDialog)"')
     expect(accountsSource).toContain('title="配置业务平台"')
     expect(accountsSource).toContain('sp-business-platform-save')
     expect(accountsSource).toContain('sp-business-platform-cancel')
@@ -1144,7 +1151,7 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('业务平台跟随接入平台')
     expect(accountsSource).toContain('setSupplierLocalAccountPlatformOverride')
     expect(accountsSource).toContain('clearSupplierLocalAccountPlatformOverride')
-    expect(accountsSource).toContain('openLocalAccountEditor(account)')
+    expect(accountsSource).toContain('runAccountActionMenuAction(openLocalAccountEditor)')
     expect(supplierProviderDataSource).toContain('export async function setSupplierLocalAccountPlatformOverride')
     expect(supplierProviderDataSource).toContain('export async function clearSupplierLocalAccountPlatformOverride')
     expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/${localAccountID}/platform-override`')
@@ -1153,7 +1160,7 @@ describe('supplier local data views component usage', () => {
   it('reuses account duplication and assigns semantic colors to supplier account actions', () => {
     expect(supplierProviderDataSource).toContain('local_account_type?: string')
     expect(accountsSource).toContain('function canDuplicateLocalAccount(account: SupplierProviderAccount): boolean')
-    expect(accountsSource).toContain('@click.stop="requestDuplicateLocalAccount(account)"')
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(requestDuplicateLocalAccount)"')
     expect(accountsSource).toContain('function confirmDuplicateLocalAccount()')
     expect(accountsSource).toContain('ConfirmDialog')
     expect(accountsSource).toContain("'复制账号'")
@@ -1169,12 +1176,14 @@ describe('supplier local data views component usage', () => {
 
   it('duplicates a uniquely matched supported local account through the shared account API', async () => {
     const wrapper = await mountSupplierAccounts()
-    const copyButton = wrapper
-      .findAll('.runtime-cell-actions[data-row-index="0"] button')
-      .find(button => button.text().includes('\u590d\u5236\u8d26\u53f7'))
+    // 「复制账号」已收进操作栏的「更多」下拉，而面板 Teleport 到 body，先展开再取。
+    await wrapper.get('[data-test="supplier-account-more-1"]').trigger('click')
+    const copyButton = document.body.querySelector<HTMLButtonElement>(
+      '[data-test="supplier-account-duplicate"]'
+    )
 
-    expect(copyButton).toBeDefined()
-    await copyButton!.trigger('click')
+    expect(copyButton).not.toBeNull()
+    copyButton!.click()
     await flushPromises()
 
     // 点击后先弹出确认，不立即调用复制接口
@@ -1234,8 +1243,9 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('@row-click="openDrawer"')
     expect(accountsSource).toContain('<template #cell-actions="{ row: account }">')
     expect(accountsSource).toContain('class="sp-button small')
-    expect(accountsSource).toContain('@click.stop="openDrawer(account)"')
-    expect(accountsSource).toContain('>查看</button>')
+    // 「查看」已收进操作栏的「更多」下拉，不再是行内的小按钮。
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(openDrawer)"')
+    expect(accountsSource).toContain('<span>查看</span>')
     expect(accountsSource).toContain('function openDrawer(account: SupplierProviderAccount)')
     expect(accountsSource).toContain(':show="Boolean(selected)"')
     expect(accountsSource).toContain('<SupplierDrawer')
@@ -1250,9 +1260,9 @@ describe('supplier local data views component usage', () => {
   it('provides edit, binding, and delete actions for matched local accounts', () => {
     expect(accountsSource).toContain("import { CreateAccountModal, EditAccountModal } from '@/components/account'")
     expect(accountsSource).toContain("import GroupSelector from '@/components/common/GroupSelector.vue'")
-    expect(accountsSource).toContain('@click.stop="openLocalAccountEditor(account)"')
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(openLocalAccountEditor)"')
     expect(accountsSource).toContain('@click.stop="openAccountBindingEditor(account)"')
-    expect(accountsSource).toContain('@click.stop="deleteLocalAccount(account)"')
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(deleteLocalAccount)"')
     expect(accountsSource).toContain('<EditAccountModal')
     expect(accountsSource).toContain('<GroupSelector')
     expect(accountsSource).toContain('adminAPI.accounts.getById(localAccountID)')
