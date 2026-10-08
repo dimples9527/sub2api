@@ -1,13 +1,25 @@
 <template>
   <SupplierModuleLayout>
     <section class="sp-account-toolbar" aria-label="账号筛选与操作">
+      <button
+        class="sp-account-mobile-filter-toggle"
+        type="button"
+        data-test="supplier-account-mobile-filter-toggle"
+        :aria-expanded="mobileFiltersExpanded"
+        aria-controls="supplier-account-filter-fields"
+        @click="mobileFiltersExpanded = !mobileFiltersExpanded"
+      >
+        <span>筛选条件</span>
+        <span class="sp-account-mobile-filter-state">{{ mobileFiltersExpanded ? '收起' : '展开' }}</span>
+        <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': mobileFiltersExpanded }" />
+      </button>
       <!-- 这里原来有一条卡片头（「筛选条件」眉题 + 「筛选账号」标题 + 一段用法说明 + 计数胶囊）。
            它只做说明、不承载任何操作，却把吸顶的筛选卡片整体撑高约 80px —— 1280 宽的窗口下
            卡片本就占到视口近半，首屏被这块说明挤掉。撤掉后筛选控件直接成为卡片的第一层级。
            其中的「N 个账号」计数一并去掉：下方表格标题里已有「当前筛选共 N 个上游账号」，
            同一个数没必要在一个屏幕里出现两次。 -->
       <div class="sp-account-filter-body">
-        <div class="sp-account-filter-fields">
+        <div id="supplier-account-filter-fields" class="sp-account-filter-fields" :class="{ 'is-expanded': mobileFiltersExpanded }">
           <div
             ref="searchFilterControl"
             class="sp-account-filter-control sp-account-search"
@@ -264,15 +276,34 @@
           <span><i class="unmatched"></i>未匹配</span>
           <span><i class="conflict"></i>匹配冲突</span>
         </div>
+        <div class="sp-account-mobile-sort" data-test="supplier-account-mobile-sort">
+          <Select
+            :model-value="sortBy"
+            class="sp-account-mobile-sort-field"
+            :options="mobileSortOptions"
+            :searchable="false"
+            aria-label="排序字段"
+            @update:model-value="handleMobileSortKeyChange"
+          />
+          <button class="sp-button sp-account-mobile-sort-order" type="button"
+            data-test="supplier-account-mobile-sort-order" :disabled="!sortBy"
+            :aria-label="sortOrder === 'asc' ? '当前升序，切换为降序' : '当前降序，切换为升序'"
+            @click="handleAccountSort(sortBy, sortOrder === 'asc' ? 'desc' : 'asc')">
+            {{ sortOrder === 'asc' ? '升序 ↑' : '降序 ↓' }}
+          </button>
+        </div>
       </header>
 
       <div class="sp-account-table-shell">
         <DataTable
+          :key="accountTableSortKey"
           :columns="accountColumns"
           :data="items"
           :loading="loading"
           row-key="id"
           server-side-sort
+          :default-sort-key="sortBy"
+          :default-sort-order="sortOrder"
           clickable-rows
           selectable
           :selected-keys="selectedAccountKeys"
@@ -2521,6 +2552,7 @@ async function submitBindByGroup() {
 
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
+const mobileFiltersExpanded = ref(false)
 const toolbarMoreOpen = ref(false)
 const toolbarMoreGroup = ref<HTMLElement | null>(null)
 
@@ -2541,6 +2573,8 @@ function handleToolbarMoreKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') closeToolbarMore()
 }
 
+// 仅同步页面已有的排序状态：表格切换卡片/表格视图时，表头仍反映手机端最后一次选择。
+const accountTableSortKey = computed(() => `${sortBy.value}:${sortOrder.value}`)
 const accountQuickFilter = ref<AccountQuickFilterKey>('all')
 const alertDetailVisible = ref(false)
 const savingBindingAccountID = ref<number | null>(null)
@@ -2882,6 +2916,19 @@ const accountColumns: Column[] = [
   { key: 'local_account_last_tested_at', label: '上次测试时间', sortable: true, class: 'min-w-[210px]' },
   { key: 'actions', label: '操作', class: 'min-w-[300px]' },
 ]
+
+// 手机排序与桌面表头使用同一份可排序列，避免字段增加后两边口径不同。
+const mobileSortOptions = [
+  { value: '', label: '默认排序' },
+  ...accountColumns.filter(column => column.sortable).map(column => ({ value: column.key, label: column.label })),
+]
+
+function handleMobileSortKeyChange(value: string | number | boolean | null) {
+  const key = String(value ?? '')
+  if (key && !mobileSortOptions.some(option => option.value === key)) return
+  if (key === sortBy.value) return
+  handleAccountSort(key, sortOrder.value)
+}
 
 // 回到顶部悬浮按钮
 // 滚动发生在 window：DataTable 的 .table-wrapper 虽然写了 overflow-y: auto，
@@ -4542,6 +4589,11 @@ function formatTime(value?: string): string {
 }
 </script>
 <style scoped>
+.sp-account-mobile-filter-toggle,
+.sp-account-mobile-sort {
+  display: none;
+}
+
 .sp-alert-chip {
   display: inline-flex;
   align-items: center;
@@ -7683,7 +7735,7 @@ button.sp-guard-failure-hint:hover {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .sp-account-toolbar {
     margin-bottom: 0.75rem;
   }
@@ -7789,7 +7841,84 @@ button.sp-guard-failure-hint:hover {
   }
 }
 
+@media (min-width: 768px) {
+  .sp-account-mobile-sort { display: none; }
+}
+
+@media (max-width: 767px) {
+  .sp-account-mobile-filter-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.45rem;
+    border: 0;
+    border-bottom: 1px solid var(--sp-line);
+    padding: 0.7rem 0.85rem;
+    background: transparent;
+    color: var(--sp-text);
+    font-size: 0.84rem;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sp-account-mobile-filter-toggle:focus-visible,
+  .sp-account-mobile-sort-order:focus-visible {
+    outline: 2px solid var(--sp-cyan);
+    outline-offset: 2px;
+  }
+
+  .sp-account-mobile-filter-state {
+    margin-left: auto;
+    color: var(--sp-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .sp-account-mobile-filter-toggle :deep(svg) { transition: transform 160ms ease; }
+
+  .sp-account-filter-fields:not(.is-expanded) { display: none; }
+
+  .sp-account-filter-body { padding: 0.65rem 0.75rem; }
+  .sp-account-filter-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .sp-account-filter-fields.is-expanded + .sp-account-filter-actions {
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--sp-line);
+  }
+  .sp-account-toolbar-more-group { grid-column: 1 / -1; }
+  .sp-account-toolbar-more-trigger {
+    width: 100%;
+  }
+
+  .sp-account-mobile-sort {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+  .sp-account-mobile-sort-field { min-width: 0; flex: 1; }
+  .sp-account-mobile-sort-order {
+    min-width: 5.6rem;
+    min-height: 2.5rem;
+    border-color: var(--sp-line);
+    background: var(--sp-panel-2);
+    color: var(--sp-text);
+    font-size: 0.8rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .sp-account-mobile-filter-toggle :deep(svg),
+  .sp-account-toolbar-more-trigger :deep(svg) { transition: none; }
   .sp-account-table-shell :deep(tbody tr) {
     transition: none;
   }
