@@ -122,14 +122,6 @@
         </div>
         <div class="sp-account-filter-actions" data-test="supplier-account-filter-actions">
           <button
-            class="sp-button sp-account-toolbar-btn sp-account-toolbar-create"
-            type="button"
-            data-test="supplier-account-create"
-            @click="openCreateAccountDialog"
-          >
-            添加账号
-          </button>
-          <button
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-test"
             type="button"
             data-test="supplier-account-batch-test"
@@ -184,48 +176,6 @@
           >
             调度切换日志
           </button>
-          <button
-            class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-groups"
-            :class="{ 'has-selection': selectedBindableAccounts.length > 0 }"
-            type="button"
-            data-test="supplier-account-batch-bind-groups"
-            :disabled="selectedBindableAccounts.length === 0 || batchBindSubmitting"
-            :title="batchBindGroupsButtonHint"
-            @click="openBatchBindGroupsDialog"
-          >
-            绑定分组
-            <span
-              v-if="selectedBindableAccounts.length > 0"
-              class="sp-account-bind-count"
-              data-test="supplier-account-batch-bind-count"
-            >{{ selectedBindableAccounts.length }}</span>
-          </button>
-          <button
-            class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-by-group"
-            type="button"
-            data-test="supplier-account-bind-by-group"
-            :disabled="batchBindSubmitting"
-            @click="openBindByGroupDialog"
-          >
-            按分组绑定
-          </button>
-          <!-- 与「测试当前筛选」同族：两者都是拿账号凭证去上游打一次真实请求，
-               共用蓝色表达这一点；区别在于这个按钮只作用于勾选到的账号。 -->
-          <button
-            class="sp-button sp-account-toolbar-btn sp-account-toolbar-sync-models"
-            type="button"
-            data-test="supplier-account-sync-upstream-models"
-            :disabled="syncModelsTargets.length === 0 || syncModelsSubmitting"
-            :title="syncModelsButtonHint"
-            @click="openSyncModelsDialog"
-          >
-            同步上游模型
-            <span
-              v-if="syncModelsTargets.length > 0"
-              class="sp-account-bind-count"
-              data-test="supplier-account-sync-upstream-models-count"
-            >{{ syncModelsTargets.length }}</span>
-          </button>
           <!-- 调度账号告警入口。原来它是页面最顶部的一条横幅：占满整行、把下方表格整体推下去，
                而它要表达的只是一个计数 + 一句说明。做成带角标的按钮后信息量不变
                （分类计数改挂 title），且不再挤压首屏。
@@ -246,6 +196,43 @@
               data-test="supplier-account-scheduling-alert-count"
             >{{ schedulingAlertSummary.total }}</span>
           </button>
+          <div ref="toolbarMoreGroup" class="sp-account-toolbar-more-group">
+            <button
+              class="sp-button sp-account-toolbar-btn sp-account-toolbar-more-trigger"
+              type="button"
+              data-test="supplier-account-toolbar-more"
+              aria-controls="supplier-account-toolbar-more-menu"
+              :aria-expanded="toolbarMoreOpen"
+              @click="toolbarMoreOpen = !toolbarMoreOpen"
+            >
+              更多
+              <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': toolbarMoreOpen }" />
+            </button>
+            <div v-show="toolbarMoreOpen" id="supplier-account-toolbar-more-menu" class="sp-account-toolbar-more-menu">
+              <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-create" type="button"
+                data-test="supplier-account-create" @click="runToolbarMoreAction(openCreateAccountDialog)">添加账号</button>
+              <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-sync-models" type="button"
+                data-test="supplier-account-sync-upstream-models"
+                :disabled="syncModelsTargets.length === 0 || syncModelsSubmitting"
+                :title="syncModelsButtonHint"
+                @click="runToolbarMoreAction(openSyncModelsDialog)">
+                同步上游模型
+                <span v-if="syncModelsTargets.length > 0" class="sp-account-bind-count" data-test="supplier-account-sync-upstream-models-count">{{ syncModelsTargets.length }}</span>
+              </button>
+              <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-groups" type="button"
+                :class="{ 'has-selection': selectedBindableAccounts.length > 0 }"
+                data-test="supplier-account-batch-bind-groups"
+                :disabled="selectedBindableAccounts.length === 0 || batchBindSubmitting"
+                :title="batchBindGroupsButtonHint"
+                @click="runToolbarMoreAction(openBatchBindGroupsDialog)">
+                绑定分组
+                <span v-if="selectedBindableAccounts.length > 0" class="sp-account-bind-count" data-test="supplier-account-batch-bind-count">{{ selectedBindableAccounts.length }}</span>
+              </button>
+              <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-by-group" type="button"
+                data-test="supplier-account-bind-by-group" :disabled="batchBindSubmitting"
+                @click="runToolbarMoreAction(openBindByGroupDialog)">按分组绑定</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -2534,6 +2521,26 @@ async function submitBindByGroup() {
 
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
+const toolbarMoreOpen = ref(false)
+const toolbarMoreGroup = ref<HTMLElement | null>(null)
+
+function closeToolbarMore() {
+  toolbarMoreOpen.value = false
+}
+
+function runToolbarMoreAction(action: () => void | Promise<void>) {
+  closeToolbarMore()
+  return action()
+}
+
+function handleToolbarMorePointerDown(event: PointerEvent) {
+  if (toolbarMoreOpen.value && !toolbarMoreGroup.value?.contains(event.target as Node)) closeToolbarMore()
+}
+
+function handleToolbarMoreKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeToolbarMore()
+}
+
 const accountQuickFilter = ref<AccountQuickFilterKey>('all')
 const alertDetailVisible = ref(false)
 const savingBindingAccountID = ref<number | null>(null)
@@ -2908,6 +2915,8 @@ function scrollToTop() {
 onMounted(async () => {
   applyFilterControlLabels()
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
+  document.addEventListener('pointerdown', handleToolbarMorePointerDown)
+  window.addEventListener('keydown', handleToolbarMoreKeydown)
   handleWindowScroll()
   guardFreshnessTimer = window.setInterval(() => {
     guardFreshnessNow.value = Date.now()
@@ -2922,6 +2931,8 @@ onBeforeUnmount(() => {
   window.clearTimeout(bindByGroupSearchTimer)
   window.clearInterval(guardFreshnessTimer)
   window.removeEventListener('scroll', handleWindowScroll)
+  document.removeEventListener('pointerdown', handleToolbarMorePointerDown)
+  window.removeEventListener('keydown', handleToolbarMoreKeydown)
   batchTestPollToken += 1
   clearBatchTestPollTimer()
   syncModelsPollToken += 1
@@ -4633,7 +4644,7 @@ function formatTime(value?: string): string {
   top: 4rem;
   z-index: 20;
   margin-bottom: 1rem;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
   border-radius: 0.875rem;
   background: var(--sp-panel);
@@ -4643,9 +4654,9 @@ function formatTime(value?: string): string {
 .sp-account-filter-body {
   display: flex;
   /*
-    必须允许换行。筛选区是 6 列栅格（各列 minmax 下限合计 922px），操作区是 9 个按钮、
-    实测 max-content 约 1128px，两者加起来放不进 2400px 以下的窗口。
-    不换行时 flex 会把缺口全部压给可收缩的筛选区（操作区是 flex: 0 0 auto，永不收缩），
+    必须允许换行。筛选区是 6 列栅格（各列 minmax 下限合计 922px），
+    操作区也可能很宽，两者在窄窗口下需要各自占一行。
+    不换行时 flex 会把缺口全部压给可收缩的筛选区，
     筛选区被压到 100 多像素，栅格内容随即溢出、直接压在操作按钮上 ——
     新加的「模型白名单」输入框与「测试当前筛选」重叠就是这个成因。
   */
@@ -4654,6 +4665,46 @@ function formatTime(value?: string): string {
   gap: 0.875rem;
   padding: 0.875rem 1rem 1rem;
 }
+
+.sp-account-toolbar-more-group {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.sp-account-toolbar-more-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-color: var(--sp-line);
+  background: var(--sp-panel-2);
+  color: var(--sp-text);
+}
+
+.sp-account-toolbar-more-trigger:focus-visible {
+  outline: 2px solid var(--sp-cyan);
+  outline-offset: 2px;
+}
+
+.sp-account-toolbar-more-trigger :deep(svg) { transition: transform 160ms ease; }
+
+.sp-account-toolbar-more-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 2;
+  display: grid;
+  width: min(15rem, calc(100vw - 2rem));
+  gap: 0.4rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  background: var(--sp-panel);
+  box-shadow: var(--sp-shadow);
+}
+
+.sp-account-toolbar-more-menu .sp-account-toolbar-btn { width: 100%; }
 
 .sp-account-filter-fields {
   display: grid;
@@ -4686,12 +4737,6 @@ function formatTime(value?: string): string {
 
 .sp-account-filter-actions {
   display: flex;
-  /*
-    flex-shrink 必须是 1（默认值）。它自己的 flex-wrap 只在「自身宽度被压住」时才生效：
-    若写成 0 0 auto，它永远拿到 1127px 的 max-content，窄窗口下会直接溢出卡片、
-    被 overflow: hidden 裁掉（1440px 窗口实测会把「绑定分组」之后的按钮整块切掉）。
-    允许收缩后，放不进同一行时它整块落到第二行，再按可用宽度把按钮折成多行。
-  */
   flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;

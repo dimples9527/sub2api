@@ -1298,11 +1298,40 @@ describe('supplier local data views component usage', () => {
   })
 
   it('opens the existing create-account modal from the supplier account toolbar', () => {
-    expect(accountsSource).toContain('@click="openCreateAccountDialog"')
+    expect(accountsSource).toContain('data-test="supplier-account-toolbar-more"')
+    expect(accountsSource).toContain('@click="runToolbarMoreAction(openCreateAccountDialog)"')
     expect(accountsSource).toContain('<CreateAccountModal')
     expect(accountsSource).toContain('@created="handleAccountCreated"')
     expect(accountsSource).toContain('await loadAccountEditorOptions()')
     expect(accountsSource).toContain('添加账号')
+  })
+
+  it('shows the same four actions in the desktop toolbar menu and dismisses it', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const trigger = wrapper.find('[data-test="supplier-account-toolbar-more"]')
+    const menu = wrapper.find('#supplier-account-toolbar-more-menu')
+
+    expect(trigger.exists()).toBe(true)
+    expect((menu.element as HTMLElement).style.display).toBe('none')
+    await trigger.trigger('click')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect((menu.element as HTMLElement).style.display).not.toBe('none')
+    expect(menu.findAll('button').map(button => button.attributes('data-test'))).toEqual([
+      'supplier-account-create',
+      'supplier-account-sync-upstream-models',
+      'supplier-account-batch-bind-groups',
+      'supplier-account-bind-by-group',
+    ])
+    expect(menu.find('[data-test="supplier-account-batch-bind-groups"]').attributes('disabled')).toBeDefined()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    await trigger.trigger('click')
+    document.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await flushPromises()
+    expect((menu.element as HTMLElement).style.display).toBe('none')
+    wrapper.unmount()
   })
 
   it('opens the shared account rate guard log dialog from the account toolbar', () => {
