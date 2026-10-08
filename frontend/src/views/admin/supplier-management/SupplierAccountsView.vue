@@ -4597,6 +4597,17 @@ function formatTime(value?: string): string {
 }
 
 .sp-account-toolbar {
+  /*
+    吸顶：下方表格区滚动时，筛选区固定在页面顶部。
+    · `top: 4rem` 让开 AppHeader（`sticky top-0` + 内层 `h-16`，含 1px 下边框共 4rem+1px）；
+      卡片 z-index 更低，多出的 1px 自然藏在 header 底下。
+    · `z-index: 20` 夹在页面内容之上、AppHeader(30) / 回顶按钮(40) / 弹窗(50) 之下。
+    · 祖先链（.supplier-management-page / main / AppLayout 各层）没有任何 overflow，
+      滚动条在 <html> 上，sticky 才成立 —— 给任一层加 overflow 都会静默失效。
+  */
+  position: sticky;
+  top: 4rem;
+  z-index: 20;
   margin-bottom: 1rem;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--sp-cyan) 18%, var(--sp-line));
@@ -4656,6 +4667,14 @@ function formatTime(value?: string): string {
 
 .sp-account-filter-body {
   display: flex;
+  /*
+    必须允许换行。筛选区是 6 列栅格（各列 minmax 下限合计 922px），操作区是 9 个按钮、
+    实测 max-content 约 1128px，两者加起来放不进 2400px 以下的窗口。
+    不换行时 flex 会把缺口全部压给可收缩的筛选区（操作区是 flex: 0 0 auto，永不收缩），
+    筛选区被压到 100 多像素，栅格内容随即溢出、直接压在操作按钮上 ——
+    新加的「模型白名单」输入框与「测试当前筛选」重叠就是这个成因。
+  */
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.875rem;
   padding: 0.875rem 1rem 1rem;
@@ -4664,9 +4683,22 @@ function formatTime(value?: string): string {
 .sp-account-filter-fields {
   display: grid;
   min-width: 0;
-  flex: 1 1 auto;
+  /*
+    flex-basis 取 min-content（即栅格各列下限之和 922px），不取 auto。
+    只有「筛选区的最小可用宽度」才该决定操作区要不要换行；用 auto（max-content）会让
+    筛选区在窗口还有余量时也被判定放不下，白白多换一行。
+  */
+  flex: 1 1 min-content;
   grid-template-columns: minmax(14rem, 1fr) minmax(8.5rem, 0.32fr) minmax(9rem, 0.34fr) minmax(7.5rem, 0.26fr) minmax(7.5rem, 0.26fr) minmax(8rem, 0.28fr);
   gap: 0.625rem;
+}
+
+/*
+  模型白名单是逗号分隔的自由文本，比下拉需要更宽的可视区：让它占满第二行除「上游状态」
+  以外的列。占位文案「模型，逗号分隔」需要约 112px，落在 8.5rem 的列里会被截断。
+*/
+.sp-account-model-filter {
+  grid-column: 2 / -1;
 }
 
 .sp-account-filter-control {
@@ -4679,14 +4711,24 @@ function formatTime(value?: string): string {
 
 .sp-account-filter-actions {
   display: flex;
-  flex: 0 0 auto;
+  /*
+    flex-shrink 必须是 1（默认值）。它自己的 flex-wrap 只在「自身宽度被压住」时才生效：
+    若写成 0 0 auto，它永远拿到 1127px 的 max-content，窄窗口下会直接溢出卡片、
+    被 overflow: hidden 裁掉（1440px 窗口实测会把「绑定分组」之后的按钮整块切掉）。
+    允许收缩后，放不进同一行时它整块落到第二行，再按可用宽度把按钮折成多行。
+  */
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
   align-self: center;
   justify-content: flex-end;
   gap: 0.75rem;
-  padding-left: 1rem;
-  border-left: 1px solid var(--sp-line);
+  /*
+    换行落到第二行时靠右对齐，与它同一行时贴右边缘的位置保持一致。
+    原来用 padding-left + border-left 画竖分隔线，但换行后那条线会悬在按钮左侧半空中，
+    因此改成只用间距分隔。
+  */
+  margin-left: auto;
 }
 
 .sp-account-toolbar-btn {
@@ -7428,6 +7470,20 @@ button.sp-guard-failure-hint:hover {
     flex-wrap: wrap;
   }
 
+  /*
+    6 列栅格各列下限合计 922px。窗口收窄到 1280px 以下后，扣掉侧边栏（≥1024px 时 256px）
+    与页面内边距，筛选区已经拿不到 922px —— 继续用 6 列会把最后一列挤出卡片、被卡片的
+    overflow: hidden 裁掉。这里退成 3 列；搜索框与模型白名单是文本输入，整行独占。
+  */
+  .sp-account-filter-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sp-account-search,
+  .sp-account-model-filter {
+    grid-column: 1 / -1;
+  }
+
 }
 
 @media (max-width: 900px) {
@@ -7459,6 +7515,11 @@ button.sp-guard-failure-hint:hover {
   }
 
   .sp-account-search {
+    grid-column: 1 / -1;
+  }
+
+  /* 窄屏下栅格退成两列，模型白名单改为整行独占，否则它前面的格子会空出来。 */
+  .sp-account-model-filter {
     grid-column: 1 / -1;
   }
 
