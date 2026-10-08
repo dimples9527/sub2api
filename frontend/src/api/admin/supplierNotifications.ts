@@ -2,7 +2,13 @@ import { apiClient } from '../client'
 import type { BasePaginationResponse } from '@/types'
 
 export type SupplierNotificationChannelType = 'feishu' | 'email'
-export type SupplierNotificationEventType = 'balance_low' | 'balance_recovered' | 'cost_overrun' | 'cost_recovered' | 'group_changed'
+export type SupplierNotificationEventType =
+  | 'balance_low'
+  | 'balance_recovered'
+  | 'cost_overrun'
+  | 'cost_recovered'
+  | 'group_changed'
+  | 'group_account_abnormal'
 export type SupplierNotificationDeliveryStatus = 'pending' | 'sending' | 'delivered' | 'failed'
 
 export interface SupplierNotificationFeishuConfigInput {
@@ -59,6 +65,8 @@ export interface SupplierNotificationSubscription {
   id: number
   channel_id: number
   provider_id?: number | null
+  // group_id 只对分组维度的事件（group_account_abnormal）有意义，此时 provider_id 为空。
+  group_id?: number | null
   event_type: SupplierNotificationEventType | string
   enabled: boolean
   created_at: string
@@ -68,6 +76,7 @@ export interface SupplierNotificationSubscription {
 export interface SupplierNotificationSubscriptionInput {
   channel_id: number
   provider_id?: number | null
+  group_id?: number | null
   event_type: SupplierNotificationEventType
   enabled: boolean
 }
@@ -78,8 +87,11 @@ export interface SupplierNotificationDelivery {
   channel_name: string
   event_id?: number | null
   group_change_event_id?: number | null
+  // 分组账号异常事件没有供应商：此时 provider_id 为 0，group_id / group_name 才有值。
   provider_id: number
   provider_name: string
+  group_id?: number | null
+  group_name?: string
   event_type: SupplierNotificationEventType | string
   status: SupplierNotificationDeliveryStatus | string
   attempt_count: number
@@ -93,6 +105,7 @@ export interface SupplierNotificationDelivery {
 export interface SupplierNotificationDeliveryListParams {
   channel_id?: number
   provider_id?: number
+  group_id?: number
   event_type?: SupplierNotificationEventType | ''
   status?: SupplierNotificationDeliveryStatus | ''
   page?: number

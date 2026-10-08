@@ -27,6 +27,16 @@ const (
 	SupplierNotificationDeliveryFailed    = "failed"
 )
 
+// SupplierGroupAccountAbnormalEventType 是「分组账号异常」通知事件。
+//
+// 触发口径：某个分组**当前开启调度**（accounts.schedulable）的账号里，存在延迟窗口内
+// 成功样本数不足（LatencySuccessCount < LatencyMinSamples）的账号 —— 即择优任务无法确认它是否健康。
+// 只推异常、不推恢复：恢复属于「少收一条」而不是「错过告警」，不需要配对事件。
+//
+// 它没有供应商（一个分组的成员可能来自多个供应商），所以投递记录的 provider_id 为 NULL，
+// 订阅与冷却都走 group_id 维度，见迁移 246。
+const SupplierGroupAccountAbnormalEventType = "group_account_abnormal"
+
 type SupplierNotificationFeishuConfig struct {
 	WebhookURL string `json:"webhook_url"`
 	Secret     string `json:"secret"`
@@ -89,38 +99,45 @@ type SupplierNotificationChannelInput struct {
 }
 
 type SupplierNotificationSubscription struct {
-	ID         int64     `json:"id"`
-	ChannelID  int64     `json:"channel_id"`
-	ProviderID *int64    `json:"provider_id,omitempty"`
-	EventType  string    `json:"event_type"`
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         int64  `json:"id"`
+	ChannelID  int64  `json:"channel_id"`
+	ProviderID *int64 `json:"provider_id,omitempty"`
+	// GroupID 是「分组账号异常」这类分组维度订阅的归属分组；与 ProviderID 互斥，
+	// 两者都为 nil 表示「通配」——按供应商的通知适用所有供应商，按分组的通知适用所有分组。
+	GroupID   *int64    `json:"group_id,omitempty"`
+	EventType string    `json:"event_type"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type SupplierNotificationSubscriptionInput struct {
 	ChannelID  int64  `json:"channel_id"`
 	ProviderID *int64 `json:"provider_id,omitempty"`
+	GroupID    *int64 `json:"group_id,omitempty"`
 	EventType  string `json:"event_type"`
 	Enabled    bool   `json:"enabled"`
 }
 
 type SupplierNotificationDelivery struct {
-	ID                 int64      `json:"id"`
-	ChannelID          int64      `json:"channel_id"`
-	ChannelName        string     `json:"channel_name"`
-	EventID            *int64     `json:"event_id,omitempty"`
-	GroupChangeEventID *int64     `json:"group_change_event_id,omitempty"`
-	ProviderID         int64      `json:"provider_id"`
-	ProviderName       string     `json:"provider_name"`
-	EventType          string     `json:"event_type"`
-	Status             string     `json:"status"`
-	AttemptCount       int        `json:"attempt_count"`
-	NextAttemptAt      time.Time  `json:"next_attempt_at"`
-	LastError          string     `json:"last_error,omitempty"`
-	SentAt             *time.Time `json:"sent_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                 int64  `json:"id"`
+	ChannelID          int64  `json:"channel_id"`
+	ChannelName        string `json:"channel_name"`
+	EventID            *int64 `json:"event_id,omitempty"`
+	GroupChangeEventID *int64 `json:"group_change_event_id,omitempty"`
+	ProviderID         int64  `json:"provider_id"`
+	ProviderName       string `json:"provider_name"`
+	// GroupID / GroupName 只对分组维度的事件（如分组账号异常）有值。
+	GroupID       *int64     `json:"group_id,omitempty"`
+	GroupName     string     `json:"group_name,omitempty"`
+	EventType     string     `json:"event_type"`
+	Status        string     `json:"status"`
+	AttemptCount  int        `json:"attempt_count"`
+	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	LastError     string     `json:"last_error,omitempty"`
+	SentAt        *time.Time `json:"sent_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // SupplierNotificationEventPayload 是余额预警通知的统一消息载荷。
@@ -138,7 +155,32 @@ type SupplierNotificationEventPayload struct {
 	ObservedAt         time.Time                           `json:"observed_at"`
 	ResolvedAt         *time.Time                          `json:"resolved_at,omitempty"`
 	GroupChanges       *SupplierProviderGroupChangeSummary `json:"group_changes,omitempty"`
-	Test               bool                                `json:"test,omitempty"`
+	// 以下三项只服务于「分组账号异常」事件：它没有供应商，靠 GroupID/GroupName 定位，
+	// AbnormalAccounts 列出本轮样本不足的在任账号，让消息本身就能回答「是哪几个账号」。
+	GroupID          int64                                 `json:"group_id,omitempty"`
+	GroupName        string                                `json:"group_name,omitempty"`
+	AbnormalAccounts []SupplierGroupAccountAbnormalAccount `json:"abnormal_accounts,omitempty"`
+	Test             bool                                  `json:"test,omitempty"`
+}
+
+// SupplierGroupAccountAbnormalAccount 是「分组账号异常」通知里的单个账号摘要。
+type SupplierGroupAccountAbnormalAccount struct {
+	AccountID   int64  `json:"account_id"`
+	AccountName string `json:"account_name"`
+	// SuccessCount 是延迟窗口内的成功样本数，RequiredCount 是配置要求的最少样本数。
+	// 两个数一起给，运维才能判断是「完全没数据」还是「差一点」。
+	SuccessCount  int `json:"success_count"`
+	RequiredCount int `json:"required_count"`
+}
+
+// SupplierGroupAccountAbnormalEvent 是一次「分组账号异常」事件。
+//
+// 只描述「哪个分组、哪些在任账号样本不足」，不携带恢复语义 —— 本事件刻意不配对 recovered。
+type SupplierGroupAccountAbnormalEvent struct {
+	GroupID    int64
+	GroupName  string
+	Accounts   []SupplierGroupAccountAbnormalAccount
+	ObservedAt time.Time
 }
 
 // SupplierGroupChangeEvent 表示一次供应商分组同步产生的汇总变化事件。
@@ -170,10 +212,12 @@ type SupplierNotificationDeliveryAttempt struct {
 type SupplierNotificationDeliveryListParams struct {
 	ChannelID  int64
 	ProviderID int64
-	EventType  string
-	Status     string
-	Page       int
-	PageSize   int
+	// GroupID 用于按分组维度筛选投递记录（分组账号异常事件没有供应商）。
+	GroupID   int64
+	EventType string
+	Status    string
+	Page      int
+	PageSize  int
 }
 
 type SupplierNotificationDeliveryListResult struct {
@@ -191,15 +235,19 @@ type SupplierNotificationDeliveryRecord struct {
 	GroupChangeEventID *int64
 	ProviderID         int64
 	ProviderName       string
-	EventType          string
-	Status             string
-	PayloadJSON        []byte
-	AttemptCount       int
-	NextAttemptAt      time.Time
-	LastError          string
-	SentAt             *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// GroupID 非空表示这是分组维度的事件（分组账号异常），此时 ProviderID 为 0、落库为 NULL。
+	// GroupName 与 ProviderName 一样只是查询期投影出来的展示名，不参与发送逻辑。
+	GroupID       *int64
+	GroupName     string
+	EventType     string
+	Status        string
+	PayloadJSON   []byte
+	AttemptCount  int
+	NextAttemptAt time.Time
+	LastError     string
+	SentAt        *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type SupplierNotificationRepository interface {
@@ -212,7 +260,11 @@ type SupplierNotificationRepository interface {
 	UpsertSubscription(ctx context.Context, subscription *SupplierNotificationSubscription) error
 	DeleteSubscription(ctx context.Context, id int64) error
 	ListMatchingSubscriptions(ctx context.Context, channelID int64, providerID int64, eventType string) ([]SupplierNotificationSubscription, error)
+	// ListMatchingGroupSubscriptions 按分组维度匹配订阅：命中「指定分组」或「通配分组」（group_id IS NULL）。
+	ListMatchingGroupSubscriptions(ctx context.Context, channelID int64, groupID int64, eventType string) ([]SupplierNotificationSubscription, error)
 	ClaimCooldown(ctx context.Context, channelID, providerID int64, eventType string, now, expiresAt time.Time) (bool, error)
+	// ClaimGroupCooldown 是分组维度的冷却占用，独立于按供应商的 ClaimCooldown。
+	ClaimGroupCooldown(ctx context.Context, channelID, groupID int64, eventType string, now, expiresAt time.Time) (bool, error)
 	CreateGroupChangeEvent(ctx context.Context, event *SupplierGroupChangeEvent) error
 	CreateDelivery(ctx context.Context, delivery *SupplierNotificationDeliveryRecord) error
 	GetDelivery(ctx context.Context, id int64) (*SupplierNotificationDeliveryRecord, error)
@@ -238,4 +290,10 @@ type SupplierNotificationSender interface {
 // SupplierGroupChangeNotifier 负责发送供应商分组变化通知。
 type SupplierGroupChangeNotifier interface {
 	DispatchGroupChanged(ctx context.Context, event SupplierGroupChangeEvent) error
+}
+
+// SupplierGroupAccountAbnormalNotifier 负责发送「分组账号异常」通知。
+// 由分组择优任务在每轮检测后调用，走与其它供应商通知相同的渠道、投递与重试链路。
+type SupplierGroupAccountAbnormalNotifier interface {
+	DispatchGroupAccountAbnormal(ctx context.Context, event SupplierGroupAccountAbnormalEvent) error
 }

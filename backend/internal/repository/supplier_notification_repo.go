@@ -97,7 +97,7 @@ func (r *supplierNotificationRepository) DeleteChannel(ctx context.Context, id i
 }
 
 const supplierNotificationSubscriptionSelect = `
-SELECT id, channel_id, provider_id, event_type, enabled, created_at, updated_at
+SELECT id, channel_id, provider_id, group_id, event_type, enabled, created_at, updated_at
 FROM supplier_notification_subscriptions`
 
 func (r *supplierNotificationRepository) ListSubscriptions(ctx context.Context, channelID int64) ([]service.SupplierNotificationSubscription, error) {
@@ -143,10 +143,14 @@ func (r *supplierNotificationRepository) UpsertSubscription(ctx context.Context,
 		return service.ErrSupplierNotificationInvalid
 	}
 	var existingID int64
+	// 冲突键必须与迁移 246 的唯一索引逐字一致（channel_id, event_type, COALESCE(provider_id,0), COALESCE(group_id,0)）：
+	// 少了 group_id，同渠道同事件下「按供应商」与「按分组」两条订阅会互相顶掉。
 	err := r.db.QueryRowContext(ctx, `
 SELECT id FROM supplier_notification_subscriptions
-WHERE channel_id = $1 AND event_type = $2 AND provider_id IS NOT DISTINCT FROM $3`,
-		subscription.ChannelID, subscription.EventType, subscription.ProviderID).Scan(&existingID)
+WHERE channel_id = $1 AND event_type = $2
+  AND provider_id IS NOT DISTINCT FROM $3
+  AND group_id IS NOT DISTINCT FROM $4`,
+		subscription.ChannelID, subscription.EventType, subscription.ProviderID, subscription.GroupID).Scan(&existingID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("查询供应商通知订阅冲突失败: %w", err)
 	}
@@ -154,8 +158,9 @@ WHERE channel_id = $1 AND event_type = $2 AND provider_id IS NOT DISTINCT FROM $
 		subscription.ID = existingID
 		result, updateErr := r.db.ExecContext(ctx, `
 UPDATE supplier_notification_subscriptions
-SET provider_id = $2, event_type = $3, enabled = $4, updated_at = NOW()
-WHERE id = $1`, subscription.ID, subscription.ProviderID, subscription.EventType, subscription.Enabled)
+SET provider_id = $2, group_id = $3, event_type = $4, enabled = $5, updated_at = NOW()
+WHERE id = $1`, subscription.ID, subscription.ProviderID, subscription.GroupID,
+			subscription.EventType, subscription.Enabled)
 		if updateErr != nil {
 			return fmt.Errorf("更新供应商通知订阅失败: %w", updateErr)
 		}
@@ -165,10 +170,10 @@ WHERE id = $1`, subscription.ID, subscription.ProviderID, subscription.EventType
 		return nil
 	}
 	err = r.db.QueryRowContext(ctx, `
-INSERT INTO supplier_notification_subscriptions (channel_id, provider_id, event_type, enabled)
-VALUES ($1, $2, $3, $4)
+INSERT INTO supplier_notification_subscriptions (channel_id, provider_id, group_id, event_type, enabled)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at, updated_at`, subscription.ChannelID, subscription.ProviderID,
-		subscription.EventType, subscription.Enabled).
+		subscription.GroupID, subscription.EventType, subscription.Enabled).
 		Scan(&subscription.ID, &subscription.CreatedAt, &subscription.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("创建供应商通知订阅失败: %w", err)
@@ -210,6 +215,31 @@ ORDER BY provider_id NULLS FIRST, id ASC`, channelID, eventType, providerID)
 	return items, nil
 }
 
+// ListMatchingGroupSubscriptions 按分组维度匹配订阅：命中「指定分组」或「通配分组」（group_id IS NULL）。
+// 与 ListMatchingSubscriptions 同构，区别只在维度 —— 分组异常事件没有供应商。
+func (r *supplierNotificationRepository) ListMatchingGroupSubscriptions(ctx context.Context, channelID int64, groupID int64, eventType string) ([]service.SupplierNotificationSubscription, error) {
+	rows, err := r.db.QueryContext(ctx, supplierNotificationSubscriptionSelect+`
+WHERE channel_id = $1 AND enabled = TRUE AND event_type = $2
+  AND (group_id = $3 OR group_id IS NULL)
+ORDER BY group_id NULLS FIRST, id ASC`, channelID, eventType, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("查询匹配分组通知订阅失败: %w", err)
+	}
+	defer rows.Close()
+	items := make([]service.SupplierNotificationSubscription, 0)
+	for rows.Next() {
+		item, scanErr := scanSupplierNotificationSubscription(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历匹配分组通知订阅失败: %w", err)
+	}
+	return items, nil
+}
+
 func (r *supplierNotificationRepository) ClaimCooldown(ctx context.Context, channelID, providerID int64, eventType string, now, expiresAt time.Time) (bool, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx, `
@@ -226,6 +256,28 @@ RETURNING id`, channelID, providerID, eventType, now, expiresAt).Scan(&id)
 	}
 	if err != nil {
 		return false, fmt.Errorf("占用供应商通知冷却失败: %w", err)
+	}
+	return id > 0, nil
+}
+
+// ClaimGroupCooldown 是分组维度的冷却占用，落在独立表 supplier_group_notification_cooldowns。
+// 刻意不复用 ClaimCooldown：那张表的 provider_id 非空，分组事件没有供应商。
+func (r *supplierNotificationRepository) ClaimGroupCooldown(ctx context.Context, channelID, groupID int64, eventType string, now, expiresAt time.Time) (bool, error) {
+	var id int64
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO supplier_group_notification_cooldowns (channel_id, group_id, event_type, expires_at, claimed_at, updated_at)
+VALUES ($1, $2, $3, $5, $4, $4)
+ON CONFLICT (channel_id, group_id, event_type) DO UPDATE SET
+  expires_at = EXCLUDED.expires_at,
+  claimed_at = EXCLUDED.claimed_at,
+  updated_at = EXCLUDED.updated_at
+WHERE supplier_group_notification_cooldowns.expires_at <= $4
+RETURNING id`, channelID, groupID, eventType, now, expiresAt).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("占用分组通知冷却失败: %w", err)
 	}
 	return id > 0, nil
 }
@@ -298,12 +350,18 @@ func (r *supplierNotificationRepository) CreateDelivery(ctx context.Context, del
 	if delivery.Status == "" {
 		delivery.Status = service.SupplierNotificationDeliveryPending
 	}
+	// 分组维度的事件（如分组账号异常）没有供应商：ProviderID 为 0 时必须写 NULL，
+	// 否则会撞上 provider_id 的外键。迁移 246 已把该列改为可空。
+	var providerID any
+	if delivery.ProviderID > 0 {
+		providerID = delivery.ProviderID
+	}
 	err := r.db.QueryRowContext(ctx, `
 INSERT INTO supplier_notification_deliveries (
-  channel_id, event_id, cost_alert_event_id, group_change_event_id, provider_id, event_type, status, payload_json, attempt_count,
+  channel_id, event_id, cost_alert_event_id, group_change_event_id, provider_id, group_id, event_type, status, payload_json, attempt_count,
   next_attempt_at, last_error, sent_at
-) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
-RETURNING id, created_at, updated_at`, delivery.ChannelID, delivery.EventID, delivery.GroupChangeEventID, delivery.ProviderID,
+) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
+RETURNING id, created_at, updated_at`, delivery.ChannelID, delivery.EventID, delivery.GroupChangeEventID, providerID, delivery.GroupID,
 		delivery.EventType, delivery.Status, string(delivery.PayloadJSON), delivery.AttemptCount,
 		delivery.NextAttemptAt, delivery.LastError, delivery.SentAt).
 		Scan(&delivery.ID, &delivery.CreatedAt, &delivery.UpdatedAt)
@@ -313,13 +371,17 @@ RETURNING id, created_at, updated_at`, delivery.ChannelID, delivery.EventID, del
 	return nil
 }
 
+// supplierNotificationDeliverySelect 同时服务投递记录（发送用）与投递列表（展示用）。
+// 供应商与分组都必须用 LEFT JOIN：分组账号异常事件没有供应商，内连接会把这类记录整条丢掉。
+// 两个名字列必须 COALESCE：LEFT JOIN 未命中时是 NULL，而 Go 侧是 string，直接 Scan 会报错。
 const supplierNotificationDeliverySelect = `
-SELECT d.id, d.channel_id, c.name, d.event_id, d.group_change_event_id, d.provider_id, p.name, d.event_type,
+SELECT d.id, d.channel_id, c.name, d.event_id, d.group_change_event_id, d.provider_id, COALESCE(p.name, ''), d.group_id, COALESCE(g.name, ''), d.event_type,
        d.status, d.payload_json, d.attempt_count, d.next_attempt_at, d.last_error,
        d.sent_at, d.created_at, d.updated_at
 FROM supplier_notification_deliveries d
 JOIN supplier_notification_channels c ON c.id = d.channel_id
-JOIN supplier_providers p ON p.id = d.provider_id`
+LEFT JOIN supplier_providers p ON p.id = d.provider_id
+LEFT JOIN groups g ON g.id = d.group_id`
 
 func (r *supplierNotificationRepository) GetDelivery(ctx context.Context, id int64) (*service.SupplierNotificationDeliveryRecord, error) {
 	item, err := scanSupplierNotificationDelivery(r.db.QueryRowContext(ctx, supplierNotificationDeliverySelect+" WHERE d.id = $1", id))
@@ -447,6 +509,10 @@ func (r *supplierNotificationRepository) ListDeliveries(ctx context.Context, par
 		args = append(args, params.ProviderID)
 		where = append(where, fmt.Sprintf("d.provider_id = $%d", len(args)))
 	}
+	if params.GroupID > 0 {
+		args = append(args, params.GroupID)
+		where = append(where, fmt.Sprintf("d.group_id = $%d", len(args)))
+	}
 	if strings.TrimSpace(params.EventType) != "" {
 		args = append(args, params.EventType)
 		where = append(where, fmt.Sprintf("d.event_type = $%d", len(args)))
@@ -517,25 +583,34 @@ func scanSupplierNotificationChannel(scanner supplierNotificationScanner) (servi
 
 func scanSupplierNotificationSubscription(scanner supplierNotificationScanner) (service.SupplierNotificationSubscription, error) {
 	var item service.SupplierNotificationSubscription
-	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ProviderID, &item.EventType, &item.Enabled,
+	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ProviderID, &item.GroupID, &item.EventType, &item.Enabled,
 		&item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
 
 func scanSupplierNotificationDelivery(scanner supplierNotificationScanner) (service.SupplierNotificationDeliveryRecord, error) {
 	var item service.SupplierNotificationDeliveryRecord
-	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.GroupChangeEventID, &item.ProviderID,
-		&item.ProviderName, &item.EventType, &item.Status, &item.PayloadJSON, &item.AttemptCount,
+	// provider_id 自迁移 246 起可空（分组事件无供应商）；直接 Scan 到 int64 会在 NULL 上报错。
+	var providerID sql.NullInt64
+	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.GroupChangeEventID, &providerID,
+		&item.ProviderName, &item.GroupID, &item.GroupName, &item.EventType, &item.Status, &item.PayloadJSON, &item.AttemptCount,
 		&item.NextAttemptAt, &item.LastError, &item.SentAt, &item.CreatedAt, &item.UpdatedAt)
+	if providerID.Valid {
+		item.ProviderID = providerID.Int64
+	}
 	return item, err
 }
 
 func scanSupplierNotificationDeliveryView(scanner supplierNotificationScanner) (service.SupplierNotificationDelivery, error) {
 	var item service.SupplierNotificationDelivery
 	var payloadJSON []byte
-	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.GroupChangeEventID, &item.ProviderID,
-		&item.ProviderName, &item.EventType, &item.Status, &payloadJSON, &item.AttemptCount, &item.NextAttemptAt,
+	var providerID sql.NullInt64
+	err := scanner.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.EventID, &item.GroupChangeEventID, &providerID,
+		&item.ProviderName, &item.GroupID, &item.GroupName, &item.EventType, &item.Status, &payloadJSON, &item.AttemptCount, &item.NextAttemptAt,
 		&item.LastError, &item.SentAt, &item.CreatedAt, &item.UpdatedAt)
+	if providerID.Valid {
+		item.ProviderID = providerID.Int64
+	}
 	return item, err
 }
 

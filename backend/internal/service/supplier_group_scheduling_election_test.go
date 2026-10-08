@@ -2219,3 +2219,165 @@ func TestGroupElectionMemberSupportsAllModelsHelper(t *testing.T) {
 	require.True(t, supplierGroupElectionMemberSupportsAllModels(unmapped, []string{"aaa"}),
 		"空 mapping = 支持所有模型，与运行时口径一致")
 }
+
+type fakeGroupAccountAbnormalNotifier struct {
+	events []SupplierGroupAccountAbnormalEvent
+	err    error
+}
+
+func (f *fakeGroupAccountAbnormalNotifier) DispatchGroupAccountAbnormal(_ context.Context, event SupplierGroupAccountAbnormalEvent) error {
+	f.events = append(f.events, event)
+	return f.err
+}
+
+// newGroupElectionAbnormalMembers 造一组固定成员：10 在任且样本不足、11 在任且样本充足。
+// TopN=2 让两个成功账号都留在任，从而把「样本是否足够」单独隔离出来比较。
+func newGroupElectionAbnormalMembers() []SupplierGroupSchedulingElectionMember {
+	return []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 10, AccountName: "账号10", Schedulable: false, LastTestStatus: "success", HealthyCount: 7, LatencySuccessCount: 0},
+		{GroupID: 1, GroupName: "G1", AccountID: 11, AccountName: "账号11", Schedulable: false, LastTestStatus: "success", HealthyCount: 6, LatencySuccessCount: 3},
+	}
+}
+
+func TestGroupElectionNotifiesOnlyInServiceAccountsWithoutEnoughSamples(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
+	notifier := &fakeGroupAccountAbnormalNotifier{}
+	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+	svc.SetGroupAccountAbnormalNotifier(notifier)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:              2,
+		LatencyMinSamples: 3,
+		AlertEnabled:      true,
+	}, time.Now())
+	require.NoError(t, err)
+
+	// 11 的成功样本正好等于要求值，不算异常；只有 10 该被推。
+	require.Len(t, notifier.events, 1)
+	event := notifier.events[0]
+	require.Equal(t, int64(1), event.GroupID)
+	require.Equal(t, "G1", event.GroupName)
+	require.Len(t, event.Accounts, 1)
+	require.Equal(t, int64(10), event.Accounts[0].AccountID)
+	require.Equal(t, 0, event.Accounts[0].SuccessCount)
+	require.Equal(t, 3, event.Accounts[0].RequiredCount)
+}
+
+func TestGroupElectionSkipsAbnormalDetectionWhenAlertDisabled(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
+	notifier := &fakeGroupAccountAbnormalNotifier{}
+	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+	svc.SetGroupAccountAbnormalNotifier(notifier)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:              2,
+		LatencyMinSamples: 3,
+	}, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, notifier.events)
+}
+
+func TestGroupElectionAlertAccountOverridesWinOverGlobalSwitch(t *testing.T) {
+	run := func(overrides map[int64]bool) []SupplierGroupAccountAbnormalEvent {
+		repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
+		notifier := &fakeGroupAccountAbnormalNotifier{}
+		svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+		svc.SetGroupAccountAbnormalNotifier(notifier)
+		_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+			TopN:                  2,
+			LatencyMinSamples:     3,
+			AlertEnabled:          true,
+			AlertAccountOverrides: overrides,
+		}, time.Now())
+		require.NoError(t, err)
+		return notifier.events
+	}
+
+	// 静音：总开关开着也不推这个账号。
+	require.Empty(t, run(map[int64]bool{10: false}))
+
+	// 强制推送：总开关关着也要推这个账号（分组事件仍会被派发，只是名单里只剩它）。
+	repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
+	notifier := &fakeGroupAccountAbnormalNotifier{}
+	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+	svc.SetGroupAccountAbnormalNotifier(notifier)
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  2,
+		LatencyMinSamples:     3,
+		AlertEnabled:          false,
+		AlertAccountOverrides: map[int64]bool{10: true},
+	}, time.Now())
+	require.NoError(t, err)
+	require.Len(t, notifier.events, 1)
+	require.Len(t, notifier.events[0].Accounts, 1)
+	require.Equal(t, int64(10), notifier.events[0].Accounts[0].AccountID)
+}
+
+func TestGroupElectionSkipsAbnormalDetectionForDisabledGroups(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
+	notifier := &fakeGroupAccountAbnormalNotifier{}
+	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+	svc.SetGroupAccountAbnormalNotifier(notifier)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:              2,
+		LatencyMinSamples: 3,
+		AlertEnabled:      true,
+		DisabledGroupIDs:  []int64{1},
+	}, time.Now())
+	require.NoError(t, err)
+	require.Empty(t, notifier.events, "被关闭择优的分组整组不参与，包括异常推送")
+}
+
+func TestGroupElectionSkipsAbnormalDetectionForAccountsClosedByFailureGate(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 10, Schedulable: true, LastTestStatus: "success", HealthyCount: 7, LatencySuccessCount: 3},
+		// 连续失败已达阈值：本轮会被关掉，因此不算「在任」。
+		{GroupID: 1, GroupName: "G1", AccountID: 11, Schedulable: true, LastTestStatus: "failed", HealthyCount: 0, LatencySuccessCount: 0, FailedCount: 5},
+	}}
+	notifier := &fakeGroupAccountAbnormalNotifier{}
+	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+	svc.SetGroupAccountAbnormalNotifier(notifier)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:              1,
+		LatencyMinSamples: 3,
+		AlertEnabled:      true,
+	}, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, 1, result.DisabledCount)
+	require.Empty(t, notifier.events, "被失败闸门关掉的账号不在任，不该报异常")
+}
+
+func TestGroupElectionAbnormalDetectionToleratesMissingNotifier(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
+	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
+
+	// 未注入通知器（单测或未配置通知模块）时不能 panic，也不能影响裁决。
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:              2,
+		LatencyMinSamples: 3,
+		AlertEnabled:      true,
+	}, time.Now())
+	require.NoError(t, err)
+}
+
+func TestGroupElectionNormalizeAlertAccountOverrides(t *testing.T) {
+	require.Nil(t, normalizeSupplierGroupElectionAlertOverrides(nil))
+	require.Nil(t, normalizeSupplierGroupElectionAlertOverrides(map[int64]bool{}))
+	require.Nil(t, normalizeSupplierGroupElectionAlertOverrides(map[int64]bool{0: true, -3: false}),
+		"非正 accountID 全部丢弃后应为 nil")
+
+	cleaned := normalizeSupplierGroupElectionAlertOverrides(map[int64]bool{1: true, 2: false, -4: true})
+	require.Equal(t, map[int64]bool{1: true, 2: false}, cleaned, "true/false 都要保留：一个是强制推、一个是静音")
+
+	// 无覆盖时跟随全局开关：全局关闭 → 不推，全局打开 → 推。
+	require.False(t, supplierGroupElectionAlertEnabledForAccount(SupplierGroupSchedulingElectionConfig{}, 9))
+	require.True(t, supplierGroupElectionAlertEnabledForAccount(
+		SupplierGroupSchedulingElectionConfig{AlertEnabled: true}, 9))
+	// 覆盖命中即替换全局，两个方向都要能翻过来。
+	require.True(t, supplierGroupElectionAlertEnabledForAccount(
+		SupplierGroupSchedulingElectionConfig{AlertAccountOverrides: map[int64]bool{9: true}}, 9))
+	require.False(t, supplierGroupElectionAlertEnabledForAccount(
+		SupplierGroupSchedulingElectionConfig{AlertEnabled: true, AlertAccountOverrides: map[int64]bool{9: false}}, 9))
+}

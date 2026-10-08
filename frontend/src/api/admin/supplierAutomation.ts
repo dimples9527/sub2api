@@ -137,6 +137,20 @@ export interface SupplierAutomationConfig {
    * 让「只盯住一两个分组」不必让全部分组同时失去择优。
    */
   group_scheduling_election_dry_run_group_ids?: number[]
+  /**
+   * 分组账号异常推送总开关（默认关闭）。
+   * 打开后：分组里**当前真的在任**的账号，若延迟窗口内的成功样本数不足
+   * group_scheduling_election_latency_min_samples，就通过供应商通知模块推一条
+   * group_account_abnormal 事件（需先在通知页订阅该事件）。只影响通知，不影响任何调度裁决。
+   */
+  group_scheduling_election_alert_enabled?: boolean
+  /**
+   * 按账号覆盖推送开关：账号 ID → 是否推送。
+   * 命中即替换总开关，未命中的账号仍跟随总开关（与 top_n_by_group 的覆盖语义一致）：
+   * 既能在大开关打开时静音个别长期样本不足的账号，也能在大开关关闭时单独盯住某个账号。
+   * 空对象或不传 = 所有账号都用总开关（默认）。
+   */
+  group_scheduling_election_alert_account_overrides?: Record<number, boolean>
 }
 
 export interface SupplierAutomationTask {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -242,6 +243,16 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// 之所以还要分组粒度：同一套权重在不同分组上的后果差别很大，常见诉求是「只盯住一两个分组」；
 	// 全量演练会让所有分组同时失去择优，反而更像故障。
 	DryRunGroupIDs []int64 `json:"group_scheduling_election_dry_run_group_ids"`
+	// AlertEnabled 是「分组账号异常推送」总开关，默认 false（不推，与升级前完全一致）。
+	// 打开后：某个分组里**当前真的在任**的账号，若延迟窗口内的成功样本数不足
+	// LatencyMinSamples，就通过供应商通知模块推一条 group_account_abnormal 事件。
+	// 它只影响通知，不影响任何裁决与调度开关。
+	AlertEnabled bool `json:"group_scheduling_election_alert_enabled"`
+	// AlertAccountOverrides 是按账号覆盖推送开关：account_id → 是否推送。
+	// 命中即替换 AlertEnabled，未命中的账号仍跟随全局值（与 TopNByGroup 的覆盖语义一致）：
+	// 既能在大开关打开时静音个别长期样本不足的账号，也能在大开关关闭时单独盯住某个账号。
+	// 空 map 表示所有账号都用全局值（默认，无需数据迁移）。
+	AlertAccountOverrides map[int64]bool `json:"group_scheduling_election_alert_account_overrides"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -307,10 +318,23 @@ type SupplierGroupSchedulingElectionRunner interface {
 type SupplierGroupSchedulingElectionService struct {
 	repository   SupplierGroupSchedulingElectionRepository
 	accountStore supplierGroupSchedulingElectionAccountStore
+	// abnormalNotifier 为 nil 表示没接入通知模块（未配置或单测），此时只算不推。
+	abnormalNotifier SupplierGroupAccountAbnormalNotifier
 }
 
 func NewSupplierGroupSchedulingElectionService(repository SupplierGroupSchedulingElectionRepository, accountStore supplierGroupSchedulingElectionAccountStore) *SupplierGroupSchedulingElectionService {
 	return &SupplierGroupSchedulingElectionService{repository: repository, accountStore: accountStore}
+}
+
+// SetGroupAccountAbnormalNotifier 注入「分组账号异常」通知发送器。
+//
+// 用 setter 而不是构造参数：本服务在测试里有大量 2 参构造点，加参数会同时打爆
+// 所有测试与 Wire 生成代码。这也是本仓既有的接法（见 SupplierAutomationService 的
+// SetGroupSchedulingElectionService、SupplierProviderSyncService 的 SetGroupChangeNotifier）。
+func (s *SupplierGroupSchedulingElectionService) SetGroupAccountAbnormalNotifier(notifier SupplierGroupAccountAbnormalNotifier) {
+	if s != nil {
+		s.abnormalNotifier = notifier
+	}
 }
 
 // SupplierGroupSchedulingElectionGroupDetail 汇总单个分组的裁决结果。
@@ -579,8 +603,12 @@ type supplierGroupElectionAccount struct {
 	name              string
 	platform          string
 	schedulableBefore bool
-	testStatus        string
-	healthyCount      int
+	// schedulableAfter 是本轮结束后该账号**真实**的在任状态（写库成功才算数）。
+	// 它只服务「分组账号异常」检测：检测跑在账号级裁决之后，而 result.Items 只收
+	// 「被拨动 / notable」的账号，拿它当全量在任视图会漏掉大量 unchanged 的账号。
+	schedulableAfter bool
+	testStatus       string
+	healthyCount     int
 	// selectable 是「参选资格」：last_test_status = success 且结果未过期，或健康守护连续成功计数 > 0。
 	// 它比 testStatus 宽 —— 健康计数 > 0 只证明守护那一轮判过 healthy，last_test_status 之后
 	// 可能被一次手工账号测试覆盖成 failed；这种账号实际仍可用，不该失去参选资格，
@@ -1310,6 +1338,14 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		item.SchedulableAfter = desiredSchedulable
 		item.Action = action
 		item.Reason = reason
+		// 记下「本轮结束后它真实的在任状态」供末尾的异常检测使用。
+		// 演练不拨开关、写库失败也会回滚（那条路径下面会把 schedulableAfter 改回 before），
+		// 所以这里不能无条件用 desiredSchedulable。
+		if account.dryRun {
+			account.schedulableAfter = account.schedulableBefore
+		} else {
+			account.schedulableAfter = desiredSchedulable
+		}
 
 		// 未测过（既不是 success/failed、又没有参选资格）的账号不产生调度变更，也不计入明细，避免噪声。
 		// 带资格的账号不能在这里被跳过：健康计数 > 0 但 last_test_status 为空/非 success 的账号
@@ -1365,6 +1401,9 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 
 		if err := s.accountStore.SetSchedulable(ctx, account.id, item.SchedulableAfter); err != nil {
 			item.SchedulableAfter = item.SchedulableBefore
+			// 写库失败 ⇒ 账号实际状态没变，异常检测必须按 before 判，否则会把
+			// 「想开但没开成」的账号报成在任。
+			account.schedulableAfter = account.schedulableBefore
 			item.Action = SupplierGroupSchedulingElectionActionNone
 			item.Reason = SupplierGroupSchedulingElectionReasonWriteFailed
 			item.ErrorMessage = err.Error()
@@ -1382,7 +1421,84 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		result.Items = append(result.Items, item)
 	}
 
+	// 4) 「分组账号异常」检测：只发通知，不参与裁决、不改变任何调度开关。
+	//
+	// 口径（与前端开关文案一致）：账号**当前真的在任**（本轮结束后 schedulable 为真），
+	// 但延迟窗口内的成功样本数不足 LatencyMinSamples —— 也就是择优任务无法确认它是否健康。
+	// 这类账号会一直占着分组的席位却没有任何证据支撑，正是「账号状态冻结在很久以前的成功结果」
+	// 那类问题的可见化手段。
+	//
+	// 刻意不推恢复：恢复只是「少收一条」，不需要配对事件（见 SupplierGroupAccountAbnormalEventType）。
+	s.notifySupplierGroupAccountAbnormal(ctx, config, members, accounts, now)
+
 	return result, nil
+}
+
+// notifySupplierGroupAccountAbnormal 按分组汇总「在任但健康样本不足」的账号并派发通知。
+//
+// 放在 Run 末尾而不是逐组处理时：在任状态要等账号级裁决全部落地（必需模型补选、容量收敛、
+// 保底开启、写库结果）之后才是最终事实，逐组处理时看到的还是中间态。
+func (s *SupplierGroupSchedulingElectionService) notifySupplierGroupAccountAbnormal(
+	ctx context.Context,
+	config SupplierGroupSchedulingElectionConfig,
+	members []SupplierGroupSchedulingElectionMember,
+	accounts map[int64]*supplierGroupElectionAccount,
+	now time.Time,
+) {
+	if s == nil || s.abnormalNotifier == nil {
+		return
+	}
+	disabledGroups := make(map[int64]struct{}, len(config.DisabledGroupIDs))
+	for _, groupID := range config.DisabledGroupIDs {
+		disabledGroups[groupID] = struct{}{}
+	}
+	abnormalByGroup := make(map[int64][]SupplierGroupAccountAbnormalAccount)
+	groupNames := make(map[int64]string)
+	groupOrder := make([]int64, 0)
+	for _, member := range members {
+		// 被关闭择优的分组整组不参与：它本来就不在择优的管理范围内。
+		if _, skip := disabledGroups[member.GroupID]; skip {
+			continue
+		}
+		account := accounts[member.AccountID]
+		if account == nil || !account.schedulableAfter {
+			continue
+		}
+		if member.LatencySuccessCount >= config.LatencyMinSamples {
+			continue
+		}
+		if !supplierGroupElectionAlertEnabledForAccount(config, member.AccountID) {
+			continue
+		}
+		if _, seen := abnormalByGroup[member.GroupID]; !seen {
+			groupOrder = append(groupOrder, member.GroupID)
+			groupNames[member.GroupID] = member.GroupName
+		}
+		abnormalByGroup[member.GroupID] = append(abnormalByGroup[member.GroupID], SupplierGroupAccountAbnormalAccount{
+			AccountID:     member.AccountID,
+			AccountName:   member.AccountName,
+			SuccessCount:  member.LatencySuccessCount,
+			RequiredCount: config.LatencyMinSamples,
+		})
+	}
+	sort.Slice(groupOrder, func(i, j int) bool { return groupOrder[i] < groupOrder[j] })
+	for _, groupID := range groupOrder {
+		event := SupplierGroupAccountAbnormalEvent{
+			GroupID:    groupID,
+			GroupName:  groupNames[groupID],
+			Accounts:   abnormalByGroup[groupID],
+			ObservedAt: now,
+		}
+		// 通知失败不冒泡给 Run 的调用方：Run 的返回值描述的是「调度结果」，
+		// 混进通知错误会让运行记录显示成 partial/failed，被读成调度本身出了问题。
+		// 但也不能静默吞掉 —— 落一条 warn 日志，排障时能看出是推送链路坏了。
+		if err := s.abnormalNotifier.DispatchGroupAccountAbnormal(ctx, event); err != nil {
+			slog.Warn("supplier_group_account_abnormal_dispatch_failed",
+				"group_id", groupID,
+				"account_count", len(event.Accounts),
+				"error", err)
+		}
+	}
 }
 
 // supplierGroupElectionItemHasLockedIncumbent 判断这条明细是否是「在任者健康锁定保住的在任账号」：
@@ -2134,7 +2250,37 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 		config.CountScoreCap = MaxSupplierGroupSchedulingElectionCountScoreCap
 	}
 	config.RequiredModelsByGroup = normalizeSupplierGroupElectionRequiredModels(config.RequiredModelsByGroup)
+	config.AlertAccountOverrides = normalizeSupplierGroupElectionAlertOverrides(config.AlertAccountOverrides)
 	return config
+}
+
+// normalizeSupplierGroupElectionAlertOverrides 清洗「按账号覆盖推送」表：丢弃非正 accountID。
+// true / false 两个取值都保留 —— 前者是「大开关关着也盯住它」，后者是「大开关开着但静音它」。
+// 空表返回 nil，让「没配置」与「配了空」在下游一致（len==0 都表示全部跟随全局开关）。
+func normalizeSupplierGroupElectionAlertOverrides(raw map[int64]bool) map[int64]bool {
+	if len(raw) == 0 {
+		return nil
+	}
+	result := make(map[int64]bool, len(raw))
+	for accountID, enabled := range raw {
+		if accountID <= 0 {
+			continue
+		}
+		result[accountID] = enabled
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// supplierGroupElectionAlertEnabledForAccount 汇总「全局开关 + 账号级覆盖」，
+// 得到某个账号本轮是否要推送异常通知。覆盖命中即替换全局值。
+func supplierGroupElectionAlertEnabledForAccount(config SupplierGroupSchedulingElectionConfig, accountID int64) bool {
+	if enabled, ok := config.AlertAccountOverrides[accountID]; ok {
+		return enabled
+	}
+	return config.AlertEnabled
 }
 
 // normalizeSupplierGroupElectionTopNByGroup 清洗「每组开启账号数」的分组级覆盖：

@@ -432,6 +432,40 @@
                 <span>{{ electionPriorityAll ? '默认计入' : '默认不计' }}</span>
               </label>
             </div>
+            <div class="sp-election-dry-run-card sp-election-keep-healthy-card" :class="{ 'is-on': electionAlertEnabled }">
+              <div>
+                <strong>分组账号异常推送</strong>
+                <span v-if="electionAlertEnabled">已开启：分组里当前开着调度的账号，若延迟窗口内的成功样本数不足「平均最少成功样本」，就按通知页订阅的「分组账号异常」事件推一条消息。只推异常、不推恢复，也不影响任何调度裁决。</span>
+                <span v-else>默认不推送。打开后会在分组在任账号健康样本不足时推送消息，需先在通知页订阅「分组账号异常」事件。</span>
+              </div>
+              <label
+                class="sp-election-dry-run-toggle"
+                title="打开后：分组在任账号健康样本不足时推送消息（只推异常、不推恢复；需先在通知页订阅该事件）"
+              >
+                <Toggle
+                  :model-value="electionAlertEnabled"
+                  aria-label="是否开启分组账号异常推送"
+                  @update:model-value="setElectionAlertEnabled"
+                />
+                <span>{{ electionAlertEnabled ? '推送中' : '不推送' }}</span>
+              </label>
+            </div>
+            <div class="sp-rate-guard-scope-card">
+              <div>
+                <strong>按账号覆盖推送</strong>
+                <span v-if="electionAlertOverrideCount === 0">所有账号都跟随上面的总开关。</span>
+                <span v-else>已为 <strong class="sp-rate-guard-scope-count">{{ electionAlertOverrideCount }}</strong> 个账号单独设置：<template v-if="electionAlertMutedCount > 0">{{ electionAlertMutedCount }} 个静音</template><template v-if="electionAlertMutedCount > 0 && electionAlertForcedCount > 0">、</template><template v-if="electionAlertForcedCount > 0">{{ electionAlertForcedCount }} 个强制推送</template>。</span>
+                <span>覆盖与总开关不一致时以覆盖为准，用于静音长期样本不足的账号，或在总开关关闭时单独盯住某个账号。</span>
+              </div>
+              <button
+                class="sp-button small ghost sp-rate-guard-scope-config-button"
+                type="button"
+                @click="openElectionAlertAccounts"
+              >
+                <Icon name="cog" size="md" />
+                配置账号
+              </button>
+            </div>
             <div class="sp-form-grid sp-group-election-policy-grid">
               <Input :model-value="editForm.config.group_scheduling_election_top_n" type="number" label="每组开启账号数（默认 1 单活）" hint="每组最多保留几个账号处于开启调度状态，默认 1 = 单活。注意这只是「每组」的目标、不是硬上限：账号的开关记在账号上（不是记在「账号 + 分组」上），判定规则是「在所属的任一分组里最优就开」。所以同属 A、B 两个组的账号，只要它在 B 组里最优就会被开启，它落在 A 组里的那一份也跟着开着 —— A 组实际开着的数量就会超过这里填的值。要真正单活，只能让分组互不重叠、或让重叠的账号只在其中一个组里最优。填 2 以上时较慢的账号也会分摊到请求。" @update:model-value="editForm.config.group_scheduling_election_top_n = toNumber($event, editForm.config.group_scheduling_election_top_n ?? 1)" />
               <Input :model-value="editForm.config.group_scheduling_election_count_weight" type="number" step="0.1" min="0.1" label="连续成功次数权重（默认 1）" hint="连续成功次数在综合分里的话语权。次数分 = min(连续成功次数 ÷ 封顶值, 1)，即达到封顶值后一律按封顶值算——默认封顶 10 时，142 次与 190 次得分完全相同。封顶是为了防止老账号靠资历永久占位。" @update:model-value="editForm.config.group_scheduling_election_count_weight = toNumber($event, editForm.config.group_scheduling_election_count_weight ?? 1)" />
@@ -1774,6 +1808,84 @@
         </template>
       </BaseDialog>
 
+      <BaseDialog
+        :show="electionAlertAccountsVisible"
+        title="按账号覆盖异常推送"
+        width="wide"
+        :z-index="60"
+        @close="closeElectionAlertAccounts"
+      >
+        <div class="sp-rate-guard-group-dialog">
+          <section class="sp-rate-guard-group-workspace">
+            <div class="sp-rate-guard-group-summary" aria-label="账号异常推送覆盖摘要">
+              <article>
+                <span>已覆盖</span>
+                <strong>{{ electionAlertOverrideCount }}</strong>
+              </article>
+              <article>
+                <span>静音</span>
+                <strong>{{ electionAlertMutedCount }}</strong>
+              </article>
+              <article>
+                <span>强制推送</span>
+                <strong>{{ electionAlertForcedCount }}</strong>
+              </article>
+            </div>
+
+            <div class="sp-rate-guard-group-toolbar">
+              <div class="sp-rate-guard-group-filters">
+                <Input v-model="electionAlertAccountSearch" placeholder="搜索账号名称" />
+              </div>
+            </div>
+
+            <div class="sp-election-alert-account-list">
+              <article
+                v-for="mapping in electionAlertAccountCandidates"
+                :key="mapping.localAccountID"
+                class="sp-election-alert-account-row"
+              >
+                <span class="sp-election-alert-account-name">
+                  <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}</strong>
+                  <span class="sp-rate-guard-group-id">#{{ mapping.localAccountID }}</span>
+                  <span class="sp-rate-guard-group-platform" :class="platformBadgeClass(mapping.platform)">
+                    {{ platformLabel(mapping.platform) }}
+                  </span>
+                </span>
+                <span
+                  class="sp-election-alert-account-choice"
+                  role="group"
+                  :aria-label="`账号 ${mapping.localAccountName} 的异常推送开关`"
+                >
+                  <button
+                    type="button"
+                    :class="{ active: electionAlertOverrideValue(mapping.localAccountID) === undefined }"
+                    @click="setElectionAlertOverride(mapping.localAccountID, undefined)"
+                  >跟随全局</button>
+                  <button
+                    type="button"
+                    :class="{ active: electionAlertOverrideValue(mapping.localAccountID) === true }"
+                    @click="setElectionAlertOverride(mapping.localAccountID, true)"
+                  >推送</button>
+                  <button
+                    type="button"
+                    :class="{ active: electionAlertOverrideValue(mapping.localAccountID) === false }"
+                    @click="setElectionAlertOverride(mapping.localAccountID, false)"
+                  >静音</button>
+                </span>
+              </article>
+              <div v-if="electionAlertAccountCandidates.length === 0" class="sp-rate-guard-empty">
+                {{ electionAlertAccountSearch.trim() ? '没有匹配的账号，换个关键词试试。' : '暂无可选账号。' }}
+              </div>
+            </div>
+          </section>
+        </div>
+        <template #footer>
+          <span class="sp-rate-guard-group-hint">「跟随全局」表示不写覆盖、直接沿用总开关；覆盖在保存任务后生效。</span>
+          <button class="sp-button ghost" type="button" @click="clearElectionAlertOverrides">清空全部覆盖</button>
+          <button class="sp-button primary" type="button" @click="closeElectionAlertAccounts">完成</button>
+        </template>
+      </BaseDialog>
+
       <BaseDialog :show="accountRateGuardExecuteVisible" title="确认执行账号倍率守护" width="wide" @close="closeAccountRateGuardExecute">
         <div class="sp-guard-confirm">
           <span class="sp-guard-confirm-mark" aria-hidden="true">!</span>
@@ -1900,6 +2012,9 @@ const electionGroupPlatformFilter = ref<string[]>([])
 // 与「是否参与择优」彻底解耦 —— 旧实现让两者共用一个勾选框，
 // 结果「想批量操作先勾一下」会把分组静默改成不参与择优。
 const electionGroupCheckedIDs = ref<number[]>([])
+// 「按账号覆盖异常推送」弹窗：只服务择优任务的推送覆盖，与健康守护账号弹窗是两套独立状态。
+const electionAlertAccountsVisible = ref(false)
+const electionAlertAccountSearch = ref('')
 const healthGuardAccountsVisible = ref(false)
 const multiplierIntervalDialogVisible = ref(false)
 const healthGuardAccountPlatformFilter = ref<string[]>([])
@@ -1981,6 +2096,9 @@ const editForm = reactive<SupplierAutomationTask>({
     // 演练默认关闭：默认行为必须是"真的择优"，演练是管理员显式选择的观察模式。
     group_scheduling_election_dry_run: false,
     group_scheduling_election_dry_run_group_ids: [],
+    // 异常推送默认关闭：升级前不发任何消息，开启是管理员的显式选择。
+    group_scheduling_election_alert_enabled: false,
+    group_scheduling_election_alert_account_overrides: {},
   },
   last_status: '',
   last_message: '',
@@ -2868,6 +2986,42 @@ const electionPriorityAll = computed(
   () => editForm.config.group_scheduling_election_priority_enabled_global === true
 )
 
+// 分组账号异常推送的总开关，同样用 === true 收敛 undefined（旧配置没有这个键，默认不推送）。
+const electionAlertEnabled = computed(
+  () => editForm.config.group_scheduling_election_alert_enabled === true
+)
+
+// 按账号覆盖推送开关：只保留正 accountID，值必须是真正的布尔。
+// 键存在即覆盖总开关（true=强制推送、false=静音），键不存在则跟随总开关。
+const electionAlertOverrides = computed<Record<number, boolean>>(() => {
+  const raw = editForm.config.group_scheduling_election_alert_account_overrides
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<number, boolean> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    const accountID = Number(key)
+    if (!Number.isSafeInteger(accountID) || accountID <= 0) continue
+    out[accountID] = value === true
+  }
+  return out
+})
+
+const electionAlertOverrideCount = computed(() => Object.keys(electionAlertOverrides.value).length)
+const electionAlertMutedCount = computed(
+  () => Object.values(electionAlertOverrides.value).filter(enabled => !enabled).length
+)
+const electionAlertForcedCount = computed(
+  () => Object.values(electionAlertOverrides.value).filter(enabled => enabled).length
+)
+
+// 覆盖弹窗的账号候选：与健康守护账号弹窗共用同一份账号数据，只列当前可用的账号 ——
+// 不可用账号进不了择优的在任集合，给它配推送覆盖没有意义，只会把列表撑长。
+const electionAlertAccountCandidates = computed(() => {
+  const keyword = electionAlertAccountSearch.value.trim().toLowerCase()
+  return healthGuardAccountMappings.value
+    .filter(mapping => mapping.available)
+    .filter(mapping => !keyword || mapping.localAccountName.toLowerCase().includes(keyword))
+})
+
 // 模型名清洗：trim、去空、按小写去重保序。必需模型的录入与展示都走它，口径与后端一致。
 function normalizeRequiredModelList(models: unknown): string[] {
   if (!Array.isArray(models)) return []
@@ -3568,6 +3722,10 @@ function applyGroupElectionDefaults() {
   editForm.config.group_scheduling_election_dry_run_group_ids = normalizePositiveAccountIDs(
     editForm.config.group_scheduling_election_dry_run_group_ids
   )
+  // 异常推送：总开关同样收敛成真正的布尔（旧配置没有这个键，读回来是 undefined）；
+  // 账号覆盖表必须序列化 —— 后端整块覆盖 config_json，省略等于保留旧值，"清掉全部覆盖"就存不成功。
+  editForm.config.group_scheduling_election_alert_enabled = electionAlertEnabled.value
+  editForm.config.group_scheduling_election_alert_account_overrides = electionAlertOverrides.value
 }
 
 function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
@@ -3775,6 +3933,45 @@ function setElectionDryRunAll(value: unknown) {
 // 全局默认锁定开关：只改全局位，不动分组级覆盖名单 —— 已显式覆盖的分组在全局翻转后仍保持覆盖。
 function setElectionKeepHealthyAll(value: unknown) {
   editForm.config.group_scheduling_election_keep_healthy_incumbent_global = Boolean(value)
+}
+
+// 异常推送总开关：只改全局位，不动账号级覆盖 —— 已显式覆盖的账号在全局翻转后仍保持覆盖。
+function setElectionAlertEnabled(value: unknown) {
+  editForm.config.group_scheduling_election_alert_enabled = Boolean(value)
+}
+
+// 账号覆盖的当前取值：undefined = 未覆盖（跟随总开关）。
+function electionAlertOverrideValue(accountID: number): boolean | undefined {
+  return electionAlertOverrides.value[accountID]
+}
+
+// 写入覆盖：undefined 表示清掉覆盖、回落到跟随总开关。
+function setElectionAlertOverride(accountID: number, value: boolean | undefined) {
+  if (!Number.isSafeInteger(accountID) || accountID <= 0) return
+  const next = { ...electionAlertOverrides.value }
+  if (value === undefined) delete next[accountID]
+  else next[accountID] = value
+  editForm.config.group_scheduling_election_alert_account_overrides = next
+}
+
+function clearElectionAlertOverrides() {
+  editForm.config.group_scheduling_election_alert_account_overrides = {}
+}
+
+async function openElectionAlertAccounts() {
+  electionAlertAccountsVisible.value = true
+  electionAlertAccountSearch.value = ''
+  // 账号候选与健康守护弹窗共用同一份数据：已加载过就不再重复请求（两个弹窗可能先后打开）。
+  if (healthGuardAccountMappings.value.length > 0) return
+  try {
+    await ensureHealthGuardAccountCandidatesLoaded()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载账号列表失败'))
+  }
+}
+
+function closeElectionAlertAccounts() {
+  electionAlertAccountsVisible.value = false
 }
 
 function electionGroupDryRun(groupID: number): boolean {
@@ -6667,6 +6864,76 @@ function intervalSecondsToCron(seconds: number): string | null {
    比"一堆独立小卡片"更耐看，分组多时也能一眼扫完。
    不设 max-height：弹窗已近全屏，列表直接吃满摘要与工具栏之外的剩余空间，
    再叠加一层上限会让内容区下方空出一块，反而显得没铺满。 */
+/* 「按账号覆盖异常推送」弹窗的账号列表：与分组弹窗同构（摘要 + 工具栏 + 整块滚动列表）。
+   右侧刻意用三段式（跟随全局 / 推送 / 静音）而不是一个开关：开关只有两态，
+   表达不了「这个账号没配过覆盖」——而那正是绝大多数账号的状态。 */
+.sp-election-alert-account-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--sp-line);
+  background: color-mix(in srgb, var(--sp-soft) 12%, var(--sp-panel));
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--sp-line) 82%, transparent) transparent;
+}
+
+.sp-election-alert-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sp-line);
+}
+
+.sp-election-alert-account-row:last-child {
+  border-bottom: none;
+}
+
+.sp-election-alert-account-row:hover {
+  background: color-mix(in srgb, var(--sp-soft) 22%, var(--sp-panel));
+}
+
+.sp-election-alert-account-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sp-election-alert-account-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-election-alert-account-choice {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--sp-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sp-soft) 18%, var(--sp-panel));
+}
+
+.sp-election-alert-account-choice button {
+  border: none;
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--sp-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sp-election-alert-account-choice button.active {
+  background: var(--sp-panel);
+  color: var(--sp-text);
+  font-weight: 600;
+}
+
 .sp-rate-guard-group-list {
   flex: 1 1 auto;
   min-height: 0;

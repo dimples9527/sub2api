@@ -119,12 +119,37 @@ func (r *supplierNotificationRepoStub) ListMatchingSubscriptions(_ context.Conte
 	return items, nil
 }
 
+func (r *supplierNotificationRepoStub) ListMatchingGroupSubscriptions(_ context.Context, channelID, groupID int64, eventType string) ([]SupplierNotificationSubscription, error) {
+	items := make([]SupplierNotificationSubscription, 0)
+	for _, item := range r.subscriptions {
+		if item.ChannelID == channelID && item.Enabled && item.EventType == eventType && (item.GroupID == nil || *item.GroupID == groupID) {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
 func supplierNotificationCooldownKey(channelID, providerID int64, eventType string) string {
 	return string(rune(channelID)) + ":" + string(rune(providerID)) + ":" + eventType
 }
 
 func (r *supplierNotificationRepoStub) ClaimCooldown(_ context.Context, channelID, providerID int64, eventType string, _, _ time.Time) (bool, error) {
 	key := supplierNotificationCooldownKey(channelID, providerID, eventType)
+	if r.cooldowns[key] {
+		return false, nil
+	}
+	r.cooldowns[key] = true
+	r.claimCount++
+	return true, nil
+}
+
+// supplierNotificationGroupCooldownKey 与供应商维度共用一个 map，但前缀不同以免撞键。
+func supplierNotificationGroupCooldownKey(channelID, groupID int64, eventType string) string {
+	return "group:" + string(rune(channelID)) + ":" + string(rune(groupID)) + ":" + eventType
+}
+
+func (r *supplierNotificationRepoStub) ClaimGroupCooldown(_ context.Context, channelID, groupID int64, eventType string, _, _ time.Time) (bool, error) {
+	key := supplierNotificationGroupCooldownKey(channelID, groupID, eventType)
 	if r.cooldowns[key] {
 		return false, nil
 	}
@@ -346,4 +371,74 @@ func TestSupplierNotificationDispatcherSkipsGroupChangedDeliveryWhenCooldownIsCl
 	require.Len(t, repo.groupEvents, 2)
 	require.Len(t, repo.deliveries, 1)
 	require.Equal(t, 1, repo.claimCount)
+}
+
+func TestSupplierNotificationDispatcherDispatchesGroupAccountAbnormalOnce(t *testing.T) {
+	repo := newSupplierNotificationRepoStub()
+	repo.channels[1] = SupplierNotificationChannel{ID: 1, Name: "飞书", ChannelType: SupplierNotificationChannelFeishu, Enabled: true}
+	groupID := int64(142)
+	repo.subscriptions = []SupplierNotificationSubscription{{ChannelID: 1, GroupID: &groupID, EventType: SupplierGroupAccountAbnormalEventType, Enabled: true}}
+	dispatcher := NewSupplierNotificationDispatcher(repo, &supplierNotificationSenderStub{})
+
+	event := SupplierGroupAccountAbnormalEvent{
+		GroupID:   groupID,
+		GroupName: "Claude福利",
+		Accounts: []SupplierGroupAccountAbnormalAccount{
+			{AccountID: 509, AccountName: "账号 509", SuccessCount: 0, RequiredCount: 3},
+		},
+		ObservedAt: time.Now(),
+	}
+
+	require.NoError(t, dispatcher.DispatchGroupAccountAbnormal(context.Background(), event))
+	// 冷却表按 (channel, group, event) 隔离：同一分组在冷却期内不再重复推送。
+	require.NoError(t, dispatcher.DispatchGroupAccountAbnormal(context.Background(), event))
+	require.Len(t, repo.deliveries, 1)
+	require.Equal(t, 1, repo.claimCount)
+
+	for _, delivery := range repo.deliveries {
+		// 分组事件没有供应商：provider_id 必须留 0，由仓储层落成 NULL。
+		require.Zero(t, delivery.ProviderID)
+		require.NotNil(t, delivery.GroupID)
+		require.Equal(t, groupID, *delivery.GroupID)
+		require.Equal(t, SupplierGroupAccountAbnormalEventType, delivery.EventType)
+		var payload SupplierNotificationEventPayload
+		require.NoError(t, json.Unmarshal(delivery.PayloadJSON, &payload))
+		require.Equal(t, groupID, payload.GroupID)
+		require.Equal(t, "Claude福利", payload.GroupName)
+		require.Len(t, payload.AbnormalAccounts, 1)
+		require.Equal(t, 509, int(payload.AbnormalAccounts[0].AccountID))
+	}
+}
+
+func TestSupplierNotificationDispatcherSkipsGroupAccountAbnormalWithoutSubscription(t *testing.T) {
+	repo := newSupplierNotificationRepoStub()
+	repo.channels[1] = SupplierNotificationChannel{ID: 1, Name: "飞书", ChannelType: SupplierNotificationChannelFeishu, Enabled: true}
+	// 只订阅了别的分组：分组维度的订阅必须精确匹配 group_id，不能跨分组串台。
+	otherGroupID := int64(156)
+	repo.subscriptions = []SupplierNotificationSubscription{{ChannelID: 1, GroupID: &otherGroupID, EventType: SupplierGroupAccountAbnormalEventType, Enabled: true}}
+	dispatcher := NewSupplierNotificationDispatcher(repo, &supplierNotificationSenderStub{})
+
+	err := dispatcher.DispatchGroupAccountAbnormal(context.Background(), SupplierGroupAccountAbnormalEvent{
+		GroupID:    142,
+		GroupName:  "Claude福利",
+		Accounts:   []SupplierGroupAccountAbnormalAccount{{AccountID: 509, AccountName: "账号 509"}},
+		ObservedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	require.Empty(t, repo.deliveries)
+	require.Zero(t, repo.claimCount)
+}
+
+func TestSupplierNotificationDispatcherRejectsInvalidGroupAccountAbnormalEvent(t *testing.T) {
+	repo := newSupplierNotificationRepoStub()
+	dispatcher := NewSupplierNotificationDispatcher(repo, &supplierNotificationSenderStub{})
+
+	// 没有分组、或没有任何异常账号都不该产生投递：前者定位不到对象，后者是空消息。
+	require.ErrorIs(t, dispatcher.DispatchGroupAccountAbnormal(context.Background(), SupplierGroupAccountAbnormalEvent{
+		Accounts: []SupplierGroupAccountAbnormalAccount{{AccountID: 509}},
+	}), ErrSupplierNotificationInvalid)
+	require.ErrorIs(t, dispatcher.DispatchGroupAccountAbnormal(context.Background(), SupplierGroupAccountAbnormalEvent{
+		GroupID: 142,
+	}), ErrSupplierNotificationInvalid)
+	require.Empty(t, repo.deliveries)
 }

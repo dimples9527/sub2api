@@ -145,6 +145,18 @@ func (s *SupplierNotificationService) SaveSubscription(ctx context.Context, id i
 	if input.ProviderID != nil && *input.ProviderID <= 0 {
 		return nil, ErrSupplierNotificationInvalid
 	}
+	if input.GroupID != nil && *input.GroupID <= 0 {
+		return nil, ErrSupplierNotificationInvalid
+	}
+	// 两类事件的维度互斥：分组账号异常没有供应商（一个分组的成员可能来自多个供应商），
+	// 供应商维度的事件也不该挂分组。允许对方维度为 nil 表示「全部」。
+	if input.EventType == SupplierGroupAccountAbnormalEventType {
+		if input.ProviderID != nil {
+			return nil, ErrSupplierNotificationInvalid
+		}
+	} else if input.GroupID != nil {
+		return nil, ErrSupplierNotificationInvalid
+	}
 	if _, err := s.repo.GetChannel(ctx, input.ChannelID); err != nil {
 		return nil, err
 	}
@@ -152,6 +164,7 @@ func (s *SupplierNotificationService) SaveSubscription(ctx context.Context, id i
 		ID:         id,
 		ChannelID:  input.ChannelID,
 		ProviderID: input.ProviderID,
+		GroupID:    input.GroupID,
 		EventType:  input.EventType,
 		Enabled:    input.Enabled,
 	}
@@ -410,6 +423,8 @@ func supplierNotificationDeliveryViewFromRecord(record *SupplierNotificationDeli
 		EventID:       record.EventID,
 		ProviderID:    record.ProviderID,
 		ProviderName:  record.ProviderName,
+		GroupID:       record.GroupID,
+		GroupName:     record.GroupName,
 		EventType:     record.EventType,
 		Status:        record.Status,
 		AttemptCount:  record.AttemptCount,

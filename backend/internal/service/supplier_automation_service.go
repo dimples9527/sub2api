@@ -135,6 +135,11 @@ type SupplierAutomationConfig struct {
 	// 分组名单是并集以外的第二档——只想盯住个别分组时用，避免全量演练让所有分组同时失去择优。
 	GroupElectionDryRun         bool    `json:"group_scheduling_election_dry_run"`
 	GroupElectionDryRunGroupIDs []int64 `json:"group_scheduling_election_dry_run_group_ids"`
+	// 分组账号异常推送总开关（默认 false）：开启后，分组里当前开着调度、但健康样本不足的账号会通过
+	// 供应商通知模块推一条 group_account_abnormal 事件。只影响通知，不参与任何调度裁决。
+	GroupElectionAlertEnabled bool `json:"group_scheduling_election_alert_enabled"`
+	// 按账号覆盖总开关：account_id → 是否推送。显式 true/false 都优先于总开关，未列出的账号跟随总开关。
+	GroupElectionAlertAccountOverrides map[int64]bool `json:"group_scheduling_election_alert_account_overrides"`
 }
 
 type SupplierAutomationRun struct {
@@ -794,6 +799,8 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			RequiredModelsByGroup:                task.Config.GroupElectionRequiredModels,
 			DryRun:                               task.Config.GroupElectionDryRun,
 			DryRunGroupIDs:                       task.Config.GroupElectionDryRunGroupIDs,
+			AlertEnabled:                         task.Config.GroupElectionAlertEnabled,
+			AlertAccountOverrides:                task.Config.GroupElectionAlertAccountOverrides,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount

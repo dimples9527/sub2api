@@ -326,6 +326,8 @@ func supplierNotificationEventTypeText(eventType string) string {
 		return "成本恢复"
 	case SupplierGroupChangeEventType:
 		return "分组变化"
+	case SupplierGroupAccountAbnormalEventType:
+		return "分组账号异常"
 	default:
 		return "余额不足"
 	}
@@ -334,6 +336,9 @@ func supplierNotificationEventTypeText(eventType string) string {
 func supplierNotificationMessage(payload SupplierNotificationEventPayload) string {
 	if payload.EventType == SupplierGroupChangeEventType {
 		return supplierGroupChangeNotificationMessage(payload)
+	}
+	if payload.EventType == SupplierGroupAccountAbnormalEventType {
+		return supplierGroupAccountAbnormalNotificationMessage(payload)
 	}
 
 	lines := []string{
@@ -352,6 +357,33 @@ func supplierNotificationMessage(payload SupplierNotificationEventPayload) strin
 			"阈值: "+payload.Threshold.String())
 	}
 	lines = append(lines, "时间: "+payload.ObservedAt.Format(time.RFC3339))
+	return strings.Join(lines, "\n")
+}
+
+// supplierGroupAccountAbnormalNotificationMessage 渲染分组账号异常消息。
+//
+// 每个账号都给出「成功样本 / 要求样本」，因为 0 条样本和差 1 条样本是完全不同的处置方向：
+// 前者要查账号是否根本没在跑，后者只是窗口内样本还没攒够。
+func supplierGroupAccountAbnormalNotificationMessage(payload SupplierNotificationEventPayload) string {
+	groupName := strings.TrimSpace(payload.GroupName)
+	if groupName == "" {
+		groupName = "分组 #" + strconv.FormatInt(payload.GroupID, 10)
+	}
+	lines := []string{
+		"分组「" + groupName + "」账号异常",
+		"在任账号健康样本不足，择优调度无法确认其可用性",
+	}
+	if len(payload.AbnormalAccounts) > 0 {
+		lines = append(lines, "", "异常账号：")
+		for _, account := range payload.AbnormalAccounts {
+			name := strings.TrimSpace(account.AccountName)
+			if name == "" {
+				name = "账号 #" + strconv.FormatInt(account.AccountID, 10)
+			}
+			lines = append(lines, "- "+name+"：成功样本 "+strconv.Itoa(account.SuccessCount)+"/"+strconv.Itoa(account.RequiredCount))
+		}
+	}
+	lines = append(lines, "", "时间: "+payload.ObservedAt.Format(time.RFC3339))
 	return strings.Join(lines, "\n")
 }
 
@@ -405,7 +437,12 @@ func formatSupplierNotificationRate(value float64) string {
 }
 
 func formatSupplierNotificationEmail(config SupplierNotificationEmailConfig, payload SupplierNotificationEventPayload) string {
-	subject := "[供应商] " + supplierNotificationEventTypeText(payload.EventType)
+	// 分组账号异常没有供应商，标题前缀改用「分组」，否则收件人会先去找一个不存在的供应商。
+	prefix := "[供应商] "
+	if payload.EventType == SupplierGroupAccountAbnormalEventType {
+		prefix = "[分组] "
+	}
+	subject := prefix + supplierNotificationEventTypeText(payload.EventType)
 	to := make([]string, 0, len(config.To))
 	for _, item := range config.To {
 		to = append(to, item)

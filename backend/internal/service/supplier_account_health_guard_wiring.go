@@ -17,8 +17,11 @@ func ProvideSupplierGroupSchedulingElectionAccountStore(repo AccountRepository) 
 func ProvideSupplierGroupSchedulingElectionService(
 	repository SupplierGroupSchedulingElectionRepository,
 	accountStore supplierGroupSchedulingElectionAccountStore,
+	abnormalNotifier SupplierGroupAccountAbnormalNotifier,
 ) *SupplierGroupSchedulingElectionService {
-	return NewSupplierGroupSchedulingElectionService(repository, accountStore)
+	svc := NewSupplierGroupSchedulingElectionService(repository, accountStore)
+	svc.SetGroupAccountAbnormalNotifier(abnormalNotifier)
+	return svc
 }
 
 func ProvideSupplierAccountHealthGuardService(

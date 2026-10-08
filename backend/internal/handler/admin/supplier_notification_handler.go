@@ -150,10 +150,16 @@ func (h *SupplierNotificationHandler) ListDeliveries(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// 分组维度筛选：分组账号异常事件没有供应商，只能按 group_id 找它的投递记录。
+	groupID, ok := parseSupplierNotificationOptionalID(c, "group_id")
+	if !ok {
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 	result, err := h.service.ListDeliveries(c.Request.Context(), service.SupplierNotificationDeliveryListParams{
 		ChannelID:  channelID,
 		ProviderID: providerID,
+		GroupID:    groupID,
 		EventType:  strings.TrimSpace(c.Query("event_type")),
 		Status:     strings.TrimSpace(c.Query("status")),
 		Page:       page,

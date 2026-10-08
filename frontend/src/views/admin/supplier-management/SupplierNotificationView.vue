@@ -51,7 +51,7 @@
       </header>
       <DataTable :columns="subscriptionColumns" :data="subscriptions" :loading="loading" row-key="id" :virtualize-threshold="1000">
         <template #cell-channel_id="{ row: subscription }"><div class="sp-entity">{{ channelName(subscription.channel_id) }}</div><div class="sp-sub">渠道 #{{ subscription.channel_id }}</div></template>
-        <template #cell-provider_id="{ row: subscription }">{{ providerName(subscription.provider_id) }}</template>
+        <template #cell-provider_id="{ row: subscription }">{{ subscriptionScopeLabel(subscription) }}</template>
         <template #cell-event_type="{ row: subscription }"><span class="sp-tag" :class="eventTypeTagTone(subscription.event_type)">{{ eventTypeLabel(subscription.event_type) }}</span></template>
         <template #cell-enabled="{ row: subscription }"><div class="sp-inline"><Toggle :model-value="subscription.enabled" :aria-label="`${channelName(subscription.channel_id)}订阅${subscription.enabled ? '已启用' : '已停用'}`" @click.stop @update:model-value="toggleSubscription(subscription, $event)" /><span class="sp-status" :class="subscription.enabled ? 'good' : 'info'">{{ subscription.enabled ? '已启用' : '已停用' }}</span></div></template>
         <template #cell-updated_at="{ row: subscription }">{{ formatDateTime(subscription.updated_at) }}</template>
@@ -72,7 +72,7 @@
       </header>
       <DataTable :columns="deliveryColumns" :data="deliveries" :loading="deliveriesLoading" row-key="id" :virtualize-threshold="1000">
         <template #cell-channel_name="{ row: delivery }"><div class="sp-entity">{{ delivery.channel_name }}</div><div class="sp-sub">渠道 #{{ delivery.channel_id }}</div></template>
-        <template #cell-provider_name="{ row: delivery }"><div class="sp-entity">{{ delivery.provider_name }}</div><div class="sp-sub">供应商 #{{ delivery.provider_id }}</div></template>
+        <template #cell-provider_name="{ row: delivery }"><div class="sp-entity">{{ deliveryTargetName(delivery) }}</div><div class="sp-sub">{{ deliveryTargetSub(delivery) }}</div></template>
         <template #cell-event_type="{ row: delivery }">{{ eventTypeLabel(delivery.event_type) }}</template>
         <template #cell-status="{ row: delivery }"><span class="sp-status" :class="deliveryStatusTone(delivery.status)">{{ deliveryStatusLabel(delivery.status) }}</span><div v-if="delivery.last_error" class="sp-sub sp-delivery-error">{{ delivery.last_error }}</div></template>
         <template #cell-attempt_count="{ row: delivery }">{{ delivery.attempt_count }} 次</template>
@@ -100,7 +100,7 @@
 
     <BaseDialog :show="subscriptionDialogVisible" :title="subscriptionDialogTitle" width="normal" @close="closeSubscriptionDialog">
       <form v-if="subscriptionForm" class="sp-dialog-form sp-notification-subscription-dialog" @submit.prevent="saveSubscription">
-        <div class="sp-form-grid"><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-subscription-channel">通知渠道</label><Select id="supplier-notification-subscription-channel" v-model="subscriptionForm.channel_id" :options="channelOptions" :searchable="false" aria-label="通知渠道" /></div><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-subscription-event">事件类型</label><Select id="supplier-notification-subscription-event" v-model="subscriptionForm.event_type" :options="eventTypeOptions" :searchable="false" aria-label="事件类型" /></div><div class="sp-form-control sp-form-control-wide"><label class="sp-form-label" for="supplier-notification-subscription-provider">供应商范围</label><Select id="supplier-notification-subscription-provider" v-model="subscriptionForm.provider_id" :options="providerOptions" searchable clearable aria-label="供应商范围" /><p class="sp-form-hint">选择“全部供应商”时，任何供应商的对应事件都会投递到该渠道。</p></div></div>
+        <div class="sp-form-grid"><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-subscription-channel">通知渠道</label><Select id="supplier-notification-subscription-channel" v-model="subscriptionForm.channel_id" :options="channelOptions" :searchable="false" aria-label="通知渠道" /></div><div class="sp-form-control"><label class="sp-form-label" for="supplier-notification-subscription-event">事件类型</label><Select id="supplier-notification-subscription-event" v-model="subscriptionForm.event_type" :options="eventTypeOptions" :searchable="false" aria-label="事件类型" /></div><div v-if="isGroupScopedEvent(subscriptionForm.event_type)" class="sp-form-control sp-form-control-wide"><label class="sp-form-label" for="supplier-notification-subscription-group">分组范围</label><Select id="supplier-notification-subscription-group" v-model="subscriptionForm.group_id" :options="groupOptions" searchable clearable aria-label="分组范围" /><p class="sp-form-hint">分组账号异常事件没有供应商，订阅只能按分组圈定；选择“全部分组”时任何分组的异常都会投递到该渠道。</p></div><div v-else class="sp-form-control sp-form-control-wide"><label class="sp-form-label" for="supplier-notification-subscription-provider">供应商范围</label><Select id="supplier-notification-subscription-provider" v-model="subscriptionForm.provider_id" :options="providerOptions" searchable clearable aria-label="供应商范围" /><p class="sp-form-hint">选择“全部供应商”时，任何供应商的对应事件都会投递到该渠道。</p></div></div>
         <label class="sp-switch-field"><span>启用事件订阅</span><span class="sp-inline"><Toggle v-model="subscriptionForm.enabled" /><em>{{ subscriptionForm.enabled ? '已启用' : '已停用' }}</em></span></label>
       </form>
       <template #footer><button class="sp-button" type="button" @click="closeSubscriptionDialog">取消</button><button class="sp-button primary" type="button" :disabled="savingSubscription" @click="saveSubscription">{{ savingSubscription ? '保存中…' : '保存订阅' }}</button></template>
@@ -108,7 +108,7 @@
 
     <BaseDialog :show="deliveryDetailVisible" title="通知投递详情" width="extra-wide" @close="closeDeliveryDetail">
       <div v-if="deliveryDetail" class="sp-delivery-detail sp-notification-delivery-dialog">
-        <section class="sp-detail-summary"><div><span>渠道</span><strong>{{ deliveryDetail.channel_name }}</strong></div><div><span>供应商</span><strong>{{ deliveryDetail.provider_name }}</strong></div><div><span>事件</span><strong>{{ eventTypeLabel(deliveryDetail.event_type) }}</strong></div><div><span>状态</span><strong class="sp-status" :class="deliveryStatusTone(deliveryDetail.status)">{{ deliveryStatusLabel(deliveryDetail.status) }}</strong></div><div><span>尝试次数</span><strong>{{ deliveryDetail.attempt_count }} 次</strong></div><div><span>创建时间</span><strong>{{ formatDateTime(deliveryDetail.created_at) }}</strong></div></section>
+        <section class="sp-detail-summary"><div><span>渠道</span><strong>{{ deliveryDetail.channel_name }}</strong></div><div><span>通知对象</span><strong>{{ deliveryTargetName(deliveryDetail) }}</strong></div><div><span>事件</span><strong>{{ eventTypeLabel(deliveryDetail.event_type) }}</strong></div><div><span>状态</span><strong class="sp-status" :class="deliveryStatusTone(deliveryDetail.status)">{{ deliveryStatusLabel(deliveryDetail.status) }}</strong></div><div><span>尝试次数</span><strong>{{ deliveryDetail.attempt_count }} 次</strong></div><div><span>创建时间</span><strong>{{ formatDateTime(deliveryDetail.created_at) }}</strong></div></section>
         <div v-if="deliveryDetail.last_error" class="sp-alert sp-error-line">最近失败：{{ deliveryDetail.last_error }}</div>
         <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递载荷</h3><span>仅展示事件内容，不包含渠道凭据</span></header><pre class="sp-payload">{{ formatPayload(deliveryDetail.payload) }}</pre></section>
         <section class="sp-detail-section"><header class="sp-detail-section-head"><h3>投递尝试</h3><span>{{ deliveryAttempts.length }} 条记录</span></header><DataTable :columns="attemptColumns" :data="deliveryAttempts" :loading="deliveryAttemptsLoading" row-key="id"><template #cell-attempt_number="{ row: attempt }">第 {{ attempt.attempt_number }} 次</template><template #cell-status="{ row: attempt }"><span class="sp-status" :class="attempt.status === 'delivered' ? 'good' : attempt.status === 'failed' ? 'bad' : 'info'">{{ deliveryStatusLabel(attempt.status) }}</span></template><template #cell-http_status="{ row: attempt }">{{ attempt.http_status || '—' }}</template><template #cell-error_message="{ row: attempt }">{{ attempt.error_message || attempt.response_body || '—' }}</template><template #cell-attempted_at="{ row: attempt }">{{ formatDateTime(attempt.attempted_at) }}</template><template #empty><div class="sp-empty-state">暂无投递尝试记录。</div></template></DataTable></section>
@@ -129,6 +129,8 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
+import { getAllIncludingInactive as listAllGroups } from '@/api/admin/groups'
+import type { AdminGroup } from '@/types'
 import {
   createSupplierNotificationChannel,
   createSupplierNotificationSubscription,
@@ -188,6 +190,7 @@ interface SubscriptionForm {
   id: number | null
   channel_id: number
   provider_id: number
+  group_id: number
   event_type: SupplierNotificationEventType
   enabled: boolean
 }
@@ -195,6 +198,7 @@ interface SubscriptionForm {
 const channels = ref<SupplierNotificationChannelView[]>([])
 const subscriptions = ref<SupplierNotificationSubscription[]>([])
 const providers = ref<SupplierProvider[]>([])
+const groups = ref<AdminGroup[]>([])
 const deliveries = ref<SupplierNotificationDelivery[]>([])
 const loading = ref(false)
 const deliveriesLoading = ref(false)
@@ -236,7 +240,7 @@ const channelColumns: Column[] = [
 
 const subscriptionColumns: Column[] = [
   { key: 'channel_id', label: '通知渠道' },
-  { key: 'provider_id', label: '供应商范围' },
+  { key: 'provider_id', label: '订阅范围' },
   { key: 'event_type', label: '事件类型' },
   { key: 'enabled', label: '订阅状态' },
   { key: 'updated_at', label: '最近更新' },
@@ -245,7 +249,7 @@ const subscriptionColumns: Column[] = [
 
 const deliveryColumns: Column[] = [
   { key: 'channel_name', label: '通知渠道' },
-  { key: 'provider_name', label: '供应商' },
+  { key: 'provider_name', label: '通知对象' },
   { key: 'event_type', label: '事件类型' },
   { key: 'status', label: '投递状态' },
   { key: 'attempt_count', label: '尝试次数' },
@@ -272,6 +276,7 @@ const eventTypeOptions: SelectOption[] = [
   { value: 'cost_overrun', label: '成本超额' },
   { value: 'cost_recovered', label: '成本恢复' },
   { value: 'group_changed', label: '分组变化' },
+  { value: 'group_account_abnormal', label: '分组账号异常' },
 ]
 
 const deliveryStatusOptions: SelectOption[] = [
@@ -290,6 +295,11 @@ const providerOptions = computed<SelectOption[]>(() => [
   ...providers.value.map((provider) => ({ value: provider.id, label: provider.name })),
 ])
 
+const groupOptions = computed<SelectOption[]>(() => [
+  { value: 0, label: '全部分组' },
+  ...groups.value.map((group) => ({ value: group.id, label: group.name })),
+])
+
 const enabledChannelCount = computed(() => channels.value.filter((channel) => channel.enabled).length)
 const enabledSubscriptionCount = computed(() => subscriptions.value.filter((subscription) => subscription.enabled).length)
 const pendingDeliveryCount = computed(() =>
@@ -300,14 +310,16 @@ async function loadAll(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [channelResult, subscriptionResult, providerResult] = await Promise.all([
+    const [channelResult, subscriptionResult, providerResult, groupResult] = await Promise.all([
       listSupplierNotificationChannels(),
       listSupplierNotificationSubscriptions(),
       supplierProvidersAPI.list({ page: 1, page_size: 1000 }),
+      listAllGroups(),
     ])
     channels.value = channelResult.items ?? []
     subscriptions.value = subscriptionResult.items ?? []
     providers.value = providerResult.items ?? []
+    groups.value = groupResult ?? []
     await loadDeliveries()
     lastLoadedAt.value = new Date().toISOString()
   } catch (err) {
@@ -522,6 +534,7 @@ function openCreateSubscriptionDialog(): void {
     id: null,
     channel_id: channels.value[0].id,
     provider_id: 0,
+    group_id: 0,
     event_type: 'balance_low',
     enabled: true,
   }
@@ -534,6 +547,7 @@ function openEditSubscriptionDialog(subscription: SupplierNotificationSubscripti
     id: subscription.id,
     channel_id: subscription.channel_id,
     provider_id: subscription.provider_id ?? 0,
+    group_id: subscription.group_id ?? 0,
     event_type: asEventType(subscription.event_type) ?? 'balance_low',
     enabled: subscription.enabled,
   }
@@ -550,6 +564,19 @@ function closeSubscriptionDialog(): void {
   forceCloseSubscriptionDialog()
 }
 
+// 订阅的维度由事件类型决定：分组事件只挂 group_id、供应商事件只挂 provider_id。
+// 后端对错配的组合直接拒绝，所以这里按事件类型只填一边，另一边显式置空。
+function subscriptionScopeInput(form: {
+  provider_id: number
+  group_id: number
+  event_type: SupplierNotificationEventType
+}): Pick<SupplierNotificationSubscriptionInput, 'provider_id' | 'group_id'> {
+  if (isGroupScopedEvent(form.event_type)) {
+    return { provider_id: null, group_id: form.group_id > 0 ? form.group_id : null }
+  }
+  return { provider_id: form.provider_id > 0 ? form.provider_id : null, group_id: null }
+}
+
 async function saveSubscription(): Promise<void> {
   const form = subscriptionForm.value
   if (!form) return
@@ -559,7 +586,7 @@ async function saveSubscription(): Promise<void> {
   }
   const input: SupplierNotificationSubscriptionInput = {
     channel_id: form.channel_id,
-    provider_id: form.provider_id > 0 ? form.provider_id : null,
+    ...subscriptionScopeInput(form),
     event_type: form.event_type,
     enabled: form.enabled,
   }
@@ -590,7 +617,11 @@ async function toggleSubscription(subscription: SupplierNotificationSubscription
   try {
     const saved = await updateSupplierNotificationSubscription(subscription.id, {
       channel_id: subscription.channel_id,
-      provider_id: subscription.provider_id ?? null,
+      ...subscriptionScopeInput({
+        provider_id: subscription.provider_id ?? 0,
+        group_id: subscription.group_id ?? 0,
+        event_type: asEventType(subscription.event_type) ?? 'balance_low',
+      }),
       event_type: asEventType(subscription.event_type) ?? 'balance_low',
       enabled,
     })
@@ -693,7 +724,7 @@ function asPositiveNumber(value: string | number | boolean | null): number | und
 }
 
 function asEventType(value: string | number | boolean | null): SupplierNotificationEventType | undefined {
-  return value === 'balance_low' || value === 'balance_recovered' || value === 'cost_overrun' || value === 'cost_recovered' ? value : undefined
+  return value === 'balance_low' || value === 'balance_recovered' || value === 'cost_overrun' || value === 'cost_recovered' || value === 'group_account_abnormal' ? value : undefined
 }
 
 function asDeliveryStatus(value: string | number | boolean | null): SupplierNotificationDeliveryStatus | undefined {
@@ -709,6 +740,35 @@ function providerName(id?: number | null): string {
   return providers.value.find((provider) => provider.id === id)?.name ?? `供应商 #${id}`
 }
 
+function groupName(id?: number | null): string {
+  if (!id) return '全部分组'
+  return groups.value.find((group) => group.id === id)?.name ?? `分组 #${id}`
+}
+
+// 分组维度的事件（目前只有分组账号异常）没有供应商，订阅范围与投递记录都只能落到分组上。
+function isGroupScopedEvent(eventType: string): boolean {
+  return eventType === 'group_account_abnormal'
+}
+
+// 订阅列表的「范围」列：按事件维度选择供应商名或分组名，不然后者会显示成「全部供应商」。
+function subscriptionScopeLabel(subscription: SupplierNotificationSubscription): string {
+  if (isGroupScopedEvent(subscription.event_type)) return groupName(subscription.group_id)
+  return providerName(subscription.provider_id)
+}
+
+// 投递记录的「对象」列：分组事件取后端投影的 group_name，供应商事件仍用 provider_name。
+function deliveryTargetName(delivery: SupplierNotificationDelivery): string {
+  if (isGroupScopedEvent(delivery.event_type)) {
+    return delivery.group_name || groupName(delivery.group_id)
+  }
+  return delivery.provider_name
+}
+
+function deliveryTargetSub(delivery: SupplierNotificationDelivery): string {
+  if (isGroupScopedEvent(delivery.event_type)) return `分组 #${delivery.group_id ?? '—'}`
+  return `供应商 #${delivery.provider_id}`
+}
+
 function secretConfigured(channel: SupplierNotificationChannelView): boolean {
   return channel.feishu_secret_configured === true
 }
@@ -722,6 +782,7 @@ function eventTypeLabel(eventType: string): string {
   if (eventType === 'cost_overrun') return '成本超额'
   if (eventType === 'cost_recovered') return '成本恢复'
   if (eventType === 'group_changed') return '分组变化'
+  if (eventType === 'group_account_abnormal') return '分组账号异常'
   return '余额不足'
 }
 

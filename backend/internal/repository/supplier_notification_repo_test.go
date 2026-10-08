@@ -125,7 +125,7 @@ func TestSupplierNotificationRepositoryCreateDeliveryStoresGroupChangeEventID(t 
 		NextAttemptAt:      now,
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO supplier_notification_deliveries")).
-		WithArgs(int64(1), nil, groupChangeEventID, int64(10), service.SupplierGroupChangeEventType,
+		WithArgs(int64(1), nil, groupChangeEventID, int64(10), nil, service.SupplierGroupChangeEventType,
 			service.SupplierNotificationDeliveryPending, string(delivery.PayloadJSON), int64(0), now, "", nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(int64(902), now, now))
 
@@ -149,10 +149,11 @@ func TestSupplierNotificationRepositoryListDeliveriesScansGroupChangeEventID(t *
 	mock.ExpectQuery(`SELECT d\.id, d\.channel_id, c\.name, d\.event_id`).
 		WithArgs(50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "channel_id", "channel_name", "event_id", "group_change_event_id", "provider_id", "provider_name", "event_type",
+			"id", "channel_id", "channel_name", "event_id", "group_change_event_id", "provider_id", "provider_name",
+			"group_id", "group_name", "event_type",
 			"status", "payload_json", "attempt_count", "next_attempt_at", "last_error", "sent_at", "created_at", "updated_at",
 		}).AddRow(
-			int64(11), int64(1), "channel", nil, int64(901), int64(10), "provider", service.SupplierGroupChangeEventType, "pending",
+			int64(11), int64(1), "channel", nil, int64(901), int64(10), "provider", nil, "", service.SupplierGroupChangeEventType, "pending",
 			[]byte(`{"event_type":"group_changed"}`), 0, now, "", nil, now, now,
 		))
 
@@ -174,10 +175,11 @@ func TestSupplierNotificationRepositoryListDeliveriesScansPayloadJSON(t *testing
 	now := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_notification_deliveries d WHERE 1 = 1")).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 	mock.ExpectQuery(`SELECT d\.id, d\.channel_id, c\.name, d\.event_id`).WithArgs(50, 0).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "channel_id", "channel_name", "event_id", "group_change_event_id", "provider_id", "provider_name", "event_type",
+		"id", "channel_id", "channel_name", "event_id", "group_change_event_id", "provider_id", "provider_name",
+		"group_id", "group_name", "event_type",
 		"status", "payload_json", "attempt_count", "next_attempt_at", "last_error", "sent_at", "created_at", "updated_at",
 	}).AddRow(
-		int64(11), int64(1), "channel", nil, nil, int64(10), "provider", "balance_low", "pending",
+		int64(11), int64(1), "channel", nil, nil, int64(10), "provider", nil, "", "balance_low", "pending",
 		[]byte(`{"provider_id":10}`), 0, now, "", nil, now, now,
 	))
 

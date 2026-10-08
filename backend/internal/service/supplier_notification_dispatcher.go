@@ -15,6 +15,13 @@ const (
 	supplierNotificationMaxAttempts        = 4
 )
 
+// SupplierGroupAccountAbnormalCooldown 是「分组账号异常」的冷却时长。
+//
+// 刻意比余额预警默认的 1 小时长：账号样本不足是一个**持续状态**而不是一次事件
+// （渠道出不了某个模型时会一直不满足样本要求），而择优任务每 180s 就会判定一次。
+// 沿用 1 小时等于每天给同一个卡住的账号推 24 条重复消息。
+const SupplierGroupAccountAbnormalCooldown = 6 * time.Hour
+
 type SupplierNotificationDispatcher struct {
 	repo        SupplierNotificationRepository
 	sender      SupplierNotificationSender
@@ -196,12 +203,82 @@ func (d *SupplierNotificationDispatcher) DispatchGroupChanged(ctx context.Contex
 	return dispatchErr
 }
 
+// DispatchGroupAccountAbnormal 派发一次「分组账号异常」通知。
+//
+// 与供应商维度事件的差别：这里没有 provider，订阅匹配走 group_id、冷却落在独立表
+// supplier_group_notification_cooldowns（见迁移 246）。只推异常、不推恢复。
+func (d *SupplierNotificationDispatcher) DispatchGroupAccountAbnormal(ctx context.Context, event SupplierGroupAccountAbnormalEvent) error {
+	if d == nil || d.repo == nil {
+		return ErrSupplierNotificationInvalid
+	}
+	if event.GroupID <= 0 || len(event.Accounts) == 0 {
+		return ErrSupplierNotificationInvalid
+	}
+	if event.ObservedAt.IsZero() {
+		event.ObservedAt = time.Now()
+	}
+	eventType := SupplierGroupAccountAbnormalEventType
+	payloadJSON, err := json.Marshal(SupplierNotificationEventPayload{
+		GroupID:          event.GroupID,
+		GroupName:        event.GroupName,
+		EventType:        eventType,
+		ObservedAt:       event.ObservedAt,
+		AbnormalAccounts: event.Accounts,
+	})
+	if err != nil {
+		return fmt.Errorf("编码分组账号异常通知载荷失败: %w", err)
+	}
+
+	channels, err := d.repo.ListChannels(ctx)
+	if err != nil {
+		return fmt.Errorf("查询启用供应商通知渠道失败: %w", err)
+	}
+	now := time.Now()
+	groupID := event.GroupID
+	var dispatchErr error
+	for _, channel := range channels {
+		if !channel.Enabled || channel.ID <= 0 {
+			continue
+		}
+		subscriptions, listErr := d.repo.ListMatchingGroupSubscriptions(ctx, channel.ID, event.GroupID, eventType)
+		if listErr != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("查询渠道 %d 的分组通知订阅失败: %w", channel.ID, listErr))
+			continue
+		}
+		if len(subscriptions) == 0 {
+			continue
+		}
+		claimed, claimErr := d.repo.ClaimGroupCooldown(ctx, channel.ID, event.GroupID, eventType, now, now.Add(SupplierGroupAccountAbnormalCooldown))
+		if claimErr != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("占用渠道 %d 的分组通知冷却失败: %w", channel.ID, claimErr))
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		// ProviderID 留 0：仓储层会把它写成 NULL，分组事件没有供应商。
+		delivery := &SupplierNotificationDeliveryRecord{
+			ChannelID:     channel.ID,
+			ChannelName:   channel.Name,
+			GroupID:       &groupID,
+			EventType:     eventType,
+			Status:        SupplierNotificationDeliveryPending,
+			PayloadJSON:   payloadJSON,
+			NextAttemptAt: now,
+		}
+		if createErr := d.repo.CreateDelivery(ctx, delivery); createErr != nil {
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("创建渠道 %d 的通知投递失败: %w", channel.ID, createErr))
+		}
+	}
+	return dispatchErr
+}
+
 // isValidSupplierNotificationEventType 判断当前供应商通知模块支持的事件类型。
 func isValidSupplierNotificationEventType(eventType string) bool {
 	switch eventType {
 	case SupplierBalanceAlertEventLow, SupplierBalanceAlertEventRecovered,
 		SupplierCostAlertEventOverrun, SupplierCostAlertEventRecovered,
-		SupplierGroupChangeEventType:
+		SupplierGroupChangeEventType, SupplierGroupAccountAbnormalEventType:
 		return true
 	default:
 		return false
