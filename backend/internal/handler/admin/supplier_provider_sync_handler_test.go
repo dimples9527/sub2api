@@ -444,10 +444,11 @@ func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	require.Equal(t, service.SupplierSyncScopeBalance, syncStub.testScope)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&platform=openai&sort_by=supplier_today_cost&sort_order=desc&page=1&page_size=20", nil)
+	req = httptest.NewRequest(http.MethodGet, "/accounts?provider_id=42&active=true&platform=openai&models=gpt-5,claude-*&sort_by=supplier_today_cost&sort_order=desc&page=1&page_size=20", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "openai", dataStub.accountListParams.Platform)
+	require.Equal(t, []string{"gpt-5", "claude-*"}, dataStub.accountListParams.Models)
 	require.Equal(t, "supplier_today_cost", dataStub.accountListParams.SortBy)
 	require.Equal(t, "desc", dataStub.accountListParams.SortOrder)
 
@@ -1327,4 +1328,35 @@ func TestSupplierProviderSyncHandlerOnlyAllowsLoginWhenExplicitlyRequested(t *te
 	syncStub.upstreamSessionAllowLogin = false
 	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/providers/9/upstream-sessions/detail?login=true", nil))
 	require.True(t, syncStub.upstreamSessionAllowLogin, "?login=true 应透传为允许登录后查询")
+}
+
+// models 筛选同时接受重复键（?models=a&models=b）与逗号分隔（?models=a,b）两种写法；
+// 空项直接丢弃，去重留在数据访问层（normalizeSupplierProviderDataListParams）。
+func TestParseSupplierProviderModelFilters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{name: "无参数", query: "", want: nil},
+		{name: "逗号分隔", query: "?models=gpt-5,claude-opus-4-1", want: []string{"gpt-5", "claude-opus-4-1"}},
+		{name: "重复键", query: "?models=gpt-5&models=claude-opus-4-1", want: []string{"gpt-5", "claude-opus-4-1"}},
+		{name: "两种混用并丢弃空项", query: "?models=gpt-5,,&models=+claude-opus-4-1+", want: []string{"gpt-5", "claude-opus-4-1"}},
+		{name: "全空项", query: "?models=+,+", want: nil},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			var got []string
+			router.GET("/accounts", func(c *gin.Context) {
+				got = parseSupplierProviderModelFilters(c)
+			})
+			router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/accounts"+tc.query, nil))
+			require.Equal(t, tc.want, got)
+		})
+	}
 }

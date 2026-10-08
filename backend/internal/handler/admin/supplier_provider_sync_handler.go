@@ -384,6 +384,7 @@ func (h *SupplierProviderSyncHandler) ListAccounts(c *gin.Context) {
 		Status:     strings.TrimSpace(c.Query("status")),
 		Search:     strings.TrimSpace(c.Query("search")),
 		Platform:   strings.TrimSpace(c.Query("platform")),
+		Models:     parseSupplierProviderModelFilters(c),
 		SortBy:     strings.TrimSpace(c.Query("sort_by")),
 		SortOrder:  strings.TrimSpace(c.Query("sort_order")),
 		Page:       page,
@@ -1052,6 +1053,31 @@ func parseOptionalInt64List(raw string) []int64 {
 		return nil
 	}
 	return values
+}
+
+// parseSupplierProviderModelFilters 解析「模型白名单」筛选参数。
+// 同时接受重复键（?models=a&models=b）与逗号分隔（?models=a,b）两种写法，也可以混用。
+// 空项直接丢弃 —— 与 parseOptionalInt64List 口径一致：这是只读筛选，宁可少筛一个模型，
+// 也别因为一个脏值让整个页面打不开。去重留在数据访问层（见 normalizeSupplierProviderDataListParams）。
+func parseSupplierProviderModelFilters(c *gin.Context) []string {
+	values := c.QueryArray("models")
+	if len(values) == 0 {
+		if single := strings.TrimSpace(c.Query("models")); single != "" {
+			values = []string{single}
+		}
+	}
+	models := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			if model := strings.TrimSpace(part); model != "" {
+				models = append(models, model)
+			}
+		}
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
 }
 
 // supplierSyncCostDay 解析成本同步的归属日期；空值返回今天。

@@ -36,7 +36,7 @@
         <div>
           <span class="sp-filter-card-kicker">筛选条件</span>
           <h2>筛选账号</h2>
-          <p>按供应商、平台、本地分组、同步有效性和上游状态 / 已删除快速定位账号。</p>
+          <p>按供应商、平台、本地分组、同步有效性和上游状态 / 已删除快速定位账号。模型筛选为「全部支持」：填多个模型时，账号必须同时支持每一个。</p>
         </div>
         <span class="sp-filter-card-count">{{ total }} 个账号</span>
       </header>
@@ -138,6 +138,20 @@
               class="w-full"
               :options="upstreamStatusFilterOptions"
               :searchable="false"
+            />
+          </div>
+          <div
+            ref="modelFilterControl"
+            class="sp-account-filter-control sp-account-model-filter"
+            role="group"
+            aria-labelledby="supplier-account-model-label"
+          >
+            <span id="supplier-account-model-label" class="sr-only">模型白名单</span>
+            <Input
+              v-model="modelFilter"
+              class="w-full"
+              placeholder="模型，逗号分隔"
+              title="按本地账号的模型白名单筛选；填多个模型时要求账号同时支持每一个（全部支持）。未配置模型白名单的账号视为支持所有模型。"
             />
           </div>
         </div>
@@ -1894,6 +1908,7 @@ type SupplierAccountFilterSnapshot = {
   providerID: number
   groupID: number
   platform: string
+  models: string[]
   active?: boolean
   status?: string
   search?: string
@@ -2496,6 +2511,8 @@ const providerStatusFilter = ref('enabled')
 const groupID = ref(0)
 const platformFilter = ref('')
 const activeFilter = ref('')
+// 模型白名单筛选：逗号分隔的自由文本。多模型是「全部支持」（AND），与后端 where 口径一致。
+const modelFilter = ref('')
 const upstreamStatusFilter = ref('')
 const search = ref('')
 const searchFilterControl = ref<HTMLElement | null>(null)
@@ -2505,7 +2522,9 @@ const groupFilterControl = ref<HTMLElement | null>(null)
 const platformFilterControl = ref<HTMLElement | null>(null)
 const activeFilterControl = ref<HTMLElement | null>(null)
 const upstreamStatusFilterControl = ref<HTMLElement | null>(null)
+const modelFilterControl = ref<HTMLElement | null>(null)
 let searchTimer: number | undefined
+let modelFilterTimer: number | undefined
 let batchTestPollTimer: ReturnType<typeof setTimeout> | null = null
 let batchTestPollToken = 0
 
@@ -2685,6 +2704,20 @@ const batchTestPlatformSummaries = computed<SupplierBatchTestPlatformSummary[]>(
   return [...summaries.values()].sort((left, right) => left.platform.localeCompare(right.platform))
 })
 
+// 逗号分隔的输入 → 模型数组。去空白、丢空项、保序去重，
+// 与后端 normalizeSupplierProviderModelFilters 同口径（模型名大小写敏感，不折叠）。
+const modelFilterModels = computed<string[]>(() => {
+  const seen = new Set<string>()
+  const models: string[] = []
+  for (const part of modelFilter.value.split(',')) {
+    const model = part.trim()
+    if (!model || seen.has(model)) continue
+    seen.add(model)
+    models.push(model)
+  }
+  return models
+})
+
 function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot, 'summary'>): string {
   const provider = snapshot.providerID
     ? providers.value.find(item => item.id === snapshot.providerID)?.name || `供应商 #${snapshot.providerID}`
@@ -2693,6 +2726,7 @@ function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot
     ? localGroups.value.find(item => item.id === snapshot.groupID)?.name || `本地分组 #${snapshot.groupID}`
     : '全部本地分组'
   const platform = snapshot.platform ? platformLabel(snapshot.platform) : '全部平台'
+  const models = snapshot.models.length > 0 ? `模型：${snapshot.models.join('、')}` : '全部模型'
   const active = snapshot.active === undefined
     ? '全部有效性'
     : activeFilterOptions.find(option => option.value === String(snapshot.active))?.label || '全部有效性'
@@ -2705,6 +2739,7 @@ function buildSupplierFilterSummary(snapshot: Omit<SupplierAccountFilterSnapshot
     provider,
     group,
     platform,
+    models,
     active,
     status,
     `快捷过滤：${quickFilter}`,
@@ -2717,6 +2752,7 @@ function createSupplierAccountFilterSnapshot(): SupplierAccountFilterSnapshot {
     providerID: providerID.value || 0,
     groupID: groupID.value || 0,
     platform: platformFilter.value || '',
+    models: modelFilterModels.value,
     active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
     status: upstreamStatusFilter.value || undefined,
     search: search.value.trim() || undefined,
@@ -2846,6 +2882,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
+  window.clearTimeout(modelFilterTimer)
   window.clearTimeout(bindByGroupSearchTimer)
   window.clearInterval(guardFreshnessTimer)
   window.removeEventListener('scroll', handleWindowScroll)
@@ -2878,6 +2915,12 @@ watch(platformFilter, platform => {
 watch(search, () => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(resetPageAndLoad, 350)
+})
+
+// 模型是自由文本输入，和搜索一样走防抖：逐字符发请求既浪费也会让列表闪烁。
+watch(modelFilter, () => {
+  window.clearTimeout(modelFilterTimer)
+  modelFilterTimer = window.setTimeout(resetPageAndLoad, 350)
 })
 
 async function loadProviders() {
@@ -2939,12 +2982,16 @@ function selectAccountQuickFilter(filter: AccountQuickFilterKey) {
   if (accountQuickFilter.value === filter) return
   accountQuickFilter.value = filter
   page.value = 1
-  // 「未匹配」筛的是本地账号匹配状态，而「本地分组 / 平台」这两个服务端筛选同样建立在
+  // 「未匹配」筛的是本地账号匹配状态，而「本地分组 / 平台 / 模型」这三个服务端筛选同样建立在
   // 「已匹配到本地账号」之上 —— 断链的行压根不会被返回，chip 就永远筛不出东西。
-  // 所以选中它时先把这两个筛选清掉，重新拉取交给它们各自的 watcher。
-  if (filter === 'unmatched' && (groupID.value !== 0 || platformFilter.value !== '')) {
+  // 所以选中它时先把这三个筛选清掉，重新拉取交给它们各自的 watcher。
+  if (
+    filter === 'unmatched'
+    && (groupID.value !== 0 || platformFilter.value !== '' || modelFilter.value !== '')
+  ) {
     groupID.value = 0
     platformFilter.value = ''
+    modelFilter.value = ''
     return
   }
   applyAccountQuickFilterPage()
@@ -2962,6 +3009,7 @@ async function loadAccounts() {
         provider_id: providerID.value || undefined,
         group_id: groupID.value || undefined,
         platform: platformFilter.value || undefined,
+        models: modelFilterModels.value.length > 0 ? modelFilterModels.value : undefined,
         active: activeFilter.value === '' ? undefined : activeFilter.value === 'true',
         status: upstreamStatusFilter.value || undefined,
         search: search.value.trim() || undefined,
@@ -2993,6 +3041,7 @@ async function loadFilteredTestAccounts(snapshot: SupplierAccountFilterSnapshot)
       provider_id: snapshot.providerID || undefined,
       group_id: snapshot.groupID || undefined,
       platform: snapshot.platform || undefined,
+      models: snapshot.models.length > 0 ? snapshot.models : undefined,
       active: snapshot.active,
       status: snapshot.status,
       search: snapshot.search,
@@ -3737,6 +3786,7 @@ function applyFilterControlLabels() {
   setFilterControlLabel(platformFilterControl.value, '.select-trigger', 'supplier-account-platform-label')
   setFilterControlLabel(activeFilterControl.value, '.select-trigger', 'supplier-account-active-label')
   setFilterControlLabel(upstreamStatusFilterControl.value, '.select-trigger', 'supplier-account-upstream-status-label')
+  setFilterControlLabel(modelFilterControl.value, 'input', 'supplier-account-model-label')
 }
 
 function setFilterControlLabel(container: HTMLElement | null, selector: string, labelID: string) {

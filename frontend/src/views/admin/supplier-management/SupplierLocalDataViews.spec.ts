@@ -854,7 +854,7 @@ describe('supplier local data views component usage', () => {
     const wrapper = await mountSupplierAccounts()
     const filterGroups = wrapper.findAll('.sp-account-filter-control[role="group"]')
 
-    expect(filterGroups).toHaveLength(7)
+    expect(filterGroups).toHaveLength(8)
     expect(filterGroups.map(group => group.attributes('aria-labelledby'))).toEqual([
       'supplier-account-search-label',
       'supplier-account-provider-label',
@@ -863,6 +863,7 @@ describe('supplier local data views component usage', () => {
       'supplier-account-group-label',
       'supplier-account-active-label',
       'supplier-account-upstream-status-label',
+      'supplier-account-model-label',
     ])
     expect(filterGroups.map(group => group.get('.sr-only').text())).toEqual([
       '账号搜索',
@@ -872,6 +873,7 @@ describe('supplier local data views component usage', () => {
       '本地分组',
       '同步有效性',
       '上游状态',
+      '模型白名单',
     ])
     expect(filterGroups.map(group => {
       const control = group.find('input, button')
@@ -884,6 +886,7 @@ describe('supplier local data views component usage', () => {
       'supplier-account-group-label',
       'supplier-account-active-label',
       'supplier-account-upstream-status-label',
+      'supplier-account-model-label',
     ])
 
     wrapper.unmount()
@@ -910,6 +913,29 @@ describe('supplier local data views component usage', () => {
 
   it('includes the local group in the batch-test query contract', () => {
     expect(accountsSource).toContain('group_id: snapshot.groupID || undefined')
+  })
+
+  it('sends the AND model filter to the paged account query', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const setupState = (wrapper.vm as any).$?.setupState
+
+    // 模型筛选和搜索一样走 350ms 防抖，要等它落地再断言最后一次请求。
+    // 顺带覆盖「逗号分隔 + 去空白 + 保序去重」这一段输入归一化。
+    setupState.modelFilter = ' gpt-5 , claude-opus-4-1 , gpt-5 '
+    await new Promise(resolve => setTimeout(resolve, 400))
+    await flushPromises()
+
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      models: ['gpt-5', 'claude-opus-4-1'],
+      page: 1,
+    }))
+
+    wrapper.unmount()
+  })
+
+  it('includes the model filter in the batch-test query contract', () => {
+    expect(accountsSource).toContain('models: modelFilterModels.value.length > 0 ? modelFilterModels.value : undefined')
+    expect(accountsSource).toContain('models: snapshot.models.length > 0 ? snapshot.models : undefined')
   })
 
   it('filters local-group options by platform and clears an incompatible selection', async () => {
@@ -1101,6 +1127,7 @@ describe('supplier local data views component usage', () => {
       providerID: 0,
       groupID: 0,
       platform: '',
+      models: [],
       quickFilter: 'all',
       summary: '全部账号',
     })

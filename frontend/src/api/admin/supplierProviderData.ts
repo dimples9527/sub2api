@@ -195,6 +195,8 @@ export interface SupplierProviderDataListParams {
   key_status?: 'created' | 'not_created' | 'unknown' | string
   search?: string
   platform?: string
+  /** 模型白名单筛选：要求该行匹配到的唯一本地账号**同时**支持列表里的每一个模型（AND 语义） */
+  models?: string[]
   match_status?: string
   rate_status?: string
   sort_by?: string
@@ -436,9 +438,17 @@ export async function testProviderEndpoint(id: number, scope: Exclude<SupplierSy
 }
 
 export async function listSupplierAccounts(params: SupplierProviderDataListParams = {}): Promise<SupplierProviderAccountListResult> {
+  const { models, ...rest } = params
   const { data } = await apiClient.get<SupplierProviderAccountListResult>(
     '/admin/supplier-management/accounts',
-    { params }
+    {
+      params: {
+        ...rest,
+        // models 走「逗号分隔的单个参数」：axios 默认把数组序列化成 models[]=a&models[]=b，
+        // 键名带方括号，后端的 c.QueryArray("models") 读不到。模型名不含逗号，拼接是安全的。
+        models: models && models.length > 0 ? models.join(',') : undefined,
+      },
+    }
   )
   return data
 }

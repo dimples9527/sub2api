@@ -1400,6 +1400,35 @@ func TestSupplierProviderAccountWhereIncludesLocalGroup(t *testing.T) {
 	require.Equal(t, []any{int64(42), int64(201)}, args)
 }
 
+// 模型筛选必须挂在「匹配到的唯一本地账号」上（白名单存在本地账号的 credentials 里），
+// 且多模型是 AND 语义 —— SQL 里体现为「不存在任何一个请求模型找不到匹配键」。
+func TestSupplierProviderAccountWhereIncludesModelWhitelist(t *testing.T) {
+	where, args := supplierProviderAccountWhere(service.SupplierProviderDataListParams{
+		ProviderID: 42,
+		Models:     []string{"gpt-5", "claude-*"},
+	})
+
+	require.Contains(t, where, "a.provider_id = $1")
+	require.Contains(t, where, "FROM accounts local_account")
+	require.Contains(t, where, "local_account.credentials->'model_mapping'")
+	require.Contains(t, where, "jsonb_object_keys(local_account.credentials->'model_mapping')")
+	require.Contains(t, where, "unnest($2::text[])")
+	require.Contains(t, where, "right(mapping_key.pattern, 1) = '*'")
+	require.Contains(t, where, ") = 1")
+	require.Equal(t, []any{int64(42), pq.Array([]string{"gpt-5", "claude-*"})}, args)
+}
+
+func TestNormalizeSupplierProviderModelFilters(t *testing.T) {
+	t.Parallel()
+
+	require.Nil(t, normalizeSupplierProviderModelFilters(nil))
+	require.Nil(t, normalizeSupplierProviderModelFilters([]string{"  ", ""}))
+	// 模型名大小写敏感（IsModelSupported 的键匹配不折叠大小写），所以 GPT-5 与 gpt-5 不能并成一条。
+	require.Equal(t,
+		[]string{"gpt-5", "GPT-5", "claude-*"},
+		normalizeSupplierProviderModelFilters([]string{" gpt-5 ", "gpt-5", "", "GPT-5", "claude-*"}))
+}
+
 func TestSupplierProviderGroupListWhereAddsMatchStatusFilters(t *testing.T) {
 	tests := []struct {
 		name      string

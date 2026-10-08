@@ -124,6 +124,11 @@ type SupplierProviderGroup struct {
 
 // SupplierProviderDataListParams 供应商上游数据列表查询参数。
 // Status 为上游密钥业务状态：active/disabled/expired/quota_exhausted/unknown。
+//
+// Models 是「模型白名单」筛选条件：要求该行匹配到的唯一本地账号**同时**支持列表里的每一个模型
+// （AND 语义）。判定口径对齐 service.Account.IsModelSupported：白名单为空视为放行所有模型；
+// 键精确匹配，或以 `*` 结尾时按前缀匹配。
+// ⚠️ 未复刻两处平台特例：OpenAI OAuth / DeepSeek 在空映射下仍有各自的内置模型白名单。
 type SupplierProviderDataListParams struct {
 	ProviderID  int64
 	GroupID     int64
@@ -132,6 +137,7 @@ type SupplierProviderDataListParams struct {
 	KeyStatus   string
 	Search      string
 	Platform    string
+	Models      []string
 	MatchStatus string
 	RateStatus  string
 	SortBy      string

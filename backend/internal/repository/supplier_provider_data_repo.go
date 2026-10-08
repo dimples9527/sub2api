@@ -2108,8 +2108,63 @@ WHERE local_account.deleted_at IS NULL
   LIMIT 1
 ), '') = $%d`, len(args)))
 	}
+	if len(params.Models) > 0 {
+		args = append(args, pq.Array(params.Models))
+		// 与 GroupID 同一个口径：只认「恰好匹配到一个本地账号」的行。模型白名单挂在本地账号上，
+		// 匹配冲突（match_count > 1）时无法确定用哪份白名单，因此一并排除，而不是取其中一个。
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (
+SELECT 1
+FROM accounts local_account
+WHERE local_account.deleted_at IS NULL
+  AND %s
+  AND (
+    SELECT COUNT(*)
+    FROM accounts candidate
+    WHERE candidate.deleted_at IS NULL
+      AND %s
+  ) = 1
+  AND %s
+)`,
+			supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"),
+			supplierProviderLocalAccountMatchCondition("candidate.name", "a.name"),
+			supplierProviderAccountModelSupportCondition("local_account.credentials", len(args))))
+	}
 	return strings.Join(conditions, " AND "), args
 }
+
+// supplierProviderAccountModelSupportCondition 生成「账号的模型白名单同时支持全部待筛模型」的 SQL 条件。
+//
+// 口径对齐 service.Account.IsModelSupported：
+//   - 白名单缺失、为空、或根本不是对象（脏数据）⇒ 视为未配置 ⇒ 放行所有模型；
+//   - 键精确匹配，或以 `*` 结尾时按前缀匹配（同 matchAntigravityWildcard，只支持末尾一个 *）。
+//
+// ⚠️ 有两处平台特例没有复刻：OpenAI OAuth 与 DeepSeek 在「空映射」下仍会拒绝不属于本厂的模型名。
+// 要复刻就得把平台内置白名单也搬进 SQL，代价大于收益 —— 本条件是筛选器，不是调度判据。
+//
+// credentialsSQL 是取 credentials 的表达式（如 local_account.credentials）；
+// argIndex 是模型名数组参数在这条查询里的占位符序号。
+func supplierProviderAccountModelSupportCondition(credentialsSQL string, argIndex int) string {
+	mapping := credentialsSQL + "->'model_mapping'"
+	return fmt.Sprintf(`(
+  COALESCE(jsonb_typeof(%s), '') <> 'object'
+  OR %s = '{}'::jsonb
+  OR NOT EXISTS (
+    SELECT 1
+    FROM unnest($%d::text[]) AS requested_model(model_id)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM jsonb_object_keys(%s) AS mapping_key(pattern)
+      WHERE mapping_key.pattern = requested_model.model_id
+         OR (
+           right(mapping_key.pattern, 1) = '*'
+           AND left(requested_model.model_id, char_length(mapping_key.pattern) - 1)
+             = left(mapping_key.pattern, char_length(mapping_key.pattern) - 1)
+         )
+    )
+  )
+)`, mapping, mapping, argIndex, mapping)
+}
+
 func supplierProviderGroupBaseWhere(params service.SupplierProviderDataListParams) (string, []any) {
 	where, args := supplierProviderDataWhere("g", params)
 	conditions := []string{where}
@@ -2293,7 +2348,34 @@ func normalizeSupplierProviderDataListParams(params service.SupplierProviderData
 	if params.PageSize < 1 || params.PageSize > 200 {
 		params.PageSize = 50
 	}
+	params.Models = normalizeSupplierProviderModelFilters(params.Models)
 	return params
+}
+
+// normalizeSupplierProviderModelFilters 去空白、去空项、保序去重。
+// 模型名按原样比较（不折叠大小写）—— IsModelSupported 的键匹配是大小写敏感的，
+// 折叠会把两个不同的白名单键误并成一个。
+func normalizeSupplierProviderModelFilters(models []string) []string {
+	if len(models) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		out = append(out, model)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeSupplierProviderMonitorTargetListParams(params service.SupplierProviderMonitorTargetListParams) service.SupplierProviderMonitorTargetListParams {
