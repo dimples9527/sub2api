@@ -1,36 +1,5 @@
 <template>
   <SupplierModuleLayout>
-    <section
-      v-if="schedulingAlertSummary.total > 0"
-      class="sp-alert-banner"
-      :class="{ 'is-critical': schedulingAlertSummary.hasCritical }"
-      aria-label="调度账号告警汇总"
-      data-test="supplier-account-alert-banner"
-    >
-      <div class="sp-alert-banner-head">
-        <span class="sp-alert-banner-icon" aria-hidden="true">!</span>
-        <span class="sp-alert-banner-title">
-          当前筛选下 <strong>{{ schedulingAlertSummary.total }}</strong> 个参与择优的调度账号存在告警
-        </span>
-        <span class="sp-alert-banner-chips">
-          <template v-for="key in SCHEDULING_ALERT_ORDER" :key="key">
-            <span
-              v-if="schedulingAlertSummary.counts[key] > 0"
-              :class="['sp-alert-chip', schedulingAlertHeadClass(key)]"
-            >{{ SCHEDULING_ALERT_LABELS[key] }} {{ schedulingAlertSummary.counts[key] }}</span>
-          </template>
-        </span>
-        <button
-          type="button"
-          class="sp-button small ghost sp-alert-banner-toggle"
-          @click="alertDetailVisible = true"
-        >
-          <Icon name="eye" size="sm" />
-          查看明细
-        </button>
-      </div>
-    </section>
-
     <section class="sp-account-toolbar" aria-label="账号筛选与操作">
       <header class="sp-filter-card-head">
         <div>
@@ -260,6 +229,26 @@
               class="sp-account-bind-count"
               data-test="supplier-account-sync-upstream-models-count"
             >{{ syncModelsTargets.length }}</span>
+          </button>
+          <!-- 调度账号告警入口。原来它是页面最顶部的一条横幅：占满整行、把下方表格整体推下去，
+               而它要表达的只是一个计数 + 一句说明。做成带角标的按钮后信息量不变
+               （分类计数改挂 title），且不再挤压首屏。
+               角标与按钮配色跟随最高级别：出现 critical 就整体转红，否则保持琥珀。 -->
+          <button
+            v-if="schedulingAlertSummary.total > 0"
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-alerts"
+            :class="{ 'is-critical': schedulingAlertSummary.hasCritical }"
+            type="button"
+            data-test="supplier-account-scheduling-alerts"
+            :title="schedulingAlertButtonHint"
+            @click="alertDetailVisible = true"
+          >
+            调度告警
+            <span
+              class="sp-account-alert-count"
+              :class="{ 'is-critical': schedulingAlertSummary.hasCritical }"
+              data-test="supplier-account-scheduling-alert-count"
+            >{{ schedulingAlertSummary.total }}</span>
           </button>
         </div>
       </div>
@@ -2545,7 +2534,7 @@ const BALANCE_CRITICAL_ALERT_DAYS = 1
 const SESSION_NEAR_LIMIT_RATIO = 0.8
 const guardFreshnessNow = ref(Date.now())
 const guardCronIntervalSeconds = ref(0)
-// 分组择优调度里「不参与择优」的本地分组 ID。告警横幅只统计参与择优的分组，
+// 分组择优调度里「不参与择优」的本地分组 ID。调度告警只统计参与择优的分组，
 // 与任务配置弹窗「勾选 = 参与择优」的口径一致；空列表 = 所有分组都参与。
 const electionDisabledGroupIDs = ref<number[]>([])
 let guardFreshnessTimer: number | undefined
@@ -4133,7 +4122,7 @@ function accountParticipatesInElection(account: SupplierProviderAccount): boolea
 }
 
 // 告警只针对已匹配、开启调度、且所属分组参与择优的账号:这些账号正在承接线上流量,异常才需要立即处置。
-// 择优里被关掉的分组不参与换人,其账号的调度开关是人工开的,不属于这条横幅的处置范围。
+// 择优里被关掉的分组不参与换人,其账号的调度开关是人工开的,不属于这条告警的处置范围。
 function accountSchedulingAlerts(account: SupplierProviderAccount): SchedulingAlert[] {
   if (!isMatchedLocalAccount(account) || account.local_account_schedulable !== true) return []
   if (!accountParticipatesInElection(account)) return []
@@ -4192,9 +4181,15 @@ const schedulingAlertSummary = computed(() => {
   }
 })
 
-function schedulingAlertHeadClass(key: SchedulingAlertKey): string {
-  return key === 'failing_scheduled' || key === 'session_near_limit' ? 'is-critical' : 'is-warning'
-}
+// 分类计数原来由横幅里的 chips 展示，横幅撤掉后改挂按钮的 title：
+// 信息一条不丢，又不占工具栏宽度（按钮行本来就放不下、会折行，再塞 chips 只会多占一行）。
+const schedulingAlertButtonHint = computed(() => {
+  const counts = schedulingAlertSummary.value.counts
+  const parts = SCHEDULING_ALERT_ORDER
+    .filter(key => counts[key] > 0)
+    .map(key => `${SCHEDULING_ALERT_LABELS[key]} ${counts[key]}`)
+  return `当前筛选下 ${schedulingAlertSummary.value.total} 个参与择优的调度账号存在告警：${parts.join(' · ')}。点击查看明细`
+})
 
 function closeAlertDetail() {
   alertDetailVisible.value = false
@@ -4390,7 +4385,7 @@ function normalizeGroupIDs(value: unknown): number[] {
 }
 
 // 一次性读取本页需要的自动化任务配置：健康守护周期（判定检测是否滞后）与分组择优调度的
-// 分组范围（决定告警横幅统计哪些账号）。任一失败都退回默认值，不打扰账号列表主流程。
+// 分组范围（决定调度告警统计哪些账号）。任一失败都退回默认值，不打扰账号列表主流程。
 async function loadAutomationTaskHints() {
   try {
     const tasks = await listAutomationTasks()
@@ -4440,73 +4435,6 @@ function formatTime(value?: string): string {
 }
 </script>
 <style scoped>
-.sp-alert-banner {
-  margin-bottom: 1rem;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sp-amber) 40%, var(--sp-line));
-  border-radius: 0.875rem;
-  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
-}
-
-.sp-alert-banner.is-critical {
-  border-color: color-mix(in srgb, var(--sp-red) 45%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-red) 8%, var(--sp-panel));
-}
-
-/* 头部只是容器：明细改由右侧按钮打开弹窗，避免整条横幅变成一个大按钮（内部 chips 也会被误触）。 */
-.sp-alert-banner-head {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.7rem 1rem;
-  color: var(--sp-text);
-  text-align: left;
-}
-
-.sp-alert-banner-icon {
-  display: inline-flex;
-  width: 1.35rem;
-  height: 1.35rem;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: var(--sp-amber);
-  color: #1a1a1a;
-  font-weight: 800;
-  font-size: 0.85rem;
-}
-
-.sp-alert-banner.is-critical .sp-alert-banner-icon {
-  background: var(--sp-red);
-  color: #fff;
-}
-
-.sp-alert-banner-title {
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-
-.sp-alert-banner-title strong {
-  font-size: 1rem;
-}
-
-.sp-alert-banner-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-/* 只保留定位与图标间距，配色/内边距交给 .sp-button.small.ghost 统一控制。 */
-.sp-alert-banner-toggle {
-  display: inline-flex;
-  margin-left: auto;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 0.25rem;
-}
-
 .sp-alert-chip {
   display: inline-flex;
   align-items: center;
@@ -4527,7 +4455,7 @@ function formatTime(value?: string): string {
   color: var(--sp-red);
 }
 
-/* 明细列表从横幅内联搬进弹窗：去掉横幅里的分隔上边线与外边距，交给弹窗 body 的 padding。 */
+/* 明细列表在弹窗里：不设分隔上边线与外边距，交给弹窗 body 的 padding。 */
 .sp-alert-list {
   margin: 0;
   padding: 0;
@@ -4857,6 +4785,62 @@ function formatTime(value?: string): string {
   border-color: color-mix(in srgb, var(--sp-orange) 62%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-orange) 16%, var(--sp-panel));
   color: color-mix(in srgb, var(--sp-orange) 88%, #7c2d12);
+}
+
+/* 调度账号告警入口（原页面顶部横幅，见模板里的注释）。
+   琥珀 = 有告警待处置；出现 critical 级告警时按钮与角标整体转红。
+   与「倍率守护日志」「健康守护详情」同为琥珀，但它们一个在工具栏开头、一个在中段，
+   本按钮在末尾，中间隔着「调度切换日志」的橙 —— 那处「琥珀与橙要排开」的约束不受影响。 */
+.sp-account-toolbar-alerts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-color: color-mix(in srgb, var(--sp-amber) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 12%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
+.sp-account-toolbar-alerts:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-amber) 62%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-amber) 88%, #7c2d12);
+}
+
+.sp-account-toolbar-alerts.is-critical {
+  border-color: color-mix(in srgb, var(--sp-red) 52%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 12%, var(--sp-panel));
+  color: var(--sp-red);
+}
+
+.sp-account-toolbar-alerts.is-critical:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-red) 68%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 18%, var(--sp-panel));
+  color: color-mix(in srgb, var(--sp-red) 88%, #7f1d1d);
+}
+
+/* 角标不能复用 .sp-account-bind-count：那个是半透明白，只适合实心按钮（.has-selection /
+   同步上游模型的计数场景），落到本按钮的浅色描边底上几乎看不见。 */
+.sp-account-alert-count {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.375rem;
+  border: 1px solid color-mix(in srgb, var(--sp-amber) 36%, var(--sp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sp-amber) 16%, var(--sp-panel));
+  color: var(--sp-amber);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sp-account-alert-count.is-critical {
+  border-color: color-mix(in srgb, var(--sp-red) 40%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 16%, var(--sp-panel));
+  color: var(--sp-red);
 }
 
 .sp-account-workbench {
