@@ -1064,10 +1064,14 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).not.toContain('<h1>上游账号</h1>')
     expect(accountsSource).not.toContain('只展示已同步到本地数据库的供应商账号')
     expect(accountsSource).toContain('sp-account-toolbar')
-    expect(accountsSource).toContain('class="sp-filter-card-head"')
+    // 筛选卡片上的说明性卡片头（「筛选条件」眉题 + 「筛选账号」标题 + 用法说明 + 计数胶囊）已撤掉：
+    // 它不承载任何操作，却把吸顶的筛选卡片整体撑高约 80px。断言它不再出现，防止以后被顺手加回来。
+    expect(accountsSource).not.toContain('class="sp-filter-card-head"')
+    // ⚠️ 只能匹配完整的 h2 标签：源码里还有 '加载当前筛选账号失败' 这类提示语，
+    // 以及说明本次删除的注释本身，都含有「筛选账号」四个字，裸词断言会误报。
+    expect(accountsSource).not.toContain('<h2>筛选账号</h2>')
     expect(accountsSource).toContain('class="sp-account-filter-body"')
     expect(accountsSource).toContain('class="sp-account-filter-actions"')
-    expect(accountsSource).toContain('筛选账号')
     expect(accountsSource).toContain('sp-account-table-shell')
     expect(accountsSource).toContain('sp-account-pagination')
     expect(accountsSource).toContain('pageSize = ref(20)')

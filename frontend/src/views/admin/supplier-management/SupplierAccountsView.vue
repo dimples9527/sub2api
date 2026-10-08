@@ -1,15 +1,11 @@
 <template>
   <SupplierModuleLayout>
     <section class="sp-account-toolbar" aria-label="账号筛选与操作">
-      <header class="sp-filter-card-head">
-        <div>
-          <span class="sp-filter-card-kicker">筛选条件</span>
-          <h2>筛选账号</h2>
-          <p>按供应商、平台、本地分组、同步有效性和上游状态 / 已删除快速定位账号。模型筛选为「全部支持」：填多个模型时，账号必须同时支持每一个。</p>
-        </div>
-        <span class="sp-filter-card-count">{{ total }} 个账号</span>
-      </header>
-
+      <!-- 这里原来有一条卡片头（「筛选条件」眉题 + 「筛选账号」标题 + 一段用法说明 + 计数胶囊）。
+           它只做说明、不承载任何操作，却把吸顶的筛选卡片整体撑高约 80px —— 1280 宽的窗口下
+           卡片本就占到视口近半，首屏被这块说明挤掉。撤掉后筛选控件直接成为卡片的第一层级。
+           其中的「N 个账号」计数一并去掉：下方表格标题里已有「当前筛选共 N 个上游账号」，
+           同一个数没必要在一个屏幕里出现两次。 -->
       <div class="sp-account-filter-body">
         <div class="sp-account-filter-fields">
           <div
@@ -4544,55 +4540,6 @@ function formatTime(value?: string): string {
   box-shadow: var(--sp-shadow);
 }
 
-.sp-filter-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.875rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--sp-line);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-cyan) 6%, transparent), transparent 38%);
-}
-
-.sp-filter-card-head > div {
-  min-width: 0;
-}
-
-.sp-filter-card-kicker {
-  display: block;
-  margin-bottom: 0.2rem;
-  color: var(--sp-cyan);
-  font-size: 0.625rem;
-  font-weight: 800;
-  letter-spacing: 0.11em;
-}
-
-.sp-filter-card-head h2 {
-  margin: 0;
-  color: var(--sp-text);
-  font-size: 0.9375rem;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.sp-filter-card-head p {
-  margin: 0.2rem 0 0;
-  color: var(--sp-muted);
-  font-size: 0.75rem;
-  line-height: 1.45;
-}
-
-.sp-filter-card-count {
-  flex: 0 0 auto;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid color-mix(in srgb, var(--sp-cyan) 20%, var(--sp-line));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--sp-cyan) 6%, var(--sp-panel));
-  color: var(--sp-cyan);
-  font-size: 0.6875rem;
-  font-weight: 700;
-}
-
 .sp-account-filter-body {
   display: flex;
   /*
@@ -7539,7 +7486,6 @@ button.sp-guard-failure-hint:hover {
     margin-bottom: 0.75rem;
   }
 
-  .sp-filter-card-head,
   .sp-account-filter-body {
     padding-inline: 0.75rem;
   }
@@ -7603,11 +7549,6 @@ button.sp-guard-failure-hint:hover {
   .batch-result-button {
     width: 100%;
     min-width: 0;
-  }
-
-  .sp-filter-card-head {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   /* 手机端筛选区保持紧凑：搜索通栏，下拉与按钮 2 列，避免全部整行占高 */
