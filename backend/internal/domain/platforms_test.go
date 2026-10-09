@@ -1,48 +1,74 @@
 package domain
 
-import "testing"
+import (
+	"testing"
 
-// TestCorePlatformDefinitionsCoverAllPlatforms 把平台目录钉死，与前端
-// platformOptions.spec.ts 对称：目录是 /admin/platforms 的唯一数据源，前端启动时
-// 用它整体覆盖本地兜底列表。新增平台常量若忘了在这里登记，就会在各筛选下拉里静默消失
-// （minimax / opencode_go 曾漏过），所以这条用例强制目录覆盖全部已知平台。
-func TestCorePlatformDefinitionsCoverAllPlatforms(t *testing.T) {
-	want := []string{
-		PlatformAnthropic,
-		PlatformOpenAI,
-		PlatformGemini,
-		PlatformAntigravity,
-		PlatformGrok,
-		PlatformKimi,
-		PlatformZhipu,
-		PlatformDeepseek,
-		PlatformMiniMax,
-		PlatformOpenCodeGo,
-		PlatformComposite,
-	}
+	"github.com/stretchr/testify/require"
+)
 
-	got := make([]string, 0, len(CorePlatformDefinitions))
-	seen := make(map[string]bool, len(CorePlatformDefinitions))
-	for _, def := range CorePlatformDefinitions {
-		if def.Code == "" {
-			t.Fatalf("catalog entry has empty code: %+v", def)
-		}
-		if def.Name == "" {
-			t.Fatalf("catalog entry %q has empty name", def.Code)
-		}
-		if seen[def.Code] {
-			t.Fatalf("catalog has duplicate code %q", def.Code)
-		}
-		seen[def.Code] = true
-		got = append(got, def.Code)
+// 重构前各处手写的平台列表，作为平台清单派生结果的等价基准；重构后新登记的平台
+// （Command Code、Cline）按同类平台（OpenCode）的位置补入。
+var (
+	legacyDisplayOrder = []string{
+		PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
+		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
+		PlatformCommandCode,
+		PlatformCline,
 	}
+	legacyCompositePrecedence = []string{
+		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
+		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
+		PlatformCommandCode,
+		PlatformCline,
+	}
+	legacyOpenAIGateway = []string{
+		PlatformOpenAI, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,
+		PlatformCommandCode,
+		PlatformCline,
+	}
+	legacyCNProviders    = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax}
+	legacyLiteLLMByPlatf = map[string]string{
+		PlatformAnthropic: "anthropic", PlatformOpenAI: "openai", PlatformGemini: "gemini",
+		PlatformAntigravity: "anthropic", PlatformGrok: "xai", PlatformKimi: "moonshot",
+		PlatformZhipu: "zhipu", PlatformDeepseek: "deepseek", PlatformMiniMax: "minimax",
+		PlatformOpenCodeGo: "opencode-go", PlatformTypeSafe: "typesafe", PlatformCommandCode: "", PlatformCline: "",
+	}
+)
 
-	if len(got) != len(want) {
-		t.Fatalf("catalog code count = %d, want %d (got %v)", len(got), len(want), got)
+func TestPlatformListMatchesLegacyLists(t *testing.T) {
+	require.Equal(t, legacyDisplayOrder, ConcretePlatformIDs())
+	require.Equal(t, legacyCompositePrecedence, CompositePrecedencePlatformIDs())
+	require.Equal(t, legacyOpenAIGateway, PlatformIDsWhere(func(spec PlatformSpec) bool {
+		return spec.Gateway == PlatformGatewayOpenAI
+	}))
+	require.Equal(t, legacyCNProviders, PlatformIDsWhere(func(spec PlatformSpec) bool { return spec.CNProvider }))
+	for platform, provider := range legacyLiteLLMByPlatf {
+		spec, ok := LookupPlatform(platform)
+		require.True(t, ok, platform)
+		require.Equal(t, provider, spec.LiteLLMProvider, platform)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("catalog code[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
-		}
+}
+
+func TestPlatformListPredicates(t *testing.T) {
+	for _, platform := range legacyDisplayOrder {
+		require.True(t, IsConcretePlatform(platform), platform)
+		require.True(t, IsGroupPlatform(platform), platform)
+		spec, ok := LookupPlatform(platform)
+		require.True(t, ok, platform)
+		require.NotEmpty(t, spec.DisplayName, platform)
+		require.NotEmpty(t, spec.Gateway, platform)
 	}
+	require.False(t, IsConcretePlatform(PlatformComposite))
+	require.True(t, IsGroupPlatform(PlatformComposite))
+	for _, invalid := range []string{"", "moonshot", "Kimi", "openai ", "glm", "bogus"} {
+		require.False(t, IsConcretePlatform(invalid), invalid)
+		require.False(t, IsGroupPlatform(invalid), invalid)
+		require.False(t, UsesOpenAIGateway(invalid), invalid)
+	}
+}
+
+func TestPlatformsReturnsCopy(t *testing.T) {
+	platforms := Platforms()
+	platforms[0].ID = "mutated"
+	require.Equal(t, PlatformAnthropic, Platforms()[0].ID)
 }
