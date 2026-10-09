@@ -2182,6 +2182,105 @@ func TestGroupElectionConsolidatesToFullCovererWithReason(t *testing.T) {
 		"这不是容量收敛 —— 413 本来就在 TopN 名额上，是必需模型让它让位")
 }
 
+// top_n >= 2 时不能因为「组里存在一个能单独全覆盖必需模型的账号」就把本组压回 1 个 ——
+// 那是用户明确配置的容量意图，必需模型的底线只是「组内有账号支持」。
+//
+// 生产现象（2026-10-09）：【对接】Claude-Max 配了 top_n=2，却每轮被压回 1 个 ——
+// 413 覆盖 2/3（缺 claude-sonnet-5-5）被判「冗余收敛」关闭，611 全覆盖者保留。
+func TestGroupElectionTopN2KeepsBothWinnersDespiteFullCoverer(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 413 覆盖 2/3、综合分最高且在任。
+		{GroupID: 103, GroupName: "Claude-Max", AccountID: 413, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 44, LastTestLatencyMs: 1000,
+			ModelMapping: map[string]any{"claude-fable-5-1": "claude-fable-5-1", "claude-opus-5-5": "claude-opus-5-5"}},
+		// 611 三项全覆盖、综合分次之且在任。
+		{GroupID: 103, GroupName: "Claude-Max", AccountID: 611, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 3000,
+			ModelMapping: map[string]any{
+				"claude-fable-5-1":  "claude-fable-5-1",
+				"claude-opus-5-5":   "claude-opus-5-5",
+				"claude-sonnet-5-5": "claude-sonnet-5-5",
+			}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         2,
+		KeepHealthyIncumbentGroupIDs: []int64{103},
+		RequiredModelsByGroup: map[int64][]string{103: {
+			"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5",
+		}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "top_n=2、在任者正好 2 个 ⇒ 一个都不该关")
+	require.ElementsMatch(t, []int64{413, 611}, result.Groups[0].WinnerIDs,
+		"必需模型由 611 承担即可，不能因此把 top_n 的第二个名额削掉")
+}
+
+// top_n=2 但有 3 个在任者时，只撤超出名额的 1 个，且优先撤「不能单独全覆盖」的。
+func TestGroupElectionTopN2ConsolidatesOnlyExcessPreferringNonCoverer(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 601 三项全覆盖但综合分最低 —— 它是必需模型的兜底者，不能撤。
+		{GroupID: 7, GroupName: "cc稳定", AccountID: 601, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 5, LastTestLatencyMs: 5000,
+			ModelMapping: map[string]any{
+				"claude-fable-5-1":  "claude-fable-5-1",
+				"claude-opus-5-5":   "claude-opus-5-5",
+				"claude-sonnet-5-5": "claude-sonnet-5-5",
+			}},
+		// 602 缺 sonnet-5-5、综合分最高。
+		{GroupID: 7, GroupName: "cc稳定", AccountID: 602, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 1000,
+			ModelMapping: map[string]any{"claude-fable-5-1": "claude-fable-5-1", "claude-opus-5-5": "claude-opus-5-5"}},
+		// 603 同样缺 sonnet-5-5、综合分居中。
+		{GroupID: 7, GroupName: "cc稳定", AccountID: 603, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 2000,
+			ModelMapping: map[string]any{"claude-fable-5-1": "claude-fable-5-1", "claude-opus-5-5": "claude-opus-5-5"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         2,
+		KeepHealthyIncumbentGroupIDs: []int64{7},
+		RequiredModelsByGroup: map[int64][]string{7: {
+			"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5",
+		}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Equal(t, map[int64]bool{603: false}, store.calls,
+		"只撤超出的 1 个：撤不能单独全覆盖里较差的 603（601 兜必需模型、602 综合分最高）")
+	require.ElementsMatch(t, []int64{601, 602}, result.Groups[0].WinnerIDs)
+}
+
+// 必需模型只能靠多人分工覆盖时（各管一半），即使超出 top_n 也不能撤 ——
+// 撤掉任何一个都会让某个必需模型失去支持。这是硬底线的必要代价，不是多开。
+func TestGroupElectionComplementaryCoverageSurvivesTopNConvergence(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 9, GroupName: "cc互补", AccountID: 901, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 30, LastTestLatencyMs: 1000,
+			ModelMapping: map[string]any{"claude-fable-5-1": "claude-fable-5-1"}},
+		{GroupID: 9, GroupName: "cc互补", AccountID: 902, Platform: "anthropic", Schedulable: true,
+			LastTestStatus: "success", HealthyCount: 20, LastTestLatencyMs: 2000,
+			ModelMapping: map[string]any{"claude-opus-5-5": "claude-opus-5-5"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                         1,
+		KeepHealthyIncumbentGroupIDs: []int64{9},
+		RequiredModelsByGroup:        map[int64][]string{9: {"claude-fable-5-1", "claude-opus-5-5"}},
+	}, time.Now())
+	require.NoError(t, err)
+
+	require.Empty(t, store.calls, "各管一半 ⇒ 撤谁都会缺一个必需模型，只能都留着")
+	require.ElementsMatch(t, []int64{901, 902}, result.Groups[0].WinnerIDs)
+}
+
 // 没配必需模型的分组不该被这条规则碰到：两个在任者仍然按原来的容量收敛走。
 func TestGroupElectionConsolidationSkippedWithoutRequiredModels(t *testing.T) {
 	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
