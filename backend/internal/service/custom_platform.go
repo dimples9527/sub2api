@@ -165,8 +165,10 @@ func normalizeCustomPlatformCode(code string) string {
 	return strings.ToLower(strings.TrimSpace(code))
 }
 
+// IsCorePlatform 报告平台是否为框架内置平台（含 composite）。平台目录由 domain 包统一维护，
+// 这里做一次归一化后委托，保持对大小写与首尾空白的容错。
 func IsCorePlatform(platform string) bool {
-	return domain.IsCorePlatform(platform)
+	return domain.IsGroupPlatform(strings.ToLower(strings.TrimSpace(platform)))
 }
 
 func PlatformLabel(platform string) string {

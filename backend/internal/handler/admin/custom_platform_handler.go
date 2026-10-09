@@ -20,6 +20,14 @@ func NewCustomPlatformHandler(service service.CustomPlatformService) *CustomPlat
 	return &CustomPlatformHandler{service: service}
 }
 
+// platformCatalogItem 是 ListCatalog 的目录项：框架原生平台与启用自定义平台的统一视图。
+// 框架原生平台的颜色由前端平台目录统一提供，这里不重复下发。
+type platformCatalogItem struct {
+	Code  string `json:"code"`
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
 func (h *CustomPlatformHandler) List(c *gin.Context) {
 	enabledOnly := parseCustomPlatformEnabled(c.Query("enabled_only"))
 	items, err := h.service.List(c.Request.Context(), enabledOnly != nil && *enabledOnly)
@@ -37,17 +45,16 @@ func (h *CustomPlatformHandler) ListCatalog(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	definitions := domain.ListCorePlatformDefinitions()
+	specs := domain.Platforms()
+	definitions := make([]platformCatalogItem, 0, len(specs)+len(items))
+	for _, spec := range specs {
+		definitions = append(definitions, platformCatalogItem{Code: spec.ID, Name: spec.DisplayName})
+	}
 	for _, item := range items {
 		if item == nil || strings.TrimSpace(item.Code) == "" {
 			continue
 		}
-		definitions = append(definitions, domain.PlatformDefinition{
-			Code:        item.Code,
-			Name:        item.Name,
-			Color:       item.Color,
-			HealthGuard: false,
-		})
+		definitions = append(definitions, platformCatalogItem{Code: item.Code, Name: item.Name, Color: item.Color})
 	}
 	response.Success(c, definitions)
 }
