@@ -382,7 +382,9 @@ describe('调度切换日志的两个入口', () => {
     expect(source).toContain('if (!decisions || decisions.length === 0) return undefined')
     // 必需模型补选要单独分类：它的综合分不一定进前 N，混进「择优入选」看起来像择优算错了。
     expect(source).toContain("kind: 'required'")
-    expect(source).toContain("note: decision.required_models.join('、')")
+    // 只列模型名会让用户对着本行「测试状态：成功」读成「这个账号不支持该模型」，
+    // 必须点破是「组里原有的在任账号当时没有可用支持者」。
+    expect(source).toContain('本组在任账号中无可用支持者，补选本账号覆盖：${decision.required_models.join')
     // 用时项取中性值时必须标明，否则管理员会拿这个 0.5 去反推配置。
     expect(source).toContain("flags.push('用时中性')")
     expect(cssBlock('.sp-election-log-score-breakdown')).toContain('margin-top')

@@ -2008,7 +2008,7 @@ func TestGroupElectionRequiredModelSupplementReason(t *testing.T) {
 	for _, item := range result.Items {
 		items[item.AccountID] = item
 	}
-	require.Equal(t, "分组必需模型 claude-fable-5-1 无在任账号支持，补选开启", items[583].Reason,
+	require.Equal(t, "分组必需模型 claude-fable-5-1 无可用在任支持者，补选开启", items[583].Reason,
 		"补选必须点名它覆盖的模型，否则日志读起来像打分算错了")
 	require.Equal(t, SupplierGroupSchedulingElectionActionEnabled, items[583].Action)
 	require.Equal(t, []string{"claude-fable-5-1"}, items[583].GroupDecisions[0].RequiredModels,

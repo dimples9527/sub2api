@@ -63,7 +63,13 @@ const (
 	// SupplierGroupSchedulingElectionReasonRequiredModelFmt 是「因覆盖必需模型被补选」的开启原因。
 	// 与 ReasonElected（分组内最优）分开：补选账号的综合分往往进不了前 N，写「分组内最优」是错的，
 	// 运维会去翻评分找那个不存在的问题；带上模型名才能一眼看出"它是为了这个模型才被开的"。
-	SupplierGroupSchedulingElectionReasonRequiredModelFmt = "分组必需模型 %s 无在任账号支持，补选开启"
+	//
+	// 措辞是「无可用在任支持者」而不是「无在任账号支持」：后者会被读成"组里没有账号支持这个模型"，
+	// 而补选恰恰是因为**本账号支持它**才被选中的 —— 被判掉的是组里原有的在任账号
+	// （测试失败 / 健康计数归零即失去参选资格，见 supplierGroupSchedulingElectionMemberSelectable）。
+	// 2026-10-09 生产实例：10/153 组的唯一在任者 542 连续失败，同一轮补选 561 开启，
+	// 而 561 自己那行「测试状态」是 success —— 旧文案读起来就是自相矛盾。
+	SupplierGroupSchedulingElectionReasonRequiredModelFmt = "分组必需模型 %s 无可用在任支持者，补选开启"
 	// SupplierGroupSchedulingElectionReasonOverCapacityRequiredModel 是「被容量收敛关闭、且本组必需模型
 	// 已由保留的账号覆盖」的原因。与 ReasonOverCapacity 分开：后者只说"开多了"，
 	// 而运维真正会问的是"为什么关的是它、留的是另一个"——答案就在这里。

@@ -755,18 +755,26 @@ function classifyReason(
   // 收敛关闭必须排在锁定之前：被收敛掉的在任者也带 locked（本组本轮没做择优），
   // 但它是被「关闭」的，标成「健康锁定（保留）」会与同一行的「关闭调度」自相矛盾。
   if (decision.over_capacity) {
-    // 叠加了必需模型这一层时必须说全：只写「超过上限」，用户解释不了
-    // 「我手动开的那个账号为什么被换掉、留下的是另一个」——那正是这条日志要回答的问题。
+    // 上限值和「只保留一个」都必须写出来：这一行的「测试状态」列往往是「成功」，
+    // 只说「超过上限」，用户对着「成功」解释不了「为什么关它、留下的是另一个」——
+    // 那正是这条日志要回答的问题。
+    const limit = (decision.top_n ?? 0) > 0 ? `（每组 ${decision.top_n} 个）` : ''
     const note = decision.over_capacity_required_model
-      ? '本组在任账号数超过上限，且必需模型已由保留的账号覆盖'
-      : '本组在任账号数超过上限'
+      ? `本组同时在任的账号数超过上限${limit}，且必需模型已由保留的账号覆盖`
+      : `本组同时在任的账号数超过上限${limit}，收敛只保留其中一个`
     return { badge: { kind: 'converged', label: '收敛关闭' }, note }
   }
   // 必需模型补选同理，只是方向相反：补选跑在收敛之后、锁定组也执行（必需模型是硬底线），
   // 所以被补选进来的账号同样带 locked —— 先判 locked 会把「刚被开启」标成「本轮未换人」，
   // 与同一行的「开启调度」自相矛盾。
   if (decision.required_models && decision.required_models.length > 0) {
-    return { badge: { kind: 'required', label: '必需模型补选' }, note: decision.required_models.join('、') }
+    // 点破「是谁不行」：只列模型名时，用户对着本行的「测试状态：成功」会读成
+    // 「这个账号不支持该模型」——实际是该组原有的在任账号当时没有可用的支持者
+    // （测试未通过或压根不覆盖），补选只是把覆盖补回来。
+    return {
+      badge: { kind: 'required', label: '必需模型补选' },
+      note: `本组在任账号中无可用支持者，补选本账号覆盖：${decision.required_models.join('、')}`,
+    }
   }
   if (decision.locked) return { badge: { kind: 'locked', label: '健康锁定' }, note: '在任者正常，本轮未换人' }
   // 保底开启必须排在 elected 之前：它也带 elected（保底同样是一种入选），但综合分不是前 N ——
