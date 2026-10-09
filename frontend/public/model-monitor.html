@@ -1758,17 +1758,36 @@
         const intervalStep = trendBucketStepMs(state.window, intervalMs);
         const showRange = state.window !== '90m';
         const anchorEndMs = showRange ? alignTrendRangeEndMs(anchorMs, state.window) : anchorMs;
-        trendSource = trendSource.map((point, pointIndex) => {
-          const displayEndTimestamp = anchorEndMs - ((trendSource.length - 1 - pointIndex) * intervalStep);
+        // 窗口固定切成 18 个等宽时间桶，每个测试点按**真实时间戳**落到自己的桶里，
+        // 空格子再沿用左侧最近一次测试结果的颜色（前向填充）。
+        // 原先按“点数从右往左连续回推”会让“90 分钟只测了 5 次”被画成挤在右侧的 5 个连续格子，
+        // 与实际每 18 分钟一次的分布不符。
+        const bucketCount = 18;
+        const windowStartMs = anchorEndMs - (bucketCount * intervalStep);
+        const buckets = new Array(bucketCount).fill(null);
+        trendSource.forEach((point, pointIndex) => {
+          const pointMs = timestampToMs(pointTimestamp(point));
+          // 无时间戳（例如接口只给了颜色序列）时，按原顺序从右往左连续排布。
+          let bucketIndex = pointMs
+            ? Math.floor((pointMs - windowStartMs) / intervalStep)
+            : (bucketCount - trendSource.length + pointIndex);
+          if (bucketIndex < 0) bucketIndex = 0;
+          if (bucketIndex > bucketCount - 1) bucketIndex = bucketCount - 1;
+          buckets[bucketIndex] = point;
+        });
+        let carry = null;
+        trendSource = buckets.map((point, bucketIndex) => {
+          if (point) carry = point;
+          const displayEndTimestamp = anchorEndMs - ((bucketCount - 1 - bucketIndex) * intervalStep);
           const displayStartTimestamp = displayEndTimestamp - intervalStep;
           const displayTimestamp = displayEndTimestamp;
           const displayFields = showRange
             ? { displayTimestamp, displayStartTimestamp, displayEndTimestamp }
             : { displayTimestamp };
-          if (point && typeof point === 'object') {
-            return { ...point, ...displayFields };
-          }
-          return { tone: point, ...displayFields };
+          const source = point || carry;
+          if (source && typeof source === 'object') return { ...source, ...displayFields };
+          if (source) return { tone: source, ...displayFields };
+          return { tone: 'empty', ...displayFields };
         });
       }
       const trend = trendSource.map((point, pointIndex) => normalizeTrendPoint(point, { availability, latency, time }, pointIndex));
