@@ -104,8 +104,9 @@ func (s *SupplierAutomationService) BuildGroupSchedulingElectionDiagnostics(ctx 
 		b.WriteString(fmt.Sprintf("  dry_run=%t  dry_run_group_ids=%s\n",
 			cfg.GroupElectionDryRun, supplierGroupElectionDiagnosticsInt64List(cfg.GroupElectionDryRunGroupIDs)))
 		b.WriteString("  required_models=" + supplierGroupElectionDiagnosticsRequiredModels(cfg.GroupElectionRequiredModels) + "\n")
-		b.WriteString(fmt.Sprintf("  alert_enabled=%t  alert_account_overrides=%v\n",
-			cfg.GroupElectionAlertEnabled, cfg.GroupElectionAlertAccountOverrides))
+		b.WriteString(fmt.Sprintf("  alert_enabled=%t  alert_group_overrides=%v\n",
+			cfg.GroupElectionAlertEnabled, cfg.GroupElectionAlertGroupOverrides))
+		b.WriteString(fmt.Sprintf("  default_account_by_group=%v\n", cfg.GroupElectionDefaultAccountByGroup))
 		b.WriteString(fmt.Sprintf("  priority_enabled_global=%t  priority_enabled_group_ids=%s\n",
 			cfg.GroupElectionPriorityEnabledGlobal, supplierGroupElectionDiagnosticsInt64List(cfg.GroupElectionPriorityEnabledGroupIDs)))
 	}

@@ -44,6 +44,15 @@ const (
 	// 从不负责"开"；一个全失败、当前又全部关着的分组会一直停在 0 开启，直到人工介入。
 	// 这条负责把「一个开启调度账号都没有」的分组兜底开一个，保证分组在调度上不是空组。
 	SupplierGroupSchedulingElectionReasonKeepAlive = "分组内无开启调度账号，保底开启"
+	// SupplierGroupSchedulingElectionReasonDefaultAccount 是「本组指定了默认账号、且它具备参选资格」的开启原因。
+	// 与 ReasonElected 分开：默认账号不是综合分选出来的，写「分组内最优」会让运维去翻一个不存在的评分问题。
+	// 与 ReasonKeepAlive 也分开：保底是"本组一个开启账号都没有"的故障兜底，默认账号是主动指定的固定主账号 ——
+	// 前者是出了事才开，后者是配置意图，混在一起会让人以为默认账号是被故障顶上来的。
+	SupplierGroupSchedulingElectionReasonDefaultAccount = "分组默认账号，开启调度"
+	// SupplierGroupSchedulingElectionReasonDefaultAccountOut 是「被本组默认账号顶掉」的关闭原因。
+	// 它必须单独存在：这类账号通常**具备参选资格**（测试成功），按普通落选写「非分组最优」，
+	// 运维会以为是打分算错了；真实原因是本组指定了固定主账号，其余成员一律让位。
+	SupplierGroupSchedulingElectionReasonDefaultAccountOut = "分组已指定默认账号，关闭调度"
 	// SupplierGroupSchedulingElectionReasonUpstreamUnavailable 是「该账号匹配到的上游已不可用」的关闭原因。
 	//
 	// 判据是「按账号名匹配到了上游账号，但没有任何一条匹配是『上游账号 active 且供应商启用』」。
@@ -254,11 +263,27 @@ type SupplierGroupSchedulingElectionConfig struct {
 	// LatencyMinSamples，就通过供应商通知模块推一条 group_account_abnormal 事件。
 	// 它只影响通知，不影响任何裁决与调度开关。
 	AlertEnabled bool `json:"group_scheduling_election_alert_enabled"`
-	// AlertAccountOverrides 是按账号覆盖推送开关：account_id → 是否推送。
-	// 命中即替换 AlertEnabled，未命中的账号仍跟随全局值（与 TopNByGroup 的覆盖语义一致）：
-	// 既能在大开关打开时静音个别长期样本不足的账号，也能在大开关关闭时单独盯住某个账号。
-	// 空 map 表示所有账号都用全局值（默认，无需数据迁移）。
-	AlertAccountOverrides map[int64]bool `json:"group_scheduling_election_alert_account_overrides"`
+	// AlertGroupOverrides 是按分组覆盖推送开关：group_id → 是否推送。
+	// 命中即替换 AlertEnabled，未命中的分组仍跟随全局值（与 TopNByGroup 的覆盖语义一致）：
+	// 既能在大开关打开时静音个别长期样本不足的分组，也能在大开关关闭时单独盯住某个分组。
+	// 空 map 表示所有分组都用全局值（默认，无需数据迁移）。
+	//
+	// 2026-10-09 由「按账号」改为「按分组」：这条通知链路的其余三层本来就是分组级 ——
+	// 事件按分组聚合（notifySupplierGroupAccountAbnormal 的 abnormalByGroup）、订阅带 GroupID
+	// （migration 246）、冷却按 (channel, group) 计（ClaimGroupCooldown），唯独覆盖曾是账号级。
+	// 口径不一致的后果在多活分组上暴露：静音其中一个账号只是把它从消息内容里剔除，
+	// 同组其它样本不足的账号仍会触发事件 ⇒ 用户"静音了却还收到这个分组的推送"。
+	AlertGroupOverrides map[int64]bool `json:"group_scheduling_election_alert_group_overrides"`
+	// DefaultAccountByGroup 是「分组默认账号」：group_id → 账号 ID（缺失或 <=0 = 该组不指定）。
+	// 该账号在本组**具备参选资格**时，本组只开它一个、关闭其它成员（跳过在任者健康锁定与正常择优）；
+	// 它不具备资格（失败 / 结果过期 / 上游不可用 / 从未测过）时回退到原本的锁定与择优流程 ——
+	// 绝不因为指定的账号挂了就把分组关成空组，那是比"没按默认账号走"更糟的故障。
+	//
+	// 为什么必须抢在「在任者健康锁定」之前：锁定在生产上是全局默认打开的，其语义是"保住当前在任者"，
+	// 不先判默认账号，用户指定的主账号就永远换不上去 —— 而"不管现在开着谁、都切回我指定的那个"
+	// 恰恰是这个配置的全部意义。
+	// 必需模型仍是硬底线：默认账号不覆盖某必需模型时照样补选支持者（本组可能因此开 2 个）。
+	DefaultAccountByGroup map[int64]int64 `json:"group_scheduling_election_default_account_by_group"`
 }
 
 // SupplierGroupSchedulingElectionMember 是仓储层返回的一条"分组×账号"成员行。
@@ -468,6 +493,14 @@ type SupplierGroupSchedulingElectionDecisionDetail struct {
 	// 单独完整覆盖，而它不覆盖全部必需模型 —— 再开着不产生任何覆盖增量，只是多一份成本。
 	// 与 OverCapacity 分开：后者是"本组开多了"，这条是"必需模型那边一个账号就够，它的名额是多余的"。
 	Consolidated bool `json:"consolidated,omitempty"`
+	// DefaultAccount 表示本组指定了默认账号、且它具备参选资格，本轮只开它一个（其余成员一律让位）。
+	// 它与 Elected 同时为真（默认账号也是一种入选），但入选依据是配置而不是综合分 ——
+	// 不标出来，日志会把一个"指定"读成"算出来的最优"。
+	DefaultAccount bool `json:"default_account,omitempty"`
+	// DefaultAccountOut 表示本账号在本组被默认账号顶掉关闭 —— 它本身可能是健康的，
+	// 只是本组指定了固定主账号。与 OverCapacity / Consolidated 分开：那两条是算法收敛的副作用，
+	// 这一条是配置意图，运维看到它不该去翻评分或容量配置。
+	DefaultAccountOut bool `json:"default_account_out,omitempty"`
 }
 
 type SupplierGroupSchedulingElectionResult struct {
@@ -666,6 +699,13 @@ type supplierGroupElectionAccount struct {
 	// consolidatedOut 表示该账号本轮被「必需模型冗余收敛」关掉：本组必需模型已能由单个账号
 	// 完整覆盖，而它不覆盖全部必需模型。只影响关闭原因文案，不改变裁决本身。
 	consolidatedOut bool
+	// defaultAccount 表示该账号本轮被某个所属分组选为「默认账号」并开启。
+	// 只影响开启原因文案（"分组默认账号"而不是"分组内最优"），不改变裁决本身。
+	defaultAccount bool
+	// defaultAccountOut 表示该账号本轮被某个所属分组的「默认账号」顶掉、关闭。
+	// 与 convergedOut 一样只影响关闭原因文案，但优先级更高：它是配置意图的直接结果，
+	// 不是"本组开多了"或"必需模型一个账号就够"这类算法收敛的副作用。
+	defaultAccountOut bool
 	// groupDecisions 是逐分组累积的裁决依据（见 SupplierGroupSchedulingElectionDecisionDetail），
 	// 最终原样写进运行明细，供切换日志展开「为什么是它」。
 	groupDecisions []SupplierGroupSchedulingElectionDecisionDetail
@@ -1044,7 +1084,48 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 与账号级的 keepAlive 分开：那是裁决用的账号属性，这里是逐组依据 ——
 		// 同一个账号在 A 组被保底开启、同时是 B 组的普通成员时，B 组那条依据不该标成保底。
 		keepAlivePicked := make(map[int64]struct{})
-		if keepHealthyForGroup(groupID) {
+		// defaultAccountDropped 记录本组被「默认账号」顶掉的成员，供明细标注关闭原因。
+		defaultAccountDropped := make(map[int64]struct{})
+		// 分组默认账号：配了默认账号、且它在本组具备参选资格时，本组只开它一个 ——
+		// 跳过在任者健康锁定与正常择优，其余成员一律落选（由账号级裁决关闭）。
+		//
+		// 排在锁定之前是必须的：锁定在生产上是全局默认打开的，其语义是「保住当前在任者」，
+		// 不抢在它前面，用户指定的主账号就永远换不上去 —— 而"不管现在开着谁、都切回我指定的那个"
+		// 恰恰是这个配置的全部意义。
+		//
+		// 资格不足时回退而不是硬开：硬开一个 failed / 上游已停用的账号等于把请求路由到不通的通道，
+		// 比"这轮先用备选"更糟；回退到原有流程即可，下一轮它恢复了又会自动切回来。
+		defaultAccountID, hasDefaultAccount := config.DefaultAccountByGroup[groupID]
+		defaultPicked := false
+		if hasDefaultAccount && defaultAccountID > 0 {
+			for _, member := range groupMembers {
+				if member.AccountID != defaultAccountID {
+					continue
+				}
+				if supplierGroupSchedulingElectionMemberSelectable(member, now) {
+					if account := accounts[defaultAccountID]; account != nil {
+						account.defaultAccount = true
+					}
+					recordWinner(defaultAccountID, "")
+					defaultPicked = true
+				}
+				break
+			}
+			// 被顶掉的成员要单独标记：账号级裁决只会给出「非分组最优」，
+			// 运维看不出"是默认账号把它挤掉的"。
+			if defaultPicked {
+				for _, member := range groupMembers {
+					if member.AccountID == defaultAccountID {
+						continue
+					}
+					if account := accounts[member.AccountID]; account != nil {
+						account.defaultAccountOut = true
+					}
+					defaultAccountDropped[member.AccountID] = struct{}{}
+				}
+			}
+		}
+		if !defaultPicked && keepHealthyForGroup(groupID) {
 			scheduledHealthy := make([]SupplierGroupSchedulingElectionMember, 0) // 开着且具备参选资格的在任者，锁定时记为赢家
 			// scheduledIncumbentCount 是「开着、且没到关闭阈值的在任者」总数（含成功、含失败但未到阈值）。
 			// 只统计已测出状态的成员：未测过的账号走「保持原状」分支、本任务关不掉它们，
@@ -1138,8 +1219,8 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			}
 		}
 
-		// 正常择优：锁定未生效时才做。综合分排序后取前 N。
-		if !locked {
+		// 正常择优：锁定与默认账号都未生效时才做。综合分排序后取前 N。
+		if !defaultPicked && !locked {
 			sort.SliceStable(candidateMembers, func(i, j int) bool {
 				return supplierGroupSchedulingElectionMemberLess(candidateMembers[i], candidateMembers[j], electionScores)
 			})
@@ -1197,6 +1278,32 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				}
 				detail.WinnerIDs = kept
 				detail.WinnerCount = len(kept)
+			}
+		}
+
+		// 默认账号豁免上面的「必需模型冗余收敛」：那条规则的本意是"必需模型一个账号就够、
+		// 多出来的赢家是多余的"，但默认账号不是"多余的那个"—— 它是用户显式指定的主账号，
+		// 关掉它就等于配置没生效。补选进来的支持者若恰好能单独全覆盖全部必需模型，
+		// 收敛会按覆盖度把默认账号剔出去，必须在之后补回。
+		if defaultPicked {
+			kept := false
+			for _, accountID := range detail.WinnerIDs {
+				if accountID == defaultAccountID {
+					kept = true
+					break
+				}
+			}
+			if !kept {
+				if account := accounts[defaultAccountID]; account != nil {
+					account.winnerGroupCount++
+					account.winner = true
+					// 收敛时给它打的标记要一并撤销，否则 decide 会先命中"收敛关闭"的文案。
+					account.consolidatedOut = false
+					delete(account.requiredModelsByGroup, groupID)
+				}
+				delete(consolidatedDropped, defaultAccountID)
+				detail.WinnerIDs = append(detail.WinnerIDs, defaultAccountID)
+				detail.WinnerCount = len(detail.WinnerIDs)
 			}
 		}
 
@@ -1259,6 +1366,13 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				TopN:         groupTopN,
 				RankTotal:    len(ranked),
 				WinnerCutoff: winnerCutoff,
+			}
+			// 默认账号相关标记排在最前：它是配置意图的直接结果，比"收敛"这类算法副作用更具体。
+			if defaultPicked && member.AccountID == defaultAccountID {
+				decision.DefaultAccount = true
+			}
+			if _, dropped := defaultAccountDropped[member.AccountID]; dropped {
+				decision.DefaultAccountOut = true
 			}
 			// 被容量收敛掉的成员必须单独标出来：它和「在任者健康锁定保住的」在明细里长得一样
 			// （都带 Locked），但一个被关闭、一个被保留，不标就会把关闭写成「未换人」。
@@ -1473,7 +1587,7 @@ func (s *SupplierGroupSchedulingElectionService) notifySupplierGroupAccountAbnor
 		if member.LatencySuccessCount >= config.LatencyMinSamples {
 			continue
 		}
-		if !supplierGroupElectionAlertEnabledForAccount(config, member.AccountID) {
+		if !supplierGroupElectionAlertEnabledForGroup(config, member.GroupID) {
 			continue
 		}
 		if _, seen := abnormalByGroup[member.GroupID]; !seen {
@@ -1575,6 +1689,14 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 	}
 	if account.selectable {
 		if account.winner {
+			// 默认账号优先于"因必需模型补选"：它才是这条记录被开启的根本原因 ——
+			// 补选只是顺带（它恰好也支持某个必需模型），写成补选会让运维以为它是被模型需求顶上来的。
+			if account.defaultAccount {
+				if !account.schedulableBefore {
+					return true, SupplierGroupSchedulingElectionActionEnabled, SupplierGroupSchedulingElectionReasonDefaultAccount
+				}
+				return true, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonDefaultAccount
+			}
 			// 补选当选必须单独说明：它多半不是综合分前 N，写「分组内最优」是错的，
 			// 运维会去翻评分找那个并不存在的问题。带上模型名才解释得清"为什么开它"。
 			if models := supplierGroupElectionAccountRequiredModels(account); len(models) > 0 {
@@ -1590,6 +1712,11 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 			return true, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonElected
 		}
 		if account.schedulableBefore {
+			// 被默认账号顶掉的原因最具体、且是配置意图，排在所有收敛类原因之前：
+			// 那些是算法副作用，这一条是"本组指定了固定主账号"，运维看到它不该去翻评分或容量配置。
+			if account.defaultAccountOut {
+				return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonDefaultAccountOut
+			}
 			// 必需模型冗余收敛的关闭原因最具体，排在容量收敛之前：它同样会走到这里
 			// （本组的赢家标记已被撤销），但"必需模型一个账号就够"比"开多了"更能回答
 			// "为什么关它、留另一个"——留下的那个能单独覆盖全部必需模型。
@@ -2256,23 +2383,24 @@ func normalizeSupplierGroupSchedulingElectionConfig(config SupplierGroupScheduli
 		config.CountScoreCap = MaxSupplierGroupSchedulingElectionCountScoreCap
 	}
 	config.RequiredModelsByGroup = normalizeSupplierGroupElectionRequiredModels(config.RequiredModelsByGroup)
-	config.AlertAccountOverrides = normalizeSupplierGroupElectionAlertOverrides(config.AlertAccountOverrides)
+	config.AlertGroupOverrides = normalizeSupplierGroupElectionAlertGroupOverrides(config.AlertGroupOverrides)
+	config.DefaultAccountByGroup = normalizeSupplierGroupElectionDefaultAccounts(config.DefaultAccountByGroup)
 	return config
 }
 
-// normalizeSupplierGroupElectionAlertOverrides 清洗「按账号覆盖推送」表：丢弃非正 accountID。
+// normalizeSupplierGroupElectionAlertGroupOverrides 清洗「按分组覆盖推送」表：丢弃非正 groupID。
 // true / false 两个取值都保留 —— 前者是「大开关关着也盯住它」，后者是「大开关开着但静音它」。
 // 空表返回 nil，让「没配置」与「配了空」在下游一致（len==0 都表示全部跟随全局开关）。
-func normalizeSupplierGroupElectionAlertOverrides(raw map[int64]bool) map[int64]bool {
+func normalizeSupplierGroupElectionAlertGroupOverrides(raw map[int64]bool) map[int64]bool {
 	if len(raw) == 0 {
 		return nil
 	}
 	result := make(map[int64]bool, len(raw))
-	for accountID, enabled := range raw {
-		if accountID <= 0 {
+	for groupID, enabled := range raw {
+		if groupID <= 0 {
 			continue
 		}
-		result[accountID] = enabled
+		result[groupID] = enabled
 	}
 	if len(result) == 0 {
 		return nil
@@ -2280,10 +2408,30 @@ func normalizeSupplierGroupElectionAlertOverrides(raw map[int64]bool) map[int64]
 	return result
 }
 
-// supplierGroupElectionAlertEnabledForAccount 汇总「全局开关 + 账号级覆盖」，
-// 得到某个账号本轮是否要推送异常通知。覆盖命中即替换全局值。
-func supplierGroupElectionAlertEnabledForAccount(config SupplierGroupSchedulingElectionConfig, accountID int64) bool {
-	if enabled, ok := config.AlertAccountOverrides[accountID]; ok {
+// normalizeSupplierGroupElectionDefaultAccounts 清洗「分组默认账号」表：丢弃非正 groupID / accountID。
+// 值 <=0 等于「该组不指定默认账号」，直接丢弃而不是留一个 0 —— 下游按 `map[groupID]` 命中即认为配了，
+// 留 0 会让它去找一个不存在的账号 0。空表返回 nil，与其它分组级 override map 一致。
+func normalizeSupplierGroupElectionDefaultAccounts(raw map[int64]int64) map[int64]int64 {
+	if len(raw) == 0 {
+		return nil
+	}
+	result := make(map[int64]int64, len(raw))
+	for groupID, accountID := range raw {
+		if groupID <= 0 || accountID <= 0 {
+			continue
+		}
+		result[groupID] = accountID
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// supplierGroupElectionAlertEnabledForGroup 汇总「全局开关 + 分组级覆盖」，
+// 得到某个分组本轮是否要推送异常通知。覆盖命中即替换全局值。
+func supplierGroupElectionAlertEnabledForGroup(config SupplierGroupSchedulingElectionConfig, groupID int64) bool {
+	if enabled, ok := config.AlertGroupOverrides[groupID]; ok {
 		return enabled
 	}
 	return config.AlertEnabled

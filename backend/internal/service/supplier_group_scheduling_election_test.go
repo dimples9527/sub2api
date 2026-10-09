@@ -2277,35 +2277,37 @@ func TestGroupElectionSkipsAbnormalDetectionWhenAlertDisabled(t *testing.T) {
 	require.Empty(t, notifier.events)
 }
 
-func TestGroupElectionAlertAccountOverridesWinOverGlobalSwitch(t *testing.T) {
+func TestGroupElectionAlertGroupOverridesWinOverGlobalSwitch(t *testing.T) {
 	run := func(overrides map[int64]bool) []SupplierGroupAccountAbnormalEvent {
 		repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
 		notifier := &fakeGroupAccountAbnormalNotifier{}
 		svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
 		svc.SetGroupAccountAbnormalNotifier(notifier)
 		_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
-			TopN:                  2,
-			LatencyMinSamples:     3,
-			AlertEnabled:          true,
-			AlertAccountOverrides: overrides,
+			TopN:                2,
+			LatencyMinSamples:   3,
+			AlertEnabled:        true,
+			AlertGroupOverrides: overrides,
 		}, time.Now())
 		require.NoError(t, err)
 		return notifier.events
 	}
 
-	// 静音：总开关开着也不推这个账号。
-	require.Empty(t, run(map[int64]bool{10: false}))
+	// 静音：总开关开着，但本组被单独静音 ⇒ 整个分组一条都不推。
+	// 这正是改成按分组的意义：账号级静音做不到「这个分组不再收」——
+	// 同组其它样本不足的账号照样会触发事件。
+	require.Empty(t, run(map[int64]bool{1: false}))
 
-	// 强制推送：总开关关着也要推这个账号（分组事件仍会被派发，只是名单里只剩它）。
+	// 强制推送：总开关关着也要推这个分组（分组事件仍会被派发，只是名单里只剩它）。
 	repo := &fakeGroupElectionRepo{members: newGroupElectionAbnormalMembers()}
 	notifier := &fakeGroupAccountAbnormalNotifier{}
 	svc := NewSupplierGroupSchedulingElectionService(repo, newFakeGroupElectionStore())
 	svc.SetGroupAccountAbnormalNotifier(notifier)
 	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
-		TopN:                  2,
-		LatencyMinSamples:     3,
-		AlertEnabled:          false,
-		AlertAccountOverrides: map[int64]bool{10: true},
+		TopN:                2,
+		LatencyMinSamples:   3,
+		AlertEnabled:        false,
+		AlertGroupOverrides: map[int64]bool{1: true},
 	}, time.Now())
 	require.NoError(t, err)
 	require.Len(t, notifier.events, 1)
@@ -2362,22 +2364,148 @@ func TestGroupElectionAbnormalDetectionToleratesMissingNotifier(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestGroupElectionNormalizeAlertAccountOverrides(t *testing.T) {
-	require.Nil(t, normalizeSupplierGroupElectionAlertOverrides(nil))
-	require.Nil(t, normalizeSupplierGroupElectionAlertOverrides(map[int64]bool{}))
-	require.Nil(t, normalizeSupplierGroupElectionAlertOverrides(map[int64]bool{0: true, -3: false}),
-		"非正 accountID 全部丢弃后应为 nil")
+func TestGroupElectionNormalizeAlertGroupOverrides(t *testing.T) {
+	require.Nil(t, normalizeSupplierGroupElectionAlertGroupOverrides(nil))
+	require.Nil(t, normalizeSupplierGroupElectionAlertGroupOverrides(map[int64]bool{}))
+	require.Nil(t, normalizeSupplierGroupElectionAlertGroupOverrides(map[int64]bool{0: true, -3: false}),
+		"非正 groupID 全部丢弃后应为 nil")
 
-	cleaned := normalizeSupplierGroupElectionAlertOverrides(map[int64]bool{1: true, 2: false, -4: true})
+	cleaned := normalizeSupplierGroupElectionAlertGroupOverrides(map[int64]bool{1: true, 2: false, -4: true})
 	require.Equal(t, map[int64]bool{1: true, 2: false}, cleaned, "true/false 都要保留：一个是强制推、一个是静音")
 
 	// 无覆盖时跟随全局开关：全局关闭 → 不推，全局打开 → 推。
-	require.False(t, supplierGroupElectionAlertEnabledForAccount(SupplierGroupSchedulingElectionConfig{}, 9))
-	require.True(t, supplierGroupElectionAlertEnabledForAccount(
+	require.False(t, supplierGroupElectionAlertEnabledForGroup(SupplierGroupSchedulingElectionConfig{}, 9))
+	require.True(t, supplierGroupElectionAlertEnabledForGroup(
 		SupplierGroupSchedulingElectionConfig{AlertEnabled: true}, 9))
 	// 覆盖命中即替换全局，两个方向都要能翻过来。
-	require.True(t, supplierGroupElectionAlertEnabledForAccount(
-		SupplierGroupSchedulingElectionConfig{AlertAccountOverrides: map[int64]bool{9: true}}, 9))
-	require.False(t, supplierGroupElectionAlertEnabledForAccount(
-		SupplierGroupSchedulingElectionConfig{AlertEnabled: true, AlertAccountOverrides: map[int64]bool{9: false}}, 9))
+	require.True(t, supplierGroupElectionAlertEnabledForGroup(
+		SupplierGroupSchedulingElectionConfig{AlertGroupOverrides: map[int64]bool{9: true}}, 9))
+	require.False(t, supplierGroupElectionAlertEnabledForGroup(
+		SupplierGroupSchedulingElectionConfig{AlertEnabled: true, AlertGroupOverrides: map[int64]bool{9: false}}, 9))
+}
+
+// newGroupElectionDefaultAccountMembers 造 G1 的三个健康账号，延迟依次变差：
+// 综合分排序固定为 10 > 11 > 12，用来验证「默认账号」会覆盖这个排序。
+// 10 与 12 初始就在任，这样它们被关掉时 before != after，才会进明细（否则测不到关闭原因）。
+func newGroupElectionDefaultAccountMembers() []SupplierGroupSchedulingElectionMember {
+	return []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 10, AccountName: "账号10", Schedulable: true, LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 100, LatencySuccessCount: 5, LatencyTotalCount: 5},
+		{GroupID: 1, GroupName: "G1", AccountID: 11, AccountName: "账号11", Schedulable: false, LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 300, LatencySuccessCount: 5, LatencyTotalCount: 5},
+		{GroupID: 1, GroupName: "G1", AccountID: 12, AccountName: "账号12", Schedulable: true, LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 500, LatencySuccessCount: 5, LatencyTotalCount: 5},
+	}
+}
+
+func TestGroupElectionDefaultAccountWinsOverScore(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: newGroupElectionDefaultAccountMembers()}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	result, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		DefaultAccountByGroup: map[int64]int64{1: 11},
+	}, time.Now())
+	require.NoError(t, err)
+
+	// 10 综合分最高，但本组把 11 指定为默认账号 ⇒ 只开 11，另外两个一律关闭。
+	require.Equal(t, map[int64]bool{11: true, 10: false, 12: false}, store.calls)
+	require.Equal(t, 1, result.EnabledCount)
+	require.Equal(t, 2, result.DisabledCount)
+
+	// 明细必须能区分「默认账号」与「被默认账号顶掉」：只靠账号级 reason 会写成「非分组最优」，
+	// 运维会去翻一个并不存在的评分问题。
+	designated := false
+	dropped := map[int64]bool{}
+	for _, item := range result.Items {
+		for _, decision := range item.GroupDecisions {
+			if decision.GroupID != 1 {
+				continue
+			}
+			if decision.DefaultAccount {
+				designated = true
+				require.Equal(t, int64(11), item.AccountID)
+			}
+			if decision.DefaultAccountOut {
+				dropped[item.AccountID] = true
+			}
+		}
+	}
+	require.True(t, designated, "默认账号那条依据必须带 default_account")
+	require.True(t, dropped[10] && dropped[12], "被顶掉的账号必须带 default_account_out")
+}
+
+func TestGroupElectionDefaultAccountFallsBackWhenNotSelectable(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 10, AccountName: "账号10", LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 100, LatencySuccessCount: 5, LatencyTotalCount: 5},
+		// 默认账号 11 连续失败且健康计数为 0 ⇒ 不具备参选资格。
+		{GroupID: 1, GroupName: "G1", AccountID: 11, AccountName: "账号11", LastTestStatus: "failed", HealthyCount: 0, FailedCount: 5},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		DefaultAccountByGroup: map[int64]int64{1: 11},
+	}, time.Now())
+	require.NoError(t, err)
+	// 回退正常择优：健康的 10 当选。绝不因为指定的账号挂了就把分组关成空组。
+	require.Equal(t, map[int64]bool{10: true}, store.calls)
+}
+
+func TestGroupElectionDefaultAccountBeatsKeepHealthyIncumbent(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		// 10 当前在任且健康 —— 只开「在任者健康锁定」的话会把它原地保住。
+		{GroupID: 1, GroupName: "G1", AccountID: 10, AccountName: "账号10", Schedulable: true, LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 100, LatencySuccessCount: 5, LatencyTotalCount: 5},
+		{GroupID: 1, GroupName: "G1", AccountID: 11, AccountName: "账号11", Schedulable: false, LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 300, LatencySuccessCount: 5, LatencyTotalCount: 5},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                       1,
+		KeepHealthyIncumbentGlobal: true,
+		DefaultAccountByGroup:      map[int64]int64{1: 11},
+	}, time.Now())
+	require.NoError(t, err)
+	// 锁定只负责「保住当前在任者」，默认账号必须抢在它前面 ——
+	// 否则用户指定的主账号永远换不上去，而这个配置的全部意义就是"不管现在开着谁都切回它"。
+	require.Equal(t, map[int64]bool{11: true, 10: false}, store.calls)
+}
+
+func TestGroupElectionDefaultAccountStillCoversRequiredModels(t *testing.T) {
+	repo := &fakeGroupElectionRepo{members: []SupplierGroupSchedulingElectionMember{
+		{GroupID: 1, GroupName: "G1", AccountID: 10, AccountName: "账号10", LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 100, LatencySuccessCount: 5, LatencyTotalCount: 5, ModelMapping: map[string]any{"req-model": "req-model"}},
+		// 默认账号 11 不支持 req-model。
+		{GroupID: 1, GroupName: "G1", AccountID: 11, AccountName: "账号11", LastTestStatus: "success", HealthyCount: 9,
+			AvgLatencyMs: 300, LatencySuccessCount: 5, LatencyTotalCount: 5, ModelMapping: map[string]any{"other-model": "other-model"}},
+	}}
+	store := newFakeGroupElectionStore()
+	svc := NewSupplierGroupSchedulingElectionService(repo, store)
+
+	_, err := svc.Run(context.Background(), SupplierGroupSchedulingElectionConfig{
+		TopN:                  1,
+		DefaultAccountByGroup: map[int64]int64{1: 11},
+		RequiredModelsByGroup: map[int64][]string{1: {"req-model"}},
+	}, time.Now())
+	require.NoError(t, err)
+	// 必需模型是硬底线：默认账号不覆盖它时照样补选支持者 ⇒ 本组开 2 个。
+	// 同时验证默认账号**豁免了「必需模型冗余收敛」** —— 补选者 10 能单独覆盖全部必需模型，
+	// 收敛会先把 11 剔出去，必须再补回来，否则配置等于没生效。
+	require.Equal(t, map[int64]bool{11: true, 10: true}, store.calls)
+}
+
+func TestGroupElectionNormalizeDefaultAccounts(t *testing.T) {
+	require.Nil(t, normalizeSupplierGroupElectionDefaultAccounts(nil))
+	require.Nil(t, normalizeSupplierGroupElectionDefaultAccounts(map[int64]int64{}))
+	require.Nil(t, normalizeSupplierGroupElectionDefaultAccounts(map[int64]int64{0: 5, -3: 7, 9: 0, 8: -1}),
+		"非正 groupID / accountID 全部丢弃后应为 nil")
+	require.Equal(t, map[int64]int64{1: 5},
+		normalizeSupplierGroupElectionDefaultAccounts(map[int64]int64{1: 5, 0: 7}),
+		"值为 0 等于该组不指定默认账号，必须丢弃而不是留一个账号 0")
 }

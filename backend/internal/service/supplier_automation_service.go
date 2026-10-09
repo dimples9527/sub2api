@@ -138,8 +138,13 @@ type SupplierAutomationConfig struct {
 	// 分组账号异常推送总开关（默认 false）：开启后，分组里当前开着调度、但健康样本不足的账号会通过
 	// 供应商通知模块推一条 group_account_abnormal 事件。只影响通知，不参与任何调度裁决。
 	GroupElectionAlertEnabled bool `json:"group_scheduling_election_alert_enabled"`
-	// 按账号覆盖总开关：account_id → 是否推送。显式 true/false 都优先于总开关，未列出的账号跟随总开关。
-	GroupElectionAlertAccountOverrides map[int64]bool `json:"group_scheduling_election_alert_account_overrides"`
+	// 按分组覆盖总开关：group_id → 是否推送。显式 true/false 都优先于总开关，未列出的分组跟随总开关。
+	// 2026-10-09 由「按账号」改为「按分组」：通知的事件聚合 / 订阅 / 冷却本来就是分组级，
+	// 账号级覆盖在多活分组里静音不了整组（同组其它样本不足的账号仍会触发推送）。
+	GroupElectionAlertGroupOverrides map[int64]bool `json:"group_scheduling_election_alert_group_overrides"`
+	// 分组默认账号：group_id → 账号 ID。该账号在本组具备参选资格时只开它一个、关闭其它成员
+	// （跳过在任者健康锁定与正常择优）；它不具备资格时回退原有流程。必需模型仍会补选支持者。
+	GroupElectionDefaultAccountByGroup map[int64]int64 `json:"group_scheduling_election_default_account_by_group"`
 }
 
 type SupplierAutomationRun struct {
@@ -800,7 +805,8 @@ func (s *SupplierAutomationService) executeTask(ctx context.Context, task *Suppl
 			DryRun:                               task.Config.GroupElectionDryRun,
 			DryRunGroupIDs:                       task.Config.GroupElectionDryRunGroupIDs,
 			AlertEnabled:                         task.Config.GroupElectionAlertEnabled,
-			AlertAccountOverrides:                task.Config.GroupElectionAlertAccountOverrides,
+			AlertGroupOverrides:                  task.Config.GroupElectionAlertGroupOverrides,
+			DefaultAccountByGroup:                task.Config.GroupElectionDefaultAccountByGroup,
 		}, time.Now())
 		run.ProcessedCount = result.AccountCount
 		run.SuccessCount = result.EnabledCount + result.DisabledCount + result.UnchangedCount
