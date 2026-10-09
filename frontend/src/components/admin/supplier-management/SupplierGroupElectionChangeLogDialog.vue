@@ -1053,14 +1053,40 @@ watch(() => props.accountId, () => {
   /* 贡献条段首标签用的正文字色。段底色是「色相 50% 混面板」，深浅不定，
      标签压在上面必须自己带色，不能靠继承（继承到的颜色随主题漂）。 */
   --sp-election-log-ink: #0f172a;
-  display: grid;
+  /* 纵向排列（原来是一列 grid，换成 flex 后视觉不变），并吃掉弹窗正文区的全部高度。
+     ⚠️ 这里必须是 flex: 1 + min-height: 0，**不能写成 min-height: 100%**：
+     父级 .modal-body 被改成 flex 容器后（见下面那条 :global），flex: 1 才能把
+     「正文区可用高」真正传下来；写成 min-height: 100% 只是个下限，
+     内容比正文区高时它照样长到内容高（实测 1406px vs 正文区 913px），
+     结果是整份日志靠 .modal-body 滚动、表格区的 flex: 1 拿不到任何剩余空间。 */
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
 
 /* BaseDialog 的 full 预设最宽到 max-w-7xl(1280px)，这份日志列多（8 列 + 完整日期时间），
-   按需求放宽到 95vw。只命中「装着本日志」的那一个 modal-content，不动其他用 full 的弹窗。 */
+   按需求放宽到 95vw。只命中「装着本日志」的那一个 modal-content，不动其他用 full 的弹窗。
+   高度同样按需求占满：默认的 max-h-[95vh] sm:max-h-[90vh] 会让表格区只剩
+   min(60vh, 680px) 可滚，一屏放不下几行。100% 相对 overlay 的内容区
+   （overlay 是 fixed inset-0 带 padding，故 = 视口高减去那圈 padding）。 */
 :global(.modal-content:has(.sp-election-log-dialog)) {
   max-width: 95vw;
+  height: 100%;
+  max-height: 100%;
+}
+
+/* BaseDialog 的 .modal-body 是普通块级容器（flex-1 + overflow-y: auto），**不是 flex 容器** ——
+   它不会把「可用高度」约束传给子元素，于是 .sp-election-log-dialog 的 flex: 1 无从生效，
+   高度只能由内容决定（实测内容 1406px、正文区 913px），整份日志会退化成靠 .modal-body 滚动：
+   表格区吃不到剩余高度、表头 sticky 吸在正文区顶部而不是表格区顶部、分页条被一起滚走。
+   把它改成 flex 容器，高度才真正传得下去。
+   overflow 从 auto 改成 hidden：滚动交给内部 .sp-election-log-scroll，避免出现两条滚动条。 */
+:global(.modal-body:has(.sp-election-log-dialog)) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* 暗色覆盖一律写普通的 `.dark xxx`，不要写 `:global(.dark) xxx`。
@@ -1082,6 +1108,8 @@ watch(() => props.accountId, () => {
   color: var(--sp-election-log-muted);
   font-size: 12px;
   line-height: 1.6;
+  /* 提示 / 筛选 / 最近批次都是按内容定高的块，窗口矮时该被压缩的是表格区，不是它们。 */
+  flex-shrink: 0;
 }
 
 .sp-election-log-filters {
@@ -1089,6 +1117,7 @@ watch(() => props.accountId, () => {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .sp-election-log-filter {
@@ -1156,9 +1185,20 @@ watch(() => props.accountId, () => {
 }
 
 .sp-election-log-table-region {
+  /* 吃掉弹窗正文里除提示/筛选/分页以外的全部高度，滚动落在里面的 .sp-election-log-scroll 上，
+     表头 sticky 才有意义。min-height: 0 是 flex 子项能真正收缩、由内部滚动的必要条件。 */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 18%, var(--sp-election-log-soft));
   border-radius: 10px;
+}
+
+/* 分页条是固定高度的一块，别被上面的 flex: 1 表格区挤扁。 */
+.sp-election-log-pagination {
+  flex-shrink: 0;
 }
 
 .sp-election-log-run {
@@ -1191,6 +1231,7 @@ watch(() => props.accountId, () => {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .sp-election-log-recent-label {
@@ -1238,7 +1279,10 @@ watch(() => props.accountId, () => {
    这里没有用 DataTable：它每行固定渲染 columns.length 个 <td>，不支持 colspan，
    而「分组标题行」必须整行贯通。页面层自建表格是既有组件能力之外的正解。 */
 .sp-election-log-scroll {
-  max-height: min(60vh, 680px);
+  /* 高度由外层 table-region 决定（弹窗撑满视口后的剩余空间），不再写死 max-height：
+     写死的话弹窗再高，表格区也只有 min(60vh, 680px)，一屏放不下几行。 */
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
