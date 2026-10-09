@@ -30,7 +30,7 @@
             <Input
               v-model="search"
               class="w-full"
-              placeholder="搜索账号名称或上游 Key"
+              placeholder="搜索账号名称、上游 Key 或本地账号"
             />
           </div>
           <div

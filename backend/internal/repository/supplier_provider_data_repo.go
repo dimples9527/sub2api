@@ -2044,9 +2044,43 @@ func supplierProviderDataWhere(alias string, params service.SupplierProviderData
 	}
 	if search := strings.TrimSpace(params.Search); search != "" {
 		args = append(args, "%"+search+"%")
-		conditions = append(conditions, fmt.Sprintf("(%s.name ILIKE $%d OR %s.upstream_%s_key ILIKE $%d)", alias, len(args), alias, supplierProviderDataKeyName(alias), len(args)))
+		conditions = append(conditions, supplierProviderNameOrKeySearchCondition(alias, len(args)))
 	}
 	return strings.Join(conditions, " AND "), args
+}
+
+// supplierProviderNameOrKeySearchCondition 生成「上游名称 或 上游 Key」的模糊匹配条件。
+// 单独抽出来是因为账号列表要把它和「本地账号」的搜索条件合并成一条 OR（见 supplierProviderAccountWhere）。
+func supplierProviderNameOrKeySearchCondition(alias string, placeholder int) string {
+	return fmt.Sprintf("(%s.name ILIKE $%d OR %s.upstream_%s_key ILIKE $%d)",
+		alias, placeholder, alias, supplierProviderDataKeyName(alias), placeholder)
+}
+
+// supplierProviderAccountLocalNameSearchCondition 让搜索框也能按列表里那一列「本地账号」过滤
+// （用户输入的是自己在页面上看得见的本地账号名，例如「皓悦-福利-Codex高并发」里的「皓悦」）。
+//
+// 这里要求「恰好匹配到一个本地账号」，与列表 local_account_match_status 的口径一致：
+// 匹配冲突（命中多个）时那一列本来就是空白，若不加这个限制，会出现
+// 「搜到了名字、结果行里却什么都不显示」的怪现象。
+// 复用 supplierProviderLocalAccountMatchCondition 而不是直接 ILIKE 原始名，
+// 是为了和列表列的判定完全同源 —— 否则会出现「列显示 matched、按这个名字却搜不到」。
+func supplierProviderAccountLocalNameSearchCondition(placeholder int) string {
+	return fmt.Sprintf(`EXISTS (
+  SELECT 1
+  FROM accounts local_account
+  WHERE local_account.deleted_at IS NULL
+    AND %s
+    AND local_account.name ILIKE $%d
+    AND (
+      SELECT COUNT(*)
+      FROM accounts candidate
+      WHERE candidate.deleted_at IS NULL
+        AND %s
+    ) = 1
+)`,
+		supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"),
+		placeholder,
+		supplierProviderLocalAccountMatchCondition("candidate.name", "a.name"))
 }
 
 // normalizeSupplierAccountStatusFilter 仅允许统一后的上游密钥状态，非法值视为不筛选。
@@ -2060,8 +2094,19 @@ func normalizeSupplierAccountStatusFilter(status string) string {
 }
 
 func supplierProviderAccountWhere(params service.SupplierProviderDataListParams) (string, []any) {
-	where, args := supplierProviderDataWhere("a", params)
+	// 账号列表的搜索要多覆盖一列「本地账号」（页面就在那一列上展示匹配结果），
+	// 所以基类那条上游名/Key 的条件不在这里生成，改由下面合成一条 OR。
+	// 若两处各生成一条 AND 起来，语义会变成「上游名命中 且 本地账号名命中」，等于什么都搜不到。
+	baseParams := params
+	baseParams.Search = ""
+	where, args := supplierProviderDataWhere("a", baseParams)
 	conditions := []string{where}
+	if search := strings.TrimSpace(params.Search); search != "" {
+		args = append(args, "%"+search+"%")
+		conditions = append(conditions, fmt.Sprintf("(%s OR %s)",
+			supplierProviderNameOrKeySearchCondition("a", len(args)),
+			supplierProviderAccountLocalNameSearchCondition(len(args))))
+	}
 	if status := normalizeSupplierAccountStatusFilter(params.Status); status != "" {
 		args = append(args, status)
 		conditions = append(conditions, fmt.Sprintf("LOWER(a.status) = $%d", len(args)))

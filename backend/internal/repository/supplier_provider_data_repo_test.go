@@ -950,11 +950,15 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM supplier_provider_accounts a")).
 		WithArgs(int64(42), active, "%pri%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
-	mock.ExpectQuery(supplierProviderAccountListQueryContractPattern(
-		"p.deleted_at IS NULL AND a.provider_id = $1 AND a.active = $2 AND (a.name ILIKE $3 OR a.upstream_account_key ILIKE $3)",
-		"$4",
-		"$5",
-	)).
+	// 搜索条件现在是一条 OR：上游名/Key 命中，或者「本地账号」列命中。
+	// 匹配条件本身有独立用例覆盖，这里只按字面写死结构、把匹配条件插值进来。
+	searchWhere := "p.deleted_at IS NULL AND a.provider_id = $1 AND a.active = $2 AND (" +
+		"(a.name ILIKE $3 OR a.upstream_account_key ILIKE $3) OR EXISTS ( SELECT 1 FROM accounts local_account " +
+		"WHERE local_account.deleted_at IS NULL AND " + supplierProviderLocalAccountMatchCondition("local_account.name", "a.name") +
+		" AND local_account.name ILIKE $3 AND ( SELECT COUNT(*) FROM accounts candidate " +
+		"WHERE candidate.deleted_at IS NULL AND " + supplierProviderLocalAccountMatchCondition("candidate.name", "a.name") +
+		" ) = 1 ))"
+	mock.ExpectQuery(supplierProviderAccountListQueryContractPattern(searchWhere, "$4", "$5")).
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
@@ -1381,6 +1385,25 @@ func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
 	require.Contains(t, where, ") = $4")
 	require.Contains(t, where, "lower(COALESCE(p.account_name_prefix, '') || a.name)")
 	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
+}
+
+// 搜索框必须也能按列表里那一列「本地账号」过滤。
+// 用户看得见的是本地账号名（如「皓悦-福利-Codex高并发」），只搜上游名/Key 时，
+// 输入「皓悦」这类供应商前缀必然一条都搜不到 —— 页面上却明明列着这些账号。
+func TestSupplierProviderAccountWhereSearchCoversLocalAccountName(t *testing.T) {
+	t.Parallel()
+
+	where, args := supplierProviderAccountWhere(service.SupplierProviderDataListParams{Search: "皓悦"})
+
+	require.Contains(t, where, "(a.name ILIKE $1 OR a.upstream_account_key ILIKE $1)")
+	require.Contains(t, where, "local_account.name ILIKE $1")
+	// 与列表列同源：走同一套归一化匹配，且要求「恰好匹配到一个本地账号」。
+	// 直接用 ILIKE 原始名会出现「列里显示 matched、按这个名字却搜不到」；
+	// 去掉「恰好一个」的限制又会出现「搜到了名字、结果行那一列却是空白」（匹配冲突）。
+	require.Contains(t, where, supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"))
+	require.Contains(t, where, supplierProviderLocalAccountMatchCondition("candidate.name", "a.name"))
+	require.Contains(t, where, ") = 1")
+	require.Equal(t, []any{"%皓悦%"}, args)
 }
 
 func TestSupplierProviderAccountWhereIncludesLocalGroup(t *testing.T) {
