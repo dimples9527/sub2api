@@ -145,12 +145,24 @@ export interface SupplierAutomationConfig {
    */
   group_scheduling_election_alert_enabled?: boolean
   /**
-   * 按账号覆盖推送开关：账号 ID → 是否推送。
-   * 命中即替换总开关，未命中的账号仍跟随总开关（与 top_n_by_group 的覆盖语义一致）：
-   * 既能在大开关打开时静音个别长期样本不足的账号，也能在大开关关闭时单独盯住某个账号。
-   * 空对象或不传 = 所有账号都用总开关（默认）。
+   * 按分组覆盖推送开关：分组 ID → 是否推送。
+   * 命中即替换总开关，未命中的分组仍跟随总开关（与 top_n_by_group 的覆盖语义一致）：
+   * 既能在大开关打开时静音个别长期样本不足的分组，也能在大开关关闭时单独盯住某个分组。
+   * 空对象或不传 = 所有分组都用总开关（默认）。
+   *
+   * 2026-10-09 由「按账号」改为「按分组」：通知的事件聚合 / 订阅 / 冷却本来就是分组级，
+   * 账号级覆盖在多活分组里静音不了整组 —— 同组其它样本不足的账号仍会触发推送。
    */
-  group_scheduling_election_alert_account_overrides?: Record<number, boolean>
+  group_scheduling_election_alert_group_overrides?: Record<number, boolean>
+  /**
+   * 分组默认账号：分组 ID → 账号 ID。
+   * 该账号在本组具备参选资格（测试成功未过期，或健康守护连续成功计数 > 0）时，
+   * 本组只开它一个、关闭其它成员（跳过在任者健康锁定与正常择优）；
+   * 它不具备资格时回退到原有的锁定/择优流程，不会把分组关成空组。
+   * 必需模型仍是硬底线：默认账号不覆盖某必需模型时会额外补选一个支持者（本组可能开 2 个）。
+   * 空对象或不传 = 所有分组都不指定默认账号（默认）。
+   */
+  group_scheduling_election_default_account_by_group?: Record<number, number>
 }
 
 export interface SupplierAutomationTask {
@@ -582,6 +594,18 @@ export interface SupplierGroupElectionDecisionDetail {
    * 旧运行记录没有这个字段，缺省按普通收敛显示。
    */
   consolidated?: boolean
+  /**
+   * true 表示本组指定了「默认账号」、且它具备参选资格，本轮只开它一个（其余成员一律让位）。
+   * 它与 elected 同时为真（默认账号也是一种入选），但入选依据是配置而不是综合分 ——
+   * 不标出来，日志会把一个「指定」读成「算出来的最优」。
+   */
+  default_account?: boolean
+  /**
+   * true 表示本账号在本组被「默认账号」顶掉关闭 —— 它本身可能是健康的，只是本组指定了固定主账号。
+   * 与 over_capacity / consolidated 分开：那两条是算法收敛的副作用，这一条是配置意图。
+   * 旧运行记录没有这个字段，缺省按普通落选显示。
+   */
+  default_account_out?: boolean
 }
 
 // 一条「某账号的调度开关被拨动（或演练模式下被建议拨动）」的记录。
