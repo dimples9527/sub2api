@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -340,7 +341,8 @@ func TestGroupElectionFailureThresholdOneClosesImmediately(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, false, store.calls[71], "阈值 1 时首次失败即关")
 	require.Equal(t, 1, result.DisabledCount)
-	require.Equal(t, SupplierGroupSchedulingElectionReasonFailed, result.Items[0].Reason)
+	require.Equal(t, fmt.Sprintf(SupplierGroupSchedulingElectionReasonFailedFmt, 1, 1), result.Items[0].Reason,
+		"达阈值关闭必须带上进度：只写「测试失败」看不出这是第几次失败，也就答不出「为什么是现在关」")
 }
 
 // 成功必须清零计数：否则账号一次失败后攒下的"欠账"会让它下次刚失败就被立刻关掉。
@@ -1729,7 +1731,16 @@ func TestGroupElectionKeepAliveOverridesFailureGates(t *testing.T) {
 	require.Equal(t, true, store.calls[511], "已到失败阈值的账号仍要被保底开起来")
 	require.Len(t, result.Items, 1)
 	require.Equal(t, SupplierGroupSchedulingElectionReasonKeepAlive, result.Items[0].Reason)
-	require.NotEqual(t, SupplierGroupSchedulingElectionReasonFailed, result.Items[0].Reason)
+	require.NotContains(t, result.Items[0].Reason, "关闭调度",
+		"保底是「开启」，理由不能落成失败关闭（阈值默认值会变，别写死次数）")
+
+	// 失败进度必须封顶到阈值：member.FailedCount 本身已按阈值封顶
+	// （见 persistSupplierGroupElectionFailedCount），decide 再加一若不封顶，
+	// 「已到阈值、还在继续失败」的行会写成「连续失败 10/2 次」这种读不通的进度。
+	decision := result.Items[0].GroupDecisions[0]
+	require.True(t, decision.TestFailed)
+	require.LessOrEqual(t, decision.FailedCount, decision.FailureThreshold,
+		"失败进度的分子不能超过阈值")
 }
 
 // 保底只挑一个：组内已有一个开启账号时，不得再顺带多开。

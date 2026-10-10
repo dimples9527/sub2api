@@ -789,14 +789,17 @@ function classifyReason(
   if (decision.test_failed) {
     // 失败闸门是按「连续失败轮次」说话的：只标「测试失败」，看不出这是第几次失败、
     // 还要几次才关 —— 而它正是「为什么是现在关、不是上一轮」的答案。
-    // 次数取自后端逐组依据（failed_count 含本轮），阈值同源给出，读起来与
-    // 「连续失败 N/M 次，未达阈值，暂不关闭」那条口径一致。
+    // 次数取自后端逐组依据（failed_count 含本轮，已按阈值封顶），阈值同源给出。
+    // 末尾必须点出「已达阈值」：这一行的「测试状态」是「失败」、结论是「关闭」，
+    // 而含未切换视图里同一账号的上一行写的是「连续失败 N/M 次，未达阈值，暂不关闭」——
+    // 只有把两侧的阈值结论都写出来，两条对照着读才能看出「是攒够次数才关的」，
+    // 否则用户只会看到「失败」就关，以为一次失败就动手。
     // ⚠️ 旧运行记录里没有这两个字段，此时不能显示成「失败 0 次」；但也别退回空白 ——
     // 能走到这一行说明 before !== after（「本该动却没动」在上面已降级返回），
     // 而测试失败且真的动了只有「关」这一种，所以「已达阈值」是必然结论，只是给不出具体第几次。
     const failed = decision.failed_count
     const note = typeof failed === 'number' && failed > 0
-      ? `连续失败 ${failed}${decision.failure_threshold ? `/${decision.failure_threshold}` : ''} 次`
+      ? `连续失败 ${failed}${decision.failure_threshold ? `/${decision.failure_threshold}` : ''} 次，已达阈值`
       : '连续失败已达阈值'
     return { badge: { kind: 'test-failed', label: '测试失败' }, note }
   }

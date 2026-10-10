@@ -22,7 +22,12 @@ const (
 	SupplierGroupSchedulingElectionActionEnabled  = "enabled"
 	SupplierGroupSchedulingElectionActionDisabled = "disabled"
 
-	SupplierGroupSchedulingElectionReasonFailed      = "测试失败，关闭调度"
+	// SupplierGroupSchedulingElectionReasonFailedFmt 是「连续失败达阈值、关闭调度」的关闭原因。
+	// 必须带上进度（第几次/阈值）：只写「测试失败」时，运维看不出这是第几次失败，
+	// 也就答不出「为什么是现在关、而不是上一轮」—— 而这道闸门恰恰是按次数说话的。
+	// 与 ReasonFailedPendingFmt 同一口径（N/M，M 都是阈值）：未达阈值那条显示 N<M 并注明「暂不关闭」，
+	// 这条显示 M/M，两条对照着读就能看懂闸门走到哪一步了。
+	SupplierGroupSchedulingElectionReasonFailedFmt   = "连续失败 %d/%d 次，关闭调度"
 	SupplierGroupSchedulingElectionReasonElected     = "分组内最优，开启调度"
 	SupplierGroupSchedulingElectionReasonNotElected  = "非分组最优，关闭调度"
 	SupplierGroupSchedulingElectionReasonUntested    = "尚未测试，保持原状"
@@ -1410,6 +1415,12 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			// member.FailedCount 是「本轮之前」的累计值，含本轮的次数要加一。
 			if decision.TestFailed {
 				decision.FailedCount = member.FailedCount + 1
+				// 与 decide 同口径封顶到阈值：member.FailedCount 本身已按阈值封顶
+				// （见 persistSupplierGroupElectionFailedCount），再加一必然越界 ——
+				// 不封顶就会把「已关且无备选、还在继续失败」的行显示成「连续失败 6/5 次」。
+				if decision.FailedCount > config.FailureThreshold {
+					decision.FailedCount = config.FailureThreshold
+				}
 				decision.FailureThreshold = config.FailureThreshold
 			}
 			decision.UpstreamUnavailable = account.upstreamUnavailable
@@ -1753,15 +1764,22 @@ func supplierGroupSchedulingElectionDecide(account *supplierGroupElectionAccount
 			return account.schedulableBefore, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonKeepLastOne
 		}
 		// 闸门二（防抖）：连续失败累计到阈值才关，让单次抖动有翻盘的机会。
-		if pending := account.failedCount + 1; pending < failureThreshold {
+		// 进度统一封顶到阈值：failedCount 本身已按阈值封顶（见 persistSupplierGroupElectionFailedCount），
+		// 再加一必然越界 —— 不封顶就会把「已关且无备选、还在继续失败」的行写成「连续失败 6/5 次」。
+		pending := account.failedCount + 1
+		if pending > failureThreshold {
+			pending = failureThreshold
+		}
+		if pending < failureThreshold {
 			account.hold = supplierGroupElectionHoldPending
 			return account.schedulableBefore, SupplierGroupSchedulingElectionActionNone,
 				fmt.Sprintf(SupplierGroupSchedulingElectionReasonFailedPendingFmt, pending, failureThreshold)
 		}
+		failedReason := fmt.Sprintf(SupplierGroupSchedulingElectionReasonFailedFmt, pending, failureThreshold)
 		if account.schedulableBefore {
-			return false, SupplierGroupSchedulingElectionActionDisabled, SupplierGroupSchedulingElectionReasonFailed
+			return false, SupplierGroupSchedulingElectionActionDisabled, failedReason
 		}
-		return false, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonFailed
+		return false, SupplierGroupSchedulingElectionActionNone, failedReason
 	default:
 		return account.schedulableBefore, SupplierGroupSchedulingElectionActionNone, SupplierGroupSchedulingElectionReasonUntested
 	}
