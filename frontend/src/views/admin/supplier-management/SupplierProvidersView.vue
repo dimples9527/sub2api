@@ -1,6 +1,27 @@
 <template>
   <SupplierModuleLayout>
-    <section class="sp-provider-filter-card" aria-label="供应商筛选与操作">
+    <section
+      class="sp-provider-filter-card"
+      :class="{ 'is-filter-collapsed': !mobileFiltersExpanded }"
+      aria-label="供应商筛选与操作"
+    >
+      <!-- 手机端把整张筛选卡片折成这一行：卡片头、筛选控件、操作按钮一起收起。
+           结果数必须留在这里 —— 卡片头在手机端整体隐藏，不挪过来就等于手机上再也看不到
+           「筛出了多少个供应商」。桌面端这一行不显示（.sp-provider-mobile-filter-toggle 默认
+           display: none），卡片头照旧，两边各自完整。 -->
+      <button
+        class="sp-provider-mobile-filter-toggle"
+        type="button"
+        data-test="supplier-provider-mobile-filter-toggle"
+        :aria-expanded="mobileFiltersExpanded"
+        aria-controls="supplier-provider-filter-body"
+        @click="mobileFiltersExpanded = !mobileFiltersExpanded"
+      >
+        <span>筛选供应商</span>
+        <span class="sp-provider-mobile-filter-count">{{ sortedProviders.length }} 个结果</span>
+        <span class="sp-provider-mobile-filter-state">{{ mobileFiltersExpanded ? '收起' : '展开' }}</span>
+        <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': mobileFiltersExpanded }" />
+      </button>
       <header class="sp-filter-card-head">
         <div>
           <span class="sp-filter-card-kicker">筛选条件</span>
@@ -10,7 +31,11 @@
         <span class="sp-filter-card-count">{{ sortedProviders.length }} 个结果</span>
       </header>
 
-      <div class="sp-provider-filter-body">
+      <div
+        id="supplier-provider-filter-body"
+        class="sp-provider-filter-body"
+        :class="{ 'is-expanded': mobileFiltersExpanded }"
+      >
         <div class="sp-provider-filter-fields">
           <div
             class="sp-provider-filter-control"
@@ -126,6 +151,28 @@
               <h2>供应商运行列表</h2>
               <span>默认按真实业务风险排序</span>
             </div>
+          </div>
+          <!-- 手机端列表渲染成卡片、没有表头可点，排序只能靠这一组控件；
+               桌面端隐藏它，继续点表头，两处不重复。 -->
+          <div class="sp-provider-mobile-sort" data-test="supplier-provider-mobile-sort">
+            <Select
+              :model-value="providerSortKey"
+              class="sp-provider-mobile-sort-field"
+              :options="providerSortOptions"
+              :searchable="false"
+              aria-label="排序字段"
+              @update:model-value="handleProviderMobileSortKeyChange"
+            />
+            <button
+              class="sp-button sp-provider-mobile-sort-order"
+              type="button"
+              data-test="supplier-provider-mobile-sort-order"
+              :disabled="!providerSortKey"
+              :aria-label="providerSortOrder === 'asc' ? '当前升序，切换为降序' : '当前降序，切换为升序'"
+              @click="handleProviderSort(providerSortKey, providerSortOrder === 'asc' ? 'desc' : 'asc')"
+            >
+              {{ providerSortOrder === 'asc' ? '升序 ↑' : '降序 ↓' }}
+            </button>
           </div>
         </header>
 
@@ -1311,6 +1358,8 @@ const providerQuickFilter = ref<ProviderQuickFilter>('all')
 const filter = ref('all')
 const providerSortKey = ref('')
 const providerSortOrder = ref<'asc' | 'desc'>('asc')
+// 手机端筛选卡片默认收起：与账号页同一套交互（那边也是 ref(false)）。
+const mobileFiltersExpanded = ref(false)
 const loading = ref(false)
 const error = ref('')
 const selectedProvider = ref<SupplierProvider | null>(null)
@@ -1363,6 +1412,21 @@ const providerColumns: Column[] = [
   { key: 'auth_summary', label: '登录认证', sortable: true, class: 'min-w-[130px]' },
   { key: 'actions', label: '操作', class: 'min-w-[330px]' },
 ]
+
+// 手机排序与桌面表头使用同一份可排序列，字段增加后两边口径不会各走各的。
+// 首项「默认排序」（value 为空串）对应 providerSortKey 的初值 —— 那种情况下 sortedProviders
+// 走「风险优先」分支；下拉里若没有这一项，用户一进页面看到的就是一个与当前排序对不上的字段名。
+const providerSortOptions: SelectOption[] = [
+  { value: '', label: '默认排序' },
+  ...providerColumns.filter(column => column.sortable).map(column => ({ value: column.key, label: column.label })),
+]
+
+function handleProviderMobileSortKeyChange(value: string | number | boolean | null) {
+  const key = String(value ?? '')
+  if (key && !providerSortOptions.some(option => option.value === key)) return
+  if (key === providerSortKey.value) return
+  handleProviderSort(key, providerSortOrder.value)
+}
 
 const authHistoryColumns: Column[] = [
   { key: 'created_at', label: '时间', class: 'min-w-[150px]' },
@@ -3236,6 +3300,12 @@ function errorMessage(err: unknown, fallback: string): string {
   box-shadow: var(--sp-shadow);
 }
 
+/* 手机端专用的折叠行与排序控件：默认（桌面）隐藏，只在下面的手机媒体查询里显示。 */
+.sp-provider-mobile-filter-toggle,
+.sp-provider-mobile-sort {
+  display: none;
+}
+
 .sp-filter-card-head {
   display: flex;
   align-items: center;
@@ -3625,10 +3695,38 @@ function errorMessage(err: unknown, fallback: string): string {
   }
 }
 
+/*
+  手机端 4 张余额卡并成一行。一行里每张只剩 ~80px，卡内说明小字（sp-balance-summary-foot，
+  如「上一统计日 2026-09-20（与今日对比）」）在这个宽度下读不出来，隐藏，只留标题 + 金额。
+  金额带千分位（¥ 1,712.4），窄格里允许在货币符号后的空格处折行 ——
+  卡片本身是 overflow: hidden，不给折行的话超宽金额会被直接裁掉、看不到数。
+*/
 @media (max-width: 560px) {
   .sp-balance-summary-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem;
   }
+
+  .sp-balance-summary-body { padding: 0.65rem 0.5rem 0.7rem; }
+
+  .sp-balance-summary-card {
+    gap: 0.1rem;
+    padding: 0.45rem 0.4rem 0.45rem 0.55rem;
+    border-radius: 0.5rem;
+  }
+
+  .sp-balance-summary-label {
+    font-size: 0.6rem;
+    line-height: 1.25;
+  }
+
+  .sp-balance-summary-value {
+    font-size: 0.72rem;
+    line-height: 1.2;
+    overflow-wrap: break-word;
+  }
+
+  .sp-balance-summary-foot { display: none; }
 }
 
 @media (max-width: 900px) {
@@ -3652,6 +3750,79 @@ function errorMessage(err: unknown, fallback: string): string {
   .sp-provider-filter-actions .sp-button {
     flex: 1 1 calc(50% - 0.5rem);
     min-width: 0;
+  }
+}
+
+/*
+  手机端：整张筛选卡片折成一行。
+  卡片头（眉题 + 标题 + 说明 + 结果数）整体隐藏，结果数挪进折叠行；筛选控件与操作按钮
+  都在 .sp-provider-filter-body 里，收起后一并不可见 —— 只收起控件、留着 6 个按钮的话，
+  这排按钮在 2 列栅格下仍占 3 行，首屏照样被吃掉。
+  断点取 767px 与账号页对齐，两页的手机端交互保持一致。
+*/
+@media (max-width: 767px) {
+  .sp-filter-card-head { display: none; }
+
+  .sp-provider-mobile-filter-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.45rem;
+    border: 0;
+    border-bottom: 1px solid var(--sp-line);
+    padding: 0.7rem 0.85rem;
+    background: transparent;
+    color: var(--sp-text);
+    font-size: 0.84rem;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sp-provider-mobile-filter-toggle:focus-visible,
+  .sp-provider-mobile-sort-order:focus-visible {
+    outline: 2px solid var(--sp-cyan);
+    outline-offset: 2px;
+  }
+
+  .sp-provider-mobile-filter-toggle :deep(svg) { transition: transform 160ms ease; }
+
+  /* margin-left: auto 把结果数与「展开」一起推到右侧，标题留在左边。 */
+  .sp-provider-mobile-filter-count {
+    margin-left: auto;
+    color: var(--sp-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .sp-provider-mobile-filter-state {
+    color: var(--sp-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  /* 收起时整张卡片只剩这一行，保留分隔线会与卡片自身的下边框叠成双线。 */
+  .sp-provider-filter-card.is-filter-collapsed .sp-provider-mobile-filter-toggle { border-bottom: 0; }
+
+  .sp-provider-filter-body:not(.is-expanded) { display: none; }
+
+  /* 排序控件：面板头在 760px 以下已是竖排，这里只要占满一行即可。 */
+  .sp-provider-mobile-sort {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .sp-provider-mobile-sort-field { min-width: 0; flex: 1; }
+
+  .sp-provider-mobile-sort-order {
+    min-width: 5.6rem;
+    min-height: 2.5rem;
+    border-color: var(--sp-line);
+    background: var(--sp-panel-2);
+    color: var(--sp-text);
+    font-size: 0.8rem;
   }
 }
 
@@ -3731,15 +3902,39 @@ function errorMessage(err: unknown, fallback: string): string {
     text-align: center;
   }
 
+  /*
+    手机端 5 张指标卡并成一行。一行里每张只剩 ~65px，卡内说明小字（sp-metric-foot，
+    如「风险等级为 high 或 critical」）隐藏，只留标签 + 数值；
+    标签最长「余额不足 3 天」，在这个宽度下会折成两行，属预期。
+  */
   .sp-metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.3rem;
   }
+
+  .sp-metric-card {
+    padding: 0.45rem 0.35rem;
+    border-radius: 0.5rem;
+  }
+
+  .sp-metric-label {
+    font-size: 0.6rem;
+    line-height: 1.2;
+  }
+
+  .sp-metric-value {
+    margin-top: 0.2rem;
+    font-size: 1rem;
+    line-height: 1.15;
+  }
+
+  .sp-metric-foot { display: none; }
 }
 
 @media (max-width: 460px) {
-  /* 覆盖共享样式把统计卡打成单列的行为 */
+  /* 覆盖共享样式把统计卡打成单列的行为；与上面 520px 同值，保持 5 列一行。 */
   .sp-metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
