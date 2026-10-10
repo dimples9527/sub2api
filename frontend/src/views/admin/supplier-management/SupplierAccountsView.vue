@@ -243,6 +243,14 @@
               <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-bind-by-group" type="button"
                 data-test="supplier-account-bind-by-group" :disabled="batchBindSubmitting"
                 @click="runToolbarMoreAction(openBindByGroupDialog)">按分组绑定</button>
+              <!-- 与自动化页的任务编辑弹窗共用同一份弹窗组件：这里原地打开、直接改那份任务配置。
+                   放在「更多」里而不是行内：它们改的是全局任务配置，不属于某一行账号。 -->
+              <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-config-health-guard" type="button"
+                data-test="supplier-account-config-health-guard"
+                @click="runToolbarMoreAction(() => openAutomationConfigDialog('health-guard'))">配置健康守护账号</button>
+              <button class="sp-button sp-account-toolbar-btn sp-account-toolbar-config-election" type="button"
+                data-test="supplier-account-config-election-groups"
+                @click="runToolbarMoreAction(() => openAutomationConfigDialog('election'))">配置参与择优的分组</button>
             </div>
           </div>
         </div>
@@ -1941,13 +1949,36 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- 顶部「更多」两个配置入口的落点：与自动化页共用同一份弹窗组件。
+         只有「完成」会落库（见 saveAutomationConfigDialog），✕ / 点遮罩 / Esc 一律只关闭。 -->
+    <SupplierHealthGuardAccountsDialog
+      v-if="automationConfigDialogDraft && automationConfigDialogKind === 'health-guard'"
+      v-model:config="automationConfigDialogDraft"
+      :show="automationConfigDialogKind === 'health-guard'"
+      :accounts="dialogEligibleAccounts"
+      :loading-accounts="dialogLoadingAccounts"
+      :disabled-provider-ids="dialogDisabledProviderIds"
+      @confirm="saveAutomationConfigDialog"
+      @close="closeAutomationConfigDialog"
+    />
+    <SupplierGroupElectionGroupsDialog
+      v-if="automationConfigDialogDraft && automationConfigDialogKind === 'election'"
+      v-model:config="automationConfigDialogDraft"
+      :show="automationConfigDialogKind === 'election'"
+      :groups="dialogAllGroups"
+      :loading-groups="dialogLoadingGroups"
+      :accounts="dialogEligibleAccounts"
+      @confirm="saveAutomationConfigDialog"
+      @close="closeAutomationConfigDialog"
+    />
   </SupplierModuleLayout>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierHealthGuardRunDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { SupplierAccountRateGuardLogDialog, SupplierDrawer, SupplierGroupElectionChangeLogDialog, SupplierGroupElectionGroupsDialog, SupplierHealthGuardAccountsDialog, SupplierHealthGuardRunDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import { CreateAccountModal, EditAccountModal } from '@/components/account'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -1986,6 +2017,14 @@ import { listAccountRateGuardUnbindLogs, listRuns, listTasks as listAutomationTa
 // 单独起一行、不并进上面那行：上面那行的写法被 SupplierLocalDataViews.spec.ts 逐字断言。
 import { updateTask as updateSupplierAutomationTask } from '@/api/admin/supplierAutomation'
 import type { SupplierAutomationRun, SupplierAutomationTask } from '@/api/admin/supplierAutomation'
+import type { SupplierAutomationConfig } from '@/api/admin/supplierAutomation'
+// 两个配置弹窗（健康守护账号 / 参与择优的分组）与自动化页共用同一份组件，
+// 候选数据（可用账号 / 已关闭的供应商）也走同一份口径，不在本页另写一套。
+import {
+  fetchDisabledSupplierProviderIds,
+  fetchEligibleSupplierAccounts,
+} from './supplierAutomationAccountCandidates'
+import { getAllIncludingInactive as listAllGroupsIncludingInactive } from '@/api/admin/groups'
 import {
   listSupplierAccountHealthRecords,
   type SupplierAccountHealthRecord,
@@ -2715,6 +2754,125 @@ const groupDefaultAccountDialog = reactive<{ open: boolean; account: SupplierPro
   open: false,
   account: null,
 })
+
+// ── 顶部「更多」里的两个配置入口 ──
+//
+// 两个弹窗与自动化页共用同一份组件，也都只编辑所属任务的 config：
+//   配置健康守护账号   → supplier_account_health_guard
+//   配置参与择优的分组 → supplier_group_scheduling_election
+// 在自动化页它们嵌在任务编辑弹窗里，由那个弹窗的「保存」整份提交；本页没有父级「保存」兜底，
+// 所以「完成」必须自己落库。落库走的是覆盖式更新，因此只在草稿真的变了时才发 PUT ——
+// 「打开看一眼就点完成」不该产生一次无谓写入（会把任务的 updated_at 一并刷掉）。
+// ✕ / 点遮罩 / Esc 只关闭不落库，否则「点一下遮罩就把配置写进库」。
+type AutomationConfigDialogKind = 'health-guard' | 'election'
+
+const AUTOMATION_CONFIG_DIALOG_TASK_CODES: Record<AutomationConfigDialogKind, string> = {
+  'health-guard': 'supplier_account_health_guard',
+  election: 'supplier_group_scheduling_election',
+}
+
+const automationConfigDialogKind = ref<'' | AutomationConfigDialogKind>('')
+// 弹窗直接改这份草稿（深拷自任务配置）；「完成」时与原值比对，决定要不要回写。
+const automationConfigDialogDraft = ref<SupplierAutomationConfig | null>(null)
+const automationConfigDialogBaseline = ref('')
+const automationConfigDialogSaving = ref(false)
+// 两个弹窗共用的候选数据，按需加载：不进这两个弹窗就一次也不请求。
+const dialogEligibleAccounts = ref<SupplierProviderAccount[]>([])
+const dialogDisabledProviderIds = ref<Set<number>>(new Set())
+const dialogLoadingAccounts = ref(false)
+const dialogAllGroups = ref<AdminGroup[]>([])
+const dialogLoadingGroups = ref(false)
+
+async function ensureDialogAccountsLoaded() {
+  if (dialogEligibleAccounts.value.length > 0) return
+  dialogLoadingAccounts.value = true
+  try {
+    // 供应商状态与账号列表并行取，别串行加一轮等待；供应商状态拿不到只影响标灰，不阻断。
+    const providersPromise = fetchDisabledSupplierProviderIds()
+    dialogEligibleAccounts.value = await fetchEligibleSupplierAccounts()
+    dialogDisabledProviderIds.value = await providersPromise
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载账号列表失败'))
+  } finally {
+    dialogLoadingAccounts.value = false
+  }
+}
+
+async function ensureDialogGroupsLoaded() {
+  if (dialogAllGroups.value.length > 0) return
+  dialogLoadingGroups.value = true
+  try {
+    // 含停用分组：已关闭择优的分组若此刻正被停用，仍要能看见它的开关状态。
+    dialogAllGroups.value = await listAllGroupsIncludingInactive()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载分组列表失败'))
+  } finally {
+    dialogLoadingGroups.value = false
+  }
+}
+
+async function openAutomationConfigDialog(kind: AutomationConfigDialogKind) {
+  automationConfigDialogKind.value = kind
+  automationConfigDialogDraft.value = null
+  automationConfigDialogBaseline.value = ''
+  try {
+    // 任务、账号候选、（只有择优要的）分组三路并行取。
+    const accountsPromise = ensureDialogAccountsLoaded()
+    const groupsPromise = kind === 'election' ? ensureDialogGroupsLoaded() : Promise.resolve()
+    const tasks = await listAutomationTasks()
+    const task = tasks.find(item => item.task_code === AUTOMATION_CONFIG_DIALOG_TASK_CODES[kind]) || null
+    if (!task) {
+      appStore.showError('没有找到对应的自动化任务，无法配置')
+      automationConfigDialogKind.value = ''
+      return
+    }
+    // 深拷一份当草稿：弹窗直接改它，关掉不落库也不会污染列表里那份任务对象。
+    const draft = JSON.parse(JSON.stringify(task.config ?? {})) as SupplierAutomationConfig
+    automationConfigDialogDraft.value = draft
+    automationConfigDialogBaseline.value = JSON.stringify(draft)
+    await Promise.all([accountsPromise, groupsPromise])
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '加载任务配置失败'))
+    automationConfigDialogKind.value = ''
+  }
+}
+
+function closeAutomationConfigDialog() {
+  automationConfigDialogKind.value = ''
+  automationConfigDialogDraft.value = null
+}
+
+/** 「完成」= 保存：草稿没变就只关闭，变了才整份回写（更新接口是覆盖式的）。 */
+async function saveAutomationConfigDialog() {
+  if (automationConfigDialogSaving.value) return
+  const kind = automationConfigDialogKind.value
+  const draft = automationConfigDialogDraft.value
+  if (!kind || !draft) return
+  if (JSON.stringify(draft) === automationConfigDialogBaseline.value) {
+    closeAutomationConfigDialog()
+    return
+  }
+  automationConfigDialogSaving.value = true
+  try {
+    const taskCode = AUTOMATION_CONFIG_DIALOG_TASK_CODES[kind]
+    // 覆盖式更新：必须拿整份任务回写，只送 config 会把 cron / enabled 一起抹掉。
+    const tasks = await listAutomationTasks()
+    const task = tasks.find(item => item.task_code === taskCode)
+    if (!task) {
+      appStore.showError('没有找到对应的自动化任务，无法保存')
+      return
+    }
+    await updateSupplierAutomationTask(taskCode, { ...task, config: draft })
+    appStore.showSuccess('配置已保存')
+    await loadAutomationTaskHints()
+    closeAutomationConfigDialog()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '保存配置失败'))
+  } finally {
+    automationConfigDialogSaving.value = false
+  }
+}
+
 let guardFreshnessTimer: number | undefined
 
 const guardCheckStaleMinutes = computed(() => {

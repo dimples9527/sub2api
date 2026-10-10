@@ -1306,7 +1306,7 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('添加账号')
   })
 
-  it('shows the same four actions in the desktop toolbar menu and dismisses it', async () => {
+  it('shows the four account actions plus the two task-config entries in the desktop toolbar menu and dismisses it', async () => {
     const wrapper = await mountSupplierAccounts()
     const trigger = wrapper.find('[data-test="supplier-account-toolbar-more"]')
     const menu = wrapper.find('#supplier-account-toolbar-more-menu')
@@ -1316,11 +1316,15 @@ describe('supplier local data views component usage', () => {
     await trigger.trigger('click')
     expect(trigger.attributes('aria-expanded')).toBe('true')
     expect((menu.element as HTMLElement).style.display).not.toBe('none')
+    // 前四个是账号级操作；后两个原地打开自动化任务的配置弹窗（与自动化页共用同一份组件），
+    // 改的是全局任务配置、不属于某一行账号，所以也挂在「更多」里而不是行内。
     expect(menu.findAll('button').map(button => button.attributes('data-test'))).toEqual([
       'supplier-account-create',
       'supplier-account-sync-upstream-models',
       'supplier-account-batch-bind-groups',
       'supplier-account-bind-by-group',
+      'supplier-account-config-health-guard',
+      'supplier-account-config-election-groups',
     ])
     expect(menu.find('[data-test="supplier-account-batch-bind-groups"]').attributes('disabled')).toBeDefined()
 

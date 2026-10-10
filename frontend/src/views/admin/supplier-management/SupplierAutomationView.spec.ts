@@ -4,10 +4,44 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const supplierAutomationSource = readFileSync(
+// 健康守护账号 / 配置参与择优的分组两个弹窗都已抽成共享组件（上游账号页复用同两个），
+// 配套的纯函数层与派生逻辑单独成模块。
+// 下面的断言关心的是「这套 UI 结构与规则存在于自动化配置入口里」，不关心它落在哪个文件，
+// 因此把这几份源码按固定顺序拼成一个整体来断言 —— 逐条改写断言对象只会让守卫更难维护。
+const supplierAutomationViewSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), 'SupplierAutomationView.vue'),
   'utf-8'
 )
+const supplierHealthGuardDialogSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/admin/supplier-management/SupplierHealthGuardAccountsDialog.vue'),
+  'utf-8'
+)
+const supplierGroupElectionDialogSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/admin/supplier-management/SupplierGroupElectionGroupsDialog.vue'),
+  'utf-8'
+)
+const supplierAutomationConfigSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'supplierAutomationConfig.ts'),
+  'utf-8'
+)
+const supplierGroupElectionComposableSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'useGroupElectionConfig.ts'),
+  'utf-8'
+)
+// 两个配置弹窗的候选数据（可用账号 / 已关闭的供应商）也抽成了共享模块：
+// 上游账号页原地打开同一个弹窗时走的是同一份分页与过滤口径。
+const supplierAccountCandidatesSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'supplierAutomationAccountCandidates.ts'),
+  'utf-8'
+)
+const supplierAutomationSource = [
+  supplierAutomationViewSource,
+  supplierHealthGuardDialogSource,
+  supplierGroupElectionDialogSource,
+  supplierAutomationConfigSource,
+  supplierGroupElectionComposableSource,
+  supplierAccountCandidatesSource,
+].join('\n')
 const supplierAutomationAPISource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../../../api/admin/supplierAutomation.ts'),
   'utf-8'
@@ -1513,9 +1547,11 @@ describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
     expect(rateGuardBlock).toContain(
       'matchesPlatformFilter(group.platform, rateGuardGroupPlatformFilter.value)'
     )
+    // 择优弹窗的过滤链已随弹窗搬进共享 composable，区间改在该模块里取；
+    // 结束标记取紧随其后的同族 computed，语义与原来的「编辑弹窗宽度注释」等价（都是「这一段到此为止」）。
     const electionBlock = supplierAutomationSource.slice(
       supplierAutomationSource.indexOf('const electionFilteredGroups = computed(()'),
-      supplierAutomationSource.indexOf('// 编辑弹窗的宽度由')
+      supplierAutomationSource.indexOf('const electionGroupAllChecked = computed(')
     )
     expect(electionBlock).toContain(
       'matchesPlatformFilter(group.platform, electionGroupPlatformFilter.value)'
@@ -1528,9 +1564,11 @@ describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
   })
 
   it('账号弹窗的平台标签放在 grid 容器之外，平台下拉已随之移除', () => {
-    const filtersBlock = supplierAutomationSource.slice(
-      supplierAutomationSource.indexOf('<div class="sp-health-guard-account-filters">'),
-      supplierAutomationSource.indexOf('<div v-if="loadingHealthGuardSupplierAccounts"')
+    // 这段模板已随弹窗搬进共享组件，区间改在组件源码里取；
+    // 结束标记是同一段模板中紧随账号列表之后的「正在加载账号」分支，语义不变。
+    const filtersBlock = supplierHealthGuardDialogSource.slice(
+      supplierHealthGuardDialogSource.indexOf('<div class="sp-health-guard-account-filters">'),
+      supplierHealthGuardDialogSource.indexOf('<div v-if="loadingAccounts"')
     )
     // 平台下拉连同「全部平台」空选项一起消失，这一行只剩供应商下拉。
     expect(filtersBlock).not.toContain('healthGuardPlatformFilterOptions')
@@ -1564,9 +1602,11 @@ describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
     expect(supplierAutomationSource).toContain(
       'buildPlatformFacets(healthGuardProviderScopedMappings.value)'
     )
-    const openBlock = supplierAutomationSource.slice(
-      supplierAutomationSource.indexOf('async function openHealthGuardAccounts()'),
-      supplierAutomationSource.indexOf('function closeHealthGuardAccounts()')
+    // 打开弹窗时的重置逻辑随弹窗一起搬进共享组件（onDialogOpen），断言对象跟着搬：
+    // 语义不变 —— 每次打开账号弹窗都必须清空平台筛选。
+    const openBlock = supplierHealthGuardDialogSource.slice(
+      supplierHealthGuardDialogSource.indexOf('async function onDialogOpen()'),
+      supplierHealthGuardDialogSource.indexOf('function closeHealthGuardAccounts()')
     )
     expect(openBlock).toContain('healthGuardAccountPlatformFilter.value = []')
     // 多选比单选更容易把结果筛空，空态必须说明是筛选造成的（沿用原有文案）。
@@ -1669,11 +1709,14 @@ describe('SupplierAutomationView 弹窗的平台筛选与平台配色', () => {
       supplierAutomationSource.indexOf('function closeRateGuardGroups()')
     )
     expect(openRateGuardBlock).toContain('rateGuardGroupPlatformFilter.value = []')
-    const openElectionBlock = supplierAutomationSource.slice(
-      supplierAutomationSource.indexOf('async function openElectionGroups()'),
-      supplierAutomationSource.indexOf('function closeElectionGroups()')
+    // 择优弹窗的筛选状态已随弹窗搬进共享组件（上游账号页复用同一个弹窗），
+    // 重置逻辑也跟着落到共享 composable 的 resetElectionDialogFilters 里；
+    // 断言对象改到那个函数本身，语义不变：打开弹窗时平台筛选必须被清空。
+    const resetElectionBlock = supplierAutomationSource.slice(
+      supplierAutomationSource.indexOf('function resetElectionDialogFilters()'),
+      supplierAutomationSource.indexOf('function electionGroupIsDisabled(')
     )
-    expect(openElectionBlock).toContain('electionGroupPlatformFilter.value = []')
+    expect(resetElectionBlock).toContain('electionGroupPlatformFilter.value = []')
   })
 
   it('平台筛选把结果筛空时，空态说明是筛选造成的，而不是「没有分组」', () => {

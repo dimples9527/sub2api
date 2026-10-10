@@ -923,542 +923,24 @@
         </template>
       </BaseDialog>
 
-      <BaseDialog
+      <!-- 健康守护账号配置已抽成共享组件：上游账号页用的是同一个组件。
+           账号候选数据仍由本页持有并传入，保证两处看到同一份列表、不重复拉取。 -->
+      <SupplierHealthGuardAccountsDialog
+        v-model:config="editForm.config"
         :show="healthGuardAccountsVisible"
-        title="配置健康守护账号"
-        width="full"
-        :z-index="60"
+        :accounts="healthGuardSupplierAccounts"
+        :loading-accounts="loadingHealthGuardSupplierAccounts"
+        :disabled-provider-ids="disabledSupplierProviderIDs"
+        @confirm="closeHealthGuardAccounts"
         @close="closeHealthGuardAccounts"
-      >
-        <div class="sp-health-guard-account-dialog">
-          <section class="sp-health-guard-platform-models">
-            <div class="sp-health-guard-dialog-section-head">
-              <strong>平台默认测试模型</strong>
-              <span>账号未单独设置模型时使用对应平台的默认值。</span>
-            </div>
-            <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-platform-model-grid">
-              <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
-                <div :class="platformTextClass(summary.platform)">
-                  <strong>{{ platformLabel(summary.platform) }}</strong>
-                  <span>{{ summary.accountCount }} 个可选账号</span>
-                </div>
-                <Select
-                  v-model="editForm.config.account_health_guard_platform_models[summary.platform]"
-                  :options="healthGuardModelSelectOptions(summary.platform, editForm.config.account_health_guard_platform_models[summary.platform])"
-                  searchable
-                  clearable
-                  creatable
-                  :creatable-prefix="healthGuardModelCreatablePrefix"
-                  :placeholder="healthGuardModelLoadingByPlatform[summary.platform] ? '加载模型中…' : '选择平台默认模型'"
-                  empty-text="暂无可用模型"
-                />
-              </article>
-            </div>
-            <div v-else class="sp-rate-guard-empty">当前没有可配置默认模型的平台。</div>
-          </section>
-
-          <!-- 倍率区间按平台铺开后，7 个平台会把账号工作区挤到看不见（弹窗高度受 100dvh 约束），
-               因此这里只放「摘要 + 入口」，实际区间配置放进二级弹窗。 -->
-          <section v-if="editForm.config.account_health_guard_platform_multiplier_intervals_enabled" class="sp-health-guard-platform-models sp-health-guard-multiplier-entry-section">
-            <div class="sp-health-guard-dialog-section-head">
-              <strong>未开调度账号按倍率间隔</strong>
-              <span>仅对未开启调度的账号生效：按账号所属平台 + 计费倍率落入的区间取检查间隔（覆盖账号级间隔）。区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。间隔不得低于 60 秒。</span>
-            </div>
-            <div class="sp-health-guard-multiplier-entry">
-              <span>{{ healthGuardMultiplierSummary }}</span>
-              <button
-                class="sp-button small ghost sp-health-guard-multiplier-entry-button"
-                type="button"
-                @click="openMultiplierIntervalDialog"
-              >
-                <Icon name="cog" size="sm" />
-                配置倍率区间
-              </button>
-            </div>
-          </section>
-
-          <section class="sp-health-guard-account-workspace">
-            <div class="sp-health-guard-selection-summary" aria-label="健康守护账号配置摘要">
-              <article>
-                <span>已选账号</span>
-                <strong>{{ healthGuardSelectionSummary.selected }}</strong>
-              </article>
-              <article>
-                <span>使用平台默认模型</span>
-                <strong>{{ healthGuardSelectionSummary.platformDefault }}</strong>
-              </article>
-              <article>
-                <span>账号模型覆盖</span>
-                <strong>{{ healthGuardSelectionSummary.overridden }}</strong>
-              </article>
-              <article>
-                <span>已设检查间隔</span>
-                <strong>{{ healthGuardSelectionSummary.intervals }}</strong>
-              </article>
-              <article :class="{ warning: healthGuardSelectionSummary.missingModel > 0 }">
-                <span>缺少有效模型</span>
-                <strong>{{ healthGuardSelectionSummary.missingModel }}</strong>
-              </article>
-            </div>
-
-            <div class="sp-health-guard-account-toolbar">
-              <div class="sp-health-guard-account-filters">
-                <Select
-                  v-model="healthGuardAccountProviderFilter"
-                  :options="healthGuardProviderFilterOptions"
-                  searchable
-                  placeholder="供应商过滤"
-                  empty-text="暂无供应商"
-                />
-                <Input v-model="healthGuardAccountSearch" placeholder="搜索账号名称或供应商来源" />
-                <!-- 两个快捷过滤是同一维度的互斥方向（参与 / 未参与守护），共用一个 flex 容器
-                     塞进 grid 的第 3 列。不能把第二个按钮直接铺成 grid 子项：桌面端列数会被
-                     撑到 4，多出来的那个只能掉到第二行、被 minmax(160px, 0.42fr) 拉成一整块宽按钮。 -->
-                <div class="sp-health-guard-quick-filters" role="group" aria-label="健康守护账号快捷过滤">
-                  <button
-                    class="sp-health-guard-selected-toggle"
-                    :class="{ active: healthGuardSelectedOnly }"
-                    type="button"
-                    :aria-pressed="healthGuardSelectedOnly"
-                    @click="toggleHealthGuardSelectedOnly"
-                  >
-                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
-                    仅看已选
-                    <strong>{{ healthGuardSelectionSummary.selected }}</strong>
-                  </button>
-                  <button
-                    class="sp-health-guard-selected-toggle"
-                    :class="{ active: healthGuardUnselectedOnly }"
-                    type="button"
-                    :aria-pressed="healthGuardUnselectedOnly"
-                    @click="toggleHealthGuardUnselectedOnly"
-                  >
-                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
-                    仅看未开启
-                    <strong>{{ healthGuardUnselectedCount }}</strong>
-                  </button>
-                  <!-- 分隔线右侧是「供应商是否开启」维度：与左边那两个正交、可以叠加
-                       （例如「未参与守护 + 供应商已关闭」一起看），但这一对内部互斥。 -->
-                  <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
-                  <button
-                    class="sp-health-guard-selected-toggle"
-                    :class="{ active: healthGuardProviderEnabledOnly }"
-                    type="button"
-                    :aria-pressed="healthGuardProviderEnabledOnly"
-                    title="只显示上游供应商仍在启用的账号"
-                    @click="toggleHealthGuardProviderEnabledOnly"
-                  >
-                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
-                    仅看供应商开启
-                    <strong>{{ healthGuardProviderEnabledCount }}</strong>
-                  </button>
-                  <button
-                    class="sp-health-guard-selected-toggle"
-                    :class="{ active: healthGuardProviderClosedOnly }"
-                    type="button"
-                    :aria-pressed="healthGuardProviderClosedOnly"
-                    title="只显示上游供应商已停用的账号"
-                    @click="toggleHealthGuardProviderClosedOnly"
-                  >
-                    <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
-                    仅看供应商关闭
-                    <strong>{{ healthGuardProviderClosedCount }}</strong>
-                  </button>
-                </div>
-              </div>
-              <span class="sp-health-guard-filter-result">筛选结果 <strong>{{ healthGuardWorkspaceAccounts.length }}</strong> 个</span>
-              <!-- 平台标签与两个分组弹窗共用同一套控件与配色语言，独占一行（flex-basis: 100%）。
-                   必须放在 grid 容器之外：.sp-health-guard-account-filters 是 grid，
-                   flex-basis 在 grid 里不生效，塞进去只会把那几列挤变形。
-                   没有可选平台时不渲染，省掉一条空行。 -->
-              <div
-                v-if="healthGuardAccountPlatformFacets.length"
-                class="sp-platform-chip-row"
-                role="group"
-                aria-label="按平台筛选账号"
-              >
-                <button
-                  v-for="facet in healthGuardAccountPlatformFacets"
-                  :key="facet.platform"
-                  class="sp-platform-chip"
-                  type="button"
-                  :aria-pressed="healthGuardAccountPlatformFilter.includes(facet.platform)"
-                  :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
-                  @click="healthGuardAccountPlatformFilter = togglePlatformFilter(healthGuardAccountPlatformFilter, facet.platform)"
-                >
-                  {{ facet.label }}
-                  <strong>{{ facet.count }}</strong>
-                </button>
-              </div>
-
-              <!-- 批量配置：全选/取消全选作用于「当前筛选结果」；间隔应用/清除作用于「当前筛选结果里已勾选且可用」的账号，
-                   所以可以按筛选分批设不同间隔而互不覆盖。独占一行（flex-basis: 100%），避免挤压上方 grid 列。 -->
-              <div class="sp-health-guard-batch-actions" role="group" aria-label="批量配置账号">
-                <button class="sp-button small ghost" type="button" @click="selectAllFilteredHealthGuardAccounts">
-                  全选筛选结果
-                </button>
-                <button class="sp-button small ghost" type="button" @click="deselectFilteredHealthGuardAccounts">
-                  取消全选
-                </button>
-                <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
-                <div class="sp-health-guard-batch-interval-input">
-                  <Input
-                    v-model="healthGuardBatchIntervalInput"
-                    type="number"
-                    min="60"
-                    placeholder="间隔（秒）"
-                    aria-label="批量检查间隔（秒），不小于 60 秒"
-                    title="批量为当前筛选结果中已勾选且可用的账号设置检查间隔，不小于 60 秒"
-                  />
-                </div>
-                <button
-                  class="sp-button small"
-                  type="button"
-                  :disabled="!healthGuardBatchIntervalValid || healthGuardBatchTargetCount === 0"
-                  title="为当前筛选结果中已勾选且可用的账号统一设置检查间隔（可按筛选分批设不同值）"
-                  @click="applyHealthGuardBatchInterval"
-                >
-                  应用到已选
-                </button>
-                <button
-                  class="sp-button small ghost danger"
-                  type="button"
-                  :disabled="healthGuardBatchTargetCount === 0"
-                  title="清除当前筛选结果中已勾选账号的检查间隔，回落到默认行为"
-                  @click="clearHealthGuardSelectedIntervals"
-                >
-                  清除已选间隔
-                </button>
-                <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
-                <button
-                  class="sp-button small ghost"
-                  type="button"
-                  :disabled="healthGuardBatchTargetCount === 0"
-                  title="批量为当前筛选结果中已勾选且可用的账号设置修改调度、账号级测试模型和三项阈值"
-                  @click="openHealthGuardBatchSettings"
-                >
-                  批量设置
-                </button>
-              </div>
-            </div>
-
-            <div v-if="loadingHealthGuardSupplierAccounts" class="sp-rate-guard-empty">正在加载账号...</div>
-            <div v-else-if="healthGuardWorkspaceAccounts.length" class="sp-health-guard-account-list">
-              <article
-                v-for="mapping in healthGuardWorkspaceAccounts"
-                :key="mapping.localAccountID"
-                class="sp-health-guard-account-row"
-                :class="{
-                  selected: healthGuardAccountIsSelected(mapping.localAccountID),
-                  unavailable: !mapping.available,
-                  'provider-closed': healthGuardAccountProviderClosed(mapping),
-                  'missing-model': healthGuardAccountIsSelected(mapping.localAccountID)
-                    && mapping.available
-                    && !supplierAccountHealthGuardModelForMapping(editForm.config, mapping),
-                }"
-              >
-                <!-- 多选列：只决定「批量设置 / 批量间隔」的作用范围，是纯界面状态（不写进 config）。
-                     与右侧「参与守护」开关刻意分开：开关是业务配置、保存后生效；
-                     若用一个开关兼作多选，想批量设阈值就得先把账号纳入守护，两件事会被绑死。 -->
-                <label class="sp-health-guard-account-check">
-                  <input
-                    type="checkbox"
-                    :checked="healthGuardAccountIsChecked(mapping.localAccountID)"
-                    :aria-label="`选择账号 ${mapping.localAccountName} 用于批量设置`"
-                    @change="toggleHealthGuardAccountCheck(mapping.localAccountID)"
-                  />
-                </label>
-
-                <div
-                  class="sp-health-guard-account-choice"
-                  :title="mapping.available ? healthGuardSourceSummary(mapping) : '账号已停用、删除或匹配失效，运行时将记录为不可用'"
-                >
-                  <span class="sp-health-guard-account-choice-copy">
-                    <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}{{ healthGuardAccountMultiplierText(mapping) }}</strong>
-                    <span
-                      v-if="mapping.available"
-                      :class="['sp-health-guard-account-platform', platformBadgeClass(mapping.platform)]"
-                    >
-                      {{ platformLabel(mapping.platform) }}
-                    </span>
-                    <span class="sp-health-guard-account-id">#{{ mapping.localAccountID }}</span>
-                    <span
-                      class="sp-health-guard-account-source"
-                      :class="{ unavailable: !mapping.available }"
-                    >
-                      {{ mapping.available ? healthGuardSourceSummary(mapping) : '当前不可用' }}
-                    </span>
-                    <span
-                      v-if="healthGuardAccountIsSelected(mapping.localAccountID) && !mapping.available"
-                      class="sp-health-guard-model-status unavailable"
-                    >账号不可用</span>
-                    <span
-                      v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardAccountOverrideModel(mapping.localAccountID)"
-                      class="sp-health-guard-model-status override"
-                    >账号覆盖</span>
-                    <!-- 「平台默认」而不是「默认」：单说「默认」看不出默认的是哪一层的东西；
-                         和上一档「账号覆盖」配成一对，才读得出这是在说「测试模型取自哪里」。 -->
-                    <span
-                      v-else-if="healthGuardAccountIsSelected(mapping.localAccountID) && healthGuardPlatformDefaultModel(mapping.platform)"
-                      class="sp-health-guard-model-status"
-                    >平台默认</span>
-                    <span
-                      v-else-if="healthGuardAccountIsSelected(mapping.localAccountID)"
-                      class="sp-health-guard-model-status missing"
-                    >未设模型</span>
-                    <span
-                      v-if="healthGuardAccountIsSelected(mapping.localAccountID) && mapping.available && healthGuardAccountIntervalValue(mapping.localAccountID)"
-                      class="sp-health-guard-model-status interval"
-                    >间隔 {{ healthGuardAccountIntervalValue(mapping.localAccountID) }}s</span>
-                  </span>
-                </div>
-
-                <!-- 开关列：表示「该账号是否参与守护」，是业务配置，保存任务后生效。
-                     放在账号信息之后：账号名紧跟勾选框，开关不再抢占行首。 -->
-                <label
-                  class="sp-health-guard-account-guard-toggle"
-                  :title="mapping.available
-                    ? '开启后该账号参与健康守护检查'
-                    : '账号已停用、删除或匹配失效，开启后运行时仍会记录为不可用'"
-                >
-                  <Toggle
-                    :model-value="healthGuardAccountIsSelected(mapping.localAccountID)"
-                    :aria-label="`${healthGuardAccountIsSelected(mapping.localAccountID) ? '关闭' : '开启'}账号 ${mapping.localAccountName} 的健康守护`"
-                    @update:model-value="toggleHealthGuardAccount(mapping.localAccountID)"
-                  />
-                  <span>参与守护</span>
-                </label>
-
-                <div
-                  class="sp-health-guard-account-group-summary"
-                  :title="healthGuardAccountGroupsTitle(mapping)"
-                  :aria-label="healthGuardAccountGroupsTitle(mapping)"
-                >
-                  <span>绑定分组</span>
-                  <strong>{{ healthGuardAccountGroupCount(mapping) }} 个</strong>
-                </div>
-
-                <div
-                  v-if="healthGuardAccountIsSelected(mapping.localAccountID) && mapping.available"
-                  class="sp-health-guard-account-model-editor"
-                >
-                  <Select
-                    v-model="editForm.config.account_health_guard_account_models[String(mapping.localAccountID)]"
-                    :options="healthGuardModelSelectOptions(mapping.platform, editForm.config.account_health_guard_account_models[String(mapping.localAccountID)])"
-                    searchable
-                    clearable
-                    creatable
-                    :creatable-prefix="healthGuardModelCreatablePrefix"
-                    placeholder="平台默认模型"
-                    empty-text="暂无可用模型"
-                  />
-                  <Input
-                    :model-value="healthGuardAccountIntervalValue(mapping.localAccountID)"
-                    type="number"
-                    min="60"
-                    placeholder="检查间隔（秒）"
-                    :aria-label="`账号 ${mapping.localAccountName} 检查间隔（秒），留空表示按任务全局执行间隔`"
-                    title="为该账号单独设置检查频率，留空表示按任务全局执行间隔"
-                    @update:model-value="setHealthGuardAccountInterval(mapping.localAccountID, $event)"
-                  />
-                  <Input
-                    :model-value="healthGuardAccountThresholdValue('account_health_guard_account_failure_thresholds', mapping.localAccountID)"
-                    type="number"
-                    min="1"
-                    :placeholder="`失败阈值（全局 ${editForm.config.account_health_guard_failure_threshold}）`"
-                    :aria-label="`账号 ${mapping.localAccountName} 连续失败暂停阈值，留空表示沿用全局阈值 ${editForm.config.account_health_guard_failure_threshold}`"
-                    :title="`连续失败达到该次数后自动暂停该账号调度，留空表示沿用全局阈值 ${editForm.config.account_health_guard_failure_threshold}`"
-                    @update:model-value="setHealthGuardAccountThreshold('account_health_guard_account_failure_thresholds', mapping.localAccountID, $event)"
-                  />
-                  <Input
-                    :model-value="healthGuardAccountThresholdValue('account_health_guard_account_slow_thresholds', mapping.localAccountID)"
-                    type="number"
-                    min="1"
-                    :placeholder="`慢响应阈值（全局 ${editForm.config.account_health_guard_slow_threshold}）`"
-                    :aria-label="`账号 ${mapping.localAccountName} 连续慢响应暂停阈值，留空表示沿用全局阈值 ${editForm.config.account_health_guard_slow_threshold}`"
-                    :title="`连续慢响应达到该次数后自动暂停该账号调度，留空表示沿用全局阈值 ${editForm.config.account_health_guard_slow_threshold}`"
-                    @update:model-value="setHealthGuardAccountThreshold('account_health_guard_account_slow_thresholds', mapping.localAccountID, $event)"
-                  />
-                  <Input
-                    :model-value="healthGuardAccountThresholdValue('account_health_guard_account_recovery_thresholds', mapping.localAccountID)"
-                    type="number"
-                    min="1"
-                    :placeholder="`恢复阈值（全局 ${editForm.config.account_health_guard_recovery_threshold}）`"
-                    :aria-label="`账号 ${mapping.localAccountName} 连续健康恢复阈值，留空表示沿用全局阈值 ${editForm.config.account_health_guard_recovery_threshold}`"
-                    :title="`连续健康达到该次数后自动恢复该账号调度，留空表示沿用全局阈值 ${editForm.config.account_health_guard_recovery_threshold}`"
-                    @update:model-value="setHealthGuardAccountThreshold('account_health_guard_account_recovery_thresholds', mapping.localAccountID, $event)"
-                  />
-                  <label class="sp-health-guard-account-scheduling-toggle">
-                    <Toggle
-                      :model-value="healthGuardAccountSchedulingChangeValue(mapping.localAccountID)"
-                      :aria-label="`账号 ${mapping.localAccountName} 是否修改调度`"
-                      :title="healthGuardAccountSchedulingChangeTitle(mapping.localAccountID)"
-                      @update:model-value="setHealthGuardAccountSchedulingChange(mapping.localAccountID, $event)"
-                    />
-                    <span>修改调度</span>
-                  </label>
-                </div>
-              </article>
-            </div>
-            <div v-else class="sp-rate-guard-empty">
-              {{ healthGuardEmptyHint }}
-            </div>
-          </section>
-        </div>
-        <template #footer>
-          <button class="sp-button primary" type="button" @click="closeHealthGuardAccounts">完成</button>
-        </template>
-      </BaseDialog>
+      />
 
       <!-- 二级弹窗：z-index 必须高于「配置健康守护账号」（60）。BaseDialog 一律 Teleport 到 body，
            这里的 .modal-content 是父弹窗的**兄弟**节点，配色变量一条都继承不到，
            所以 .sp-multiplier-interval-dialog 自己声明了完整的 --sp-* 兜底（见样式块）。 -->
-      <BaseDialog
-        :show="multiplierIntervalDialogVisible"
-        title="配置倍率区间"
-        width="extra-wide"
-        :z-index="70"
-        @close="closeMultiplierIntervalDialog"
-      >
-        <div class="sp-multiplier-interval-dialog">
-          <div v-if="healthGuardPlatformSummaries.length" class="sp-health-guard-multiplier-grid">
-            <article v-for="summary in healthGuardPlatformSummaries" :key="summary.platform">
-              <div class="sp-health-guard-multiplier-head" :class="platformTextClass(summary.platform)">
-                <strong>{{ platformLabel(summary.platform) }}</strong>
-                <button class="sp-button small ghost" type="button" @click="addHealthGuardMultiplierRule(summary.platform)">
-                  <Icon name="plus" size="sm" />
-                  新增区间
-                </button>
-              </div>
-              <div v-if="healthGuardMultiplierRules(summary.platform).length" class="sp-health-guard-multiplier-rows">
-                <div class="sp-health-guard-multiplier-row sp-health-guard-multiplier-row-head">
-                  <span>倍率下限（含）</span>
-                  <span>倍率上限（不含，留空=无上界）</span>
-                  <span>检查间隔（秒）</span>
-                  <span></span>
-                </div>
-                <div v-for="(rule, index) in healthGuardMultiplierRules(summary.platform)" :key="index" class="sp-health-guard-multiplier-row">
-                  <Input :model-value="rule.min_multiplier" type="number" step="0.1" min="0" @update:model-value="rule.min_multiplier = toNumber($event, rule.min_multiplier)" />
-                  <Input :model-value="rule.max_multiplier || ''" type="number" step="0.1" min="0" placeholder="无上界" @update:model-value="rule.max_multiplier = toNumber($event, 0)" />
-                  <Input :model-value="rule.interval_seconds" type="number" min="60" @update:model-value="rule.interval_seconds = toNumber($event, rule.interval_seconds)" />
-                  <button class="sp-button small ghost danger" type="button" @click="removeHealthGuardMultiplierRule(summary.platform, index)">
-                    <Icon name="trash" size="sm" />
-                  </button>
-                </div>
-              </div>
-              <div v-else class="sp-rate-guard-empty">未配置区间：该平台下未开调度的账号每轮都会检查。</div>
-            </article>
-          </div>
-          <div v-else class="sp-rate-guard-empty">当前没有可配置倍率间隔的平台。</div>
-        </div>
-        <template #footer>
-          <span class="sp-multiplier-interval-hint">区间取 [下限, 上限)，上限留空表示无上界；未命中任何区间的账号每轮都会检查。</span>
-          <button class="sp-button primary" type="button" @click="closeMultiplierIntervalDialog">完成</button>
-        </template>
-      </BaseDialog>
 
       <!-- 二级弹窗：批量设置账号。z-index 高于「配置健康守护账号」（60）、低于「配置倍率区间」（70）。
            内容区不再重复弹窗标题，作用范围与「留空即不改」的语义统一放在页脚提示里。 -->
-      <BaseDialog
-        :show="healthGuardBatchSettingsVisible"
-        title="批量设置账号"
-        width="extra-wide"
-        :z-index="65"
-        @close="closeHealthGuardBatchSettings"
-      >
-        <div class="sp-health-guard-batch-dialog">
-          <div class="sp-health-guard-batch-rows">
-            <div class="sp-health-guard-batch-row">
-              <div>
-                <strong>参与守护</strong>
-                <span>「纳入守护」把勾选账号加入检查名单；「移出守护」会清空该账号的账号级配置，因此选它时本次其余项对该批账号不再生效。</span>
-              </div>
-              <Select
-                v-model="healthGuardBatchGuardInput"
-                :options="healthGuardBatchGuardOptions"
-                :searchable="false"
-                aria-label="批量设置参与守护"
-              />
-            </div>
-            <div class="sp-health-guard-batch-row">
-              <div>
-                <strong>修改调度</strong>
-                <span>「跟随全局」会清掉该账号的账号级覆盖，之后随任务的全局开关一起变。</span>
-              </div>
-              <Select
-                v-model="healthGuardBatchSchedulingChangeInput"
-                :options="healthGuardBatchSchedulingChangeOptions"
-                :searchable="false"
-                aria-label="批量设置修改调度"
-              />
-            </div>
-            <div class="sp-health-guard-batch-row">
-              <div>
-                <strong>账号级测试模型</strong>
-                <span>写入账号级覆盖，优先级高于「平台默认测试模型」；跨平台账号请先确认该模型可用。</span>
-              </div>
-              <Select
-                v-model="healthGuardBatchModelInput"
-                :options="healthGuardBatchModelOptions"
-                searchable
-                creatable
-                :creatable-prefix="healthGuardModelCreatablePrefix"
-                aria-label="批量设置账号级测试模型"
-              />
-            </div>
-            <div class="sp-health-guard-batch-row">
-              <div>
-                <strong>连续失败暂停阈值</strong>
-                <span>写入账号级覆盖，留空的账号继续沿用全局阈值。</span>
-              </div>
-              <Input
-                v-model="healthGuardBatchFailureThresholdInput"
-                type="number"
-                min="1"
-                placeholder="不修改"
-                aria-label="批量设置连续失败暂停阈值"
-              />
-            </div>
-            <div class="sp-health-guard-batch-row">
-              <div>
-                <strong>连续慢响应暂停阈值</strong>
-                <span>写入账号级覆盖，留空的账号继续沿用全局阈值。</span>
-              </div>
-              <Input
-                v-model="healthGuardBatchSlowThresholdInput"
-                type="number"
-                min="1"
-                placeholder="不修改"
-                aria-label="批量设置连续慢响应暂停阈值"
-              />
-            </div>
-            <div class="sp-health-guard-batch-row">
-              <div>
-                <strong>连续健康恢复阈值</strong>
-                <span>写入账号级覆盖，留空的账号继续沿用全局阈值。</span>
-              </div>
-              <Input
-                v-model="healthGuardBatchRecoveryThresholdInput"
-                type="number"
-                min="1"
-                placeholder="不修改"
-                aria-label="批量设置连续健康恢复阈值"
-              />
-            </div>
-          </div>
-        </div>
-        <template #footer>
-          <span class="sp-health-guard-batch-hint">
-            只写入填过的项，留空表示保持原值；作用于当前筛选结果里已勾选的 {{ healthGuardBatchTargetCount }} 个可用账号，保存任务后生效。检查间隔请用工具栏的「应用到已选」。
-          </span>
-          <button
-            class="sp-button primary"
-            type="button"
-            :disabled="healthGuardBatchTargetCount === 0"
-            @click="applyHealthGuardBatchSettings"
-          >应用到已选</button>
-        </template>
-      </BaseDialog>
 
       <BaseDialog
         :show="rateGuardGroupsVisible"
@@ -1571,269 +1053,15 @@
         </template>
       </BaseDialog>
 
-      <BaseDialog
+      <SupplierGroupElectionGroupsDialog
+        v-model:config="editForm.config"
         :show="electionGroupsVisible"
-        title="配置参与择优的分组"
-        width="full"
-        :z-index="60"
+        :groups="rateGuardGroups"
+        :loading-groups="loadingRateGuardGroups"
+        :accounts="healthGuardSupplierAccounts"
+        @confirm="closeElectionGroups"
         @close="closeElectionGroups"
-      >
-        <div class="sp-rate-guard-group-dialog">
-          <section class="sp-rate-guard-group-workspace">
-            <div class="sp-rate-guard-group-summary" aria-label="分组择优调度分组配置摘要">
-              <article>
-                <span>参与择优</span>
-                <strong>{{ electionGroupScopeSummary.enabled }}</strong>
-              </article>
-              <article :class="{ warning: electionGroupScopeSummary.disabled > 0 }">
-                <span>已关闭</span>
-                <strong>{{ electionGroupScopeSummary.disabled }}</strong>
-              </article>
-              <article>
-                <span>可选分组</span>
-                <strong>{{ rateGuardGroups.length }}</strong>
-              </article>
-            </div>
-
-            <div class="sp-rate-guard-group-toolbar">
-              <div class="sp-rate-guard-group-filters">
-                <Input v-model="electionGroupSearch" placeholder="搜索分组名称或 ID" />
-                <button
-                  class="sp-rate-guard-group-selected-toggle"
-                  :class="{ active: electionGroupDisabledOnly }"
-                  type="button"
-                  :aria-pressed="electionGroupDisabledOnly"
-                  @click="electionGroupDisabledOnly = !electionGroupDisabledOnly"
-                >
-                  <span class="sp-rate-guard-group-selected-toggle-mark" aria-hidden="true"></span>
-                  仅看已关闭
-                  <strong>{{ electionGroupScopeSummary.disabled }}</strong>
-                </button>
-              </div>
-              <span class="sp-rate-guard-group-filter-result">
-                筛选结果 <strong>{{ electionFilteredGroups.length }}</strong> 个
-              </span>
-              <!-- 与「配置参与守护的分组」保持同一套筛选控件与配色语言。 -->
-              <div
-                v-if="groupPlatformFacets.length"
-                class="sp-platform-chip-row"
-                role="group"
-                aria-label="按平台筛选分组"
-              >
-                <button
-                  v-for="facet in groupPlatformFacets"
-                  :key="facet.platform"
-                  class="sp-platform-chip"
-                  type="button"
-                  :aria-pressed="electionGroupPlatformFilter.includes(facet.platform)"
-                  :style="{ '--sp-chip-platform-color': platformAccentColor(facet.platform) }"
-                  @click="electionGroupPlatformFilter = togglePlatformFilter(electionGroupPlatformFilter, facet.platform)"
-                >
-                  {{ facet.label }}
-                  <strong>{{ facet.count }}</strong>
-                </button>
-              </div>
-            </div>
-
-            <div v-if="loadingRateGuardGroups" class="sp-rate-guard-empty">正在加载分组...</div>
-            <template v-else-if="electionFilteredGroups.length">
-              <!-- 批量操作条：勾选框专门用来多选，配合这里的批量开关整批改状态。
-                   全选只作用于「当前筛选」的结果（与工具栏筛选联动）；
-                   只在有勾选时展开可执行的批量动作，避免空架子占地方。 -->
-              <div class="sp-group-election-batch-bar">
-                <label class="sp-group-election-batch-master">
-                  <input
-                    type="checkbox"
-                    :checked="electionGroupAllChecked"
-                    :aria-label="`全选当前筛选的 ${electionFilteredGroups.length} 个分组`"
-                    @change="toggleElectionGroupCheckAll"
-                  />
-                  <span>全选</span>
-                </label>
-                <span class="sp-group-election-batch-count">已选 <strong>{{ electionGroupCheckedIDs.length }}</strong> 个</span>
-                <template v-if="electionGroupCheckedIDs.length">
-                  <span class="sp-group-election-batch-divider"></span>
-                  <span class="sp-group-election-batch-label">参与择优</span>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsSelect(true)">批量开启</button>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsSelect(false)">批量关闭</button>
-                  <span class="sp-group-election-batch-label">健康锁定</span>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsKeepHealthy(true)">批量开锁</button>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsKeepHealthy(false)">批量解锁</button>
-                  <span class="sp-group-election-batch-label">演练</span>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsDryRun(true)">批量开启</button>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsDryRun(false)">批量关闭</button>
-                  <span class="sp-group-election-batch-label">计优先级</span>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsPriority(true)">批量开启</button>
-                  <button type="button" class="sp-group-election-batch-btn" @click="batchElectionGroupsPriority(false)">批量关闭</button>
-                  <button type="button" class="sp-group-election-batch-clear" @click="clearElectionGroupChecks">清空勾选</button>
-                </template>
-              </div>
-              <div class="sp-rate-guard-group-list">
-              <article
-                v-for="group in electionFilteredGroups"
-                :key="group.id"
-                class="sp-rate-guard-group-row"
-                :class="{ disabled: electionGroupIsDisabled(group.id) }"
-                :style="{ '--sp-group-platform-color': platformAccentColor(group.platform) }"
-              >
-                <label class="sp-rate-guard-group-choice">
-                  <!-- 勾选框只负责「多选 + 批量操作」：是否参与择优改由行内「参与择优」开关控制，
-                       两者不再共用同一个框，选中不等同于参与，避免误改。 -->
-                  <input
-                    type="checkbox"
-                    :checked="electionGroupIsChecked(group.id)"
-                    :aria-label="`选择分组 ${group.name} 用于批量操作`"
-                    @change="toggleElectionGroupCheck(group.id)"
-                  />
-                  <span class="sp-rate-guard-group-choice-copy">
-                    <strong :class="platformTextClass(group.platform)">{{ group.name }}</strong>
-                    <span class="sp-rate-guard-group-platform" :class="platformBadgeClass(group.platform)">
-                      {{ platformLabel(group.platform) }}
-                    </span>
-                    <span class="sp-rate-guard-group-id">#{{ group.id }}</span>
-                    <span class="sp-rate-guard-group-rate">倍率 {{ group.rate_multiplier }}</span>
-                  </span>
-                </label>
-                <span
-                  v-if="electionGroupIsDisabled(group.id)"
-                  class="sp-rate-guard-group-status off"
-                >
-                  已关闭择优
-                </span>
-                <label
-                  v-else
-                  class="sp-health-guard-account-scheduling-toggle sp-election-keep-healthy-toggle sp-election-toggle-health"
-                  :title="`打开后：分组「${group.name}」当前开着调度的账号测试都正常时，保留现状、跳过择优与换人；有开着的账号失败仍走正常择优`"
-                >
-                  <Toggle
-                    :model-value="electionGroupKeepHealthy(group.id)"
-                    :aria-label="`分组 ${group.name} 在任者健康时是否锁定`"
-                    @update:model-value="toggleElectionKeepHealthyGroup(group.id)"
-                  />
-                  <span>健康锁定</span>
-                </label>
-                <label
-                  v-if="!electionGroupIsDisabled(group.id)"
-                  class="sp-health-guard-account-scheduling-toggle sp-election-dry-run-toggle sp-election-toggle-dryrun"
-                  :title="`打开后：分组「${group.name}」只给出建议、不真的改调度（总开关打开时全部分组都演练）`"
-                >
-                  <Toggle
-                    :model-value="electionGroupDryRun(group.id)"
-                    :aria-label="`分组 ${group.name} 是否只演练不生效`"
-                    @update:model-value="toggleElectionGroupDryRun(group.id)"
-                  />
-                  <span>演练</span>
-                </label>
-                <label
-                  v-if="!electionGroupIsDisabled(group.id)"
-                  class="sp-health-guard-account-scheduling-toggle sp-election-keep-healthy-toggle sp-election-toggle-priority"
-                  :title="`打开后：分组「${group.name}」的综合分计入账号优先级（数值越小优先级越高），都健康时高优先级更占优势；默认跟随全局开关，逐个分组可覆盖`"
-                >
-                  <Toggle
-                    :model-value="electionGroupPriority(group.id)"
-                    :aria-label="`分组 ${group.name} 是否计入账号优先级`"
-                    @update:model-value="toggleElectionGroupPriority(group.id)"
-                  />
-                  <span>计优先级</span>
-                </label>
-                <!-- 参与择优开关列：不参与的分组也要能直接勾回来，所以不像其它开关那样用 v-if 隐藏 ——
-                     位置固定在网格第 5 列，行与行对齐不随显隐摇晃。 -->
-                <label
-                  class="sp-health-guard-account-scheduling-toggle sp-election-participate-toggle"
-                  :title="`打开后：分组「${group.name}」参与择优调度；关闭则不参与（同时清空其健康锁定/演练/计优先级配置）`"
-                >
-                  <Toggle
-                    :model-value="electionGroupParticipates(group.id)"
-                    :aria-label="`分组 ${group.name} 是否参与择优调度`"
-                    @update:model-value="toggleElectionGroup(group.id)"
-                  />
-                  <span>参与择优</span>
-                </label>
-                <div v-if="!electionGroupIsDisabled(group.id)" class="sp-election-group-extra">
-                  <label
-                    class="sp-election-top-n-override"
-                    :title="`分组「${group.name}」单独设置「每组开启账号数」：留空=沿用全局默认（当前 ${editForm.config.group_scheduling_election_top_n ?? 1}），填 1–100 的正整数则覆盖全局。`"
-                  >
-                    <span class="sp-election-top-n-override-label">每组开启数</span>
-                    <input
-                      class="sp-election-top-n-override-input"
-                      type="number"
-                      min="1"
-                      max="100"
-                      :placeholder="`全局 ${editForm.config.group_scheduling_election_top_n ?? 1}`"
-                      :value="electionGroupTopNText(group.id)"
-                      :aria-label="`分组 ${group.name} 单独设置的每组开启账号数`"
-                      @change="setElectionGroupTopN(group.id, ($event.target as HTMLInputElement).value)"
-                    />
-                  </label>
-                  <label
-                    class="sp-election-required-models"
-                    :title="`分组「${group.name}」的必需模型：择优后若赢家没覆盖这些模型，会补选一个健康支持者开启；支持它的账号全失败时不硬留、只告警待恢复。逗号或空格分隔。`"
-                  >
-                    <span class="sp-election-required-models-label">必需模型</span>
-                    <input
-                      class="sp-election-required-models-input"
-                      type="text"
-                      placeholder="留空=无强制要求，如 gpt-5.6, claude-opus-5"
-                      :value="electionGroupRequiredModelsText(group.id)"
-                      :aria-label="`分组 ${group.name} 的必需模型`"
-                      @change="setElectionGroupRequiredModels(group.id, ($event.target as HTMLInputElement).value)"
-                    />
-                  </label>
-                  <label
-                    class="sp-election-default-account"
-                    :title="`分组「${group.name}」的默认账号：它健康（可参选）时本组只开它一个、关闭其它成员；它失败或不可用时回退正常择优。若它不支持本组必需模型，会额外补选一个支持者。`"
-                  >
-                    <span class="sp-election-default-account-label">默认账号</span>
-                    <Select
-                      class="sp-election-default-account-select"
-                      :model-value="electionGroupDefaultAccountValue(group.id)"
-                      :options="electionGroupDefaultAccountOptions(group.id)"
-                      :searchable="false"
-                      :aria-label="`分组 ${group.name} 的默认账号`"
-                      @update:model-value="setElectionGroupDefaultAccount(group.id, $event)"
-                    />
-                  </label>
-                  <!-- 异常推送覆盖：三段式（跟随全局 / 强制推送 / 静音），不用开关 ——
-                       开关只有两态，表达不了「这个分组没配过覆盖」，而那正是绝大多数分组的状态。 -->
-                  <span
-                    class="sp-election-alert-override"
-                    role="group"
-                    :aria-label="`分组 ${group.name} 的异常推送覆盖`"
-                    :title="`分组「${group.name}」的异常推送：跟随全局=沿用上方总开关；强制推送=即使总开关关闭，本组样本不足时也推送；静音=本组永不推送。需先在通知页订阅「分组账号异常」事件。`"
-                  >
-                    <span class="sp-election-alert-override-label">异常推送</span>
-                    <span class="sp-election-alert-override-choice">
-                      <button
-                        type="button"
-                        :class="{ active: electionAlertOverrideValue(group.id) === undefined }"
-                        @click="setElectionAlertOverride(group.id, undefined)"
-                      >跟随全局</button>
-                      <button
-                        type="button"
-                        :class="{ active: electionAlertOverrideValue(group.id) === true }"
-                        @click="setElectionAlertOverride(group.id, true)"
-                      >强制推送</button>
-                      <button
-                        type="button"
-                        :class="{ active: electionAlertOverrideValue(group.id) === false }"
-                        @click="setElectionAlertOverride(group.id, false)"
-                      >静音</button>
-                    </span>
-                  </span>
-                </div>
-              </article>
-              </div>
-            </template>
-            <div v-else class="sp-rate-guard-empty">{{ electionGroupEmptyHint }}</div>
-          </section>
-        </div>
-        <template #footer>
-          <span class="sp-rate-guard-group-hint">取消勾选的分组会被跳过；「健康锁定」默认跟随全局开关，逐个分组可覆盖（关掉=强制不锁定、打开=强制锁定），开着的账号正常时保留现状、不换人；「计优先级」默认跟随全局开关，逐个分组可覆盖（打开=强制计入、关掉=强制不计）；「演练」只记录建议、不改调度。</span>
-          <button class="sp-button ghost" type="button" @click="enableAllElectionGroups">全部参与</button>
-          <button class="sp-button primary" type="button" @click="closeElectionGroups">完成</button>
-        </template>
-      </BaseDialog>
+      />
 
       <BaseDialog :show="accountRateGuardExecuteVisible" title="确认执行账号倍率守护" width="wide" @close="closeAccountRateGuardExecute">
         <div class="sp-guard-confirm">
@@ -1876,8 +1104,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierGroupElectionDiagnosticsDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { SupplierAccountHealthGuardResult, SupplierAccountRateGuardLogDialog, SupplierGroupElectionChangeLogDialog, SupplierGroupElectionDiagnosticsDialog, SupplierGroupElectionGroupsDialog, SupplierHealthGuardAccountsDialog, SupplierModuleLayout } from '@/components/admin/supplier-management'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Input from '@/components/common/Input.vue'
@@ -1886,14 +1114,14 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
-import {
-  listSupplierAccounts,
-  type SupplierProviderAccount,
-} from '@/api/admin/supplierProviderData'
-// 账号列表接口不带「供应商是否启用」，所以单独取一份供应商列表来判定「供应商已关闭」。
-import { list as listSupplierProviders } from '@/api/admin/supplierProviders'
-import { adminAPI } from '@/api/admin'
+import type { SupplierProviderAccount } from '@/api/admin/supplierProviderData'
 import { getAllIncludingInactive as listAllGroups } from '@/api/admin/groups'
+// 两个配置弹窗的候选数据（可用账号 / 已关闭的供应商）：上游账号页原地打开同一个弹窗，
+// 也走这一份，「哪些账号算可用」才不会在两个页面里各写一套。
+import {
+  fetchDisabledSupplierProviderIds,
+  fetchEligibleSupplierAccounts,
+} from './supplierAutomationAccountCandidates'
 import type { AdminGroup } from '@/types'
 import {
   listAccountRateGuardUnbindLogs,
@@ -1904,8 +1132,6 @@ import {
   type SupplierAutomationProviderRunDetail,
   type SupplierAutomationRun,
   type SupplierAutomationStageRunDetail,
-  type SupplierAutomationConfig,
-  type SupplierAccountHealthGuardMultiplierInterval,
   type SupplierAutomationTask,
   type SupplierProviderRechargeSyncAllResult,
   type SupplierProviderMonitorSyncItem,
@@ -1915,6 +1141,28 @@ import { ensureCustomPlatformLabels, resolvePlatformDisplayLabel as platformLabe
 import { platformAccentColor, platformBadgeClass, platformTextClass } from '@/utils/platformColors'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { cronToIntervalSeconds } from './supplierAutomationCron'
+// 健康守护账号 / 分组择优配置的纯函数层：页面与弹窗组件共用同一套归一化 / 校验 / 账号映射规则。
+import {
+  buildHealthGuardAccountMappings,
+  buildPlatformFacets,
+  groupFilterEmptyHint,
+  matchesPlatformFilter,
+  normalizeAccountHealthGuardAccountIntervals,
+  normalizeAccountHealthGuardSchedulingChange,
+  normalizeAccountHealthGuardAccountThresholds,
+  normalizeHealthGuardPlatformMultiplierIntervals,
+  normalizePositiveAccountIDs,
+  normalizePositiveNumberMap,
+  normalizeStringMap,
+  positiveIntegerOr,
+  toNumber,
+  togglePlatformFilter,
+  validateAccountHealthGuardConfig,
+  validateAccountHealthGuardSelection,
+  type HealthGuardAccountMapping,
+} from './supplierAutomationConfig'
+// 分组择优配置的派生值与分组级操作：编辑弹窗摘要、保存归一化、「配置参与择优的分组」弹窗共用同一份口径。
+import { useGroupElectionConfig } from './useGroupElectionConfig'
 
 const tasks = ref<SupplierAutomationTask[]>([])
 const runs = ref<SupplierAutomationRun[]>([])
@@ -1954,32 +1202,14 @@ const rateGuardGroupPlatformFilter = ref<string[]>([])
 const rateGuardGroups = ref<AdminGroup[]>([])
 const loadingRateGuardGroups = ref(false)
 const electionGroupsVisible = ref(false)
-const electionGroupSearch = ref('')
-const electionGroupDisabledOnly = ref(false)
-const electionGroupPlatformFilter = ref<string[]>([])
-// 分组择优弹窗的勾选集合：只服务「多选 + 批量操作」，是纯界面瞬时状态，不写进任务配置。
-// 与「是否参与择优」彻底解耦 —— 旧实现让两者共用一个勾选框，
-// 结果「想批量操作先勾一下」会把分组静默改成不参与择优。
-const electionGroupCheckedIDs = ref<number[]>([])
 const healthGuardAccountsVisible = ref(false)
-const multiplierIntervalDialogVisible = ref(false)
-const healthGuardAccountPlatformFilter = ref<string[]>([])
-const healthGuardAccountProviderFilter = ref('')
-const healthGuardAccountSearch = ref('')
-const healthGuardSelectedOnly = ref(false)
 // 与「仅看已选」是同一维度的两个互斥方向：同时开启只会得到空集，所以开一个必须关掉另一个。
-const healthGuardUnselectedOnly = ref(false)
 // 「供应商是否开启」是另一个维度，与上面两个正交，可以和它们叠加；
 // 但开启/关闭本身是一对互斥方向，所以这两个之间互斥。
-const healthGuardProviderClosedOnly = ref(false)
-const healthGuardProviderEnabledOnly = ref(false)
-const healthGuardBatchIntervalInput = ref<number | string>('')
 const healthGuardSupplierAccounts = ref<SupplierProviderAccount[]>([])
 // 已关闭（停用）的供应商 ID。账号列表接口不返回这个状态，只能另取一份供应商列表。
 const disabledSupplierProviderIDs = ref<Set<number>>(new Set())
 const loadingHealthGuardSupplierAccounts = ref(false)
-const healthGuardModelOptionsByPlatform = ref<Record<string, { id: string; display_name?: string }[]>>({})
-const healthGuardModelLoadingByPlatform = ref<Record<string, boolean>>({})
 
  
 const editForm = reactive<SupplierAutomationTask>({
@@ -2318,7 +1548,7 @@ async function saveTask() {
       appStore.showError(extractApiErrorMessage(err, '加载健康守护账号失败'))
       return
     }
-    const validationMessage = validateAccountHealthGuardConfig()
+    const validationMessage = validateAccountHealthGuardConfig(editForm.config, healthGuardAccountMappings.value)
     if (validationMessage) {
       appStore.showError(validationMessage)
       return
@@ -2372,7 +1602,7 @@ async function runNow(taskCode: string) {
     }
     const task = tasks.value.find(item => item.task_code === taskCode)
     const validationMessage = task
-      ? validateAccountHealthGuardSelection(task.config)
+      ? validateAccountHealthGuardSelection(task.config, healthGuardAccountMappings.value)
       : '请至少选择一个需要检查的账号'
     if (validationMessage) {
       appStore.showError(validationMessage)
@@ -2739,77 +1969,15 @@ function runSummary(run: SupplierAutomationRun): string {
   return `${run.processed_count} 个对象，${run.success_count} 成功，${run.failed_count} 失败`
 }
 
-interface HealthGuardAccountMapping {
-  localAccountID: number
-  localAccountName: string
-  platform: string
-  localGroupPlatforms: string[]
-  available: boolean
-  sources: SupplierProviderAccount[]
-}
 
-interface HealthGuardPlatformSummary {
-  platform: string
-  accountCount: number
-}
 
-function normalizeHealthGuardPlatform(platform?: string): string {
-  return platform?.trim().toLowerCase() || 'unknown'
-}
 
-function effectiveHealthGuardPlatform(account: SupplierProviderAccount): string {
-  return normalizeHealthGuardPlatform(
-    account.effective_platform || account.local_account_platform || account.platform
-  )
-}
 
-function healthGuardLocalGroupPlatforms(account: SupplierProviderAccount): string[] {
-  const platforms = Array.from(new Set(
-    account.binding_groups.map(group => normalizeHealthGuardPlatform(group.platform))
-      .filter(platform => platform !== 'unknown')
-  ))
-  return platforms.length ? platforms : [effectiveHealthGuardPlatform(account)]
-}
 
-function isHealthGuardAccountAvailable(account: SupplierProviderAccount): boolean {
-  return account.active
-    && account.local_account_match_status === 'matched'
-    && account.local_account_status === 'active'
-}
 
-const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() => {
-  const grouped = new Map<number, HealthGuardAccountMapping>()
-  for (const account of healthGuardSupplierAccounts.value) {
-    const localAccountID = Number(account.local_account_id)
-    if (!Number.isSafeInteger(localAccountID) || localAccountID <= 0) continue
-
-    const available = isHealthGuardAccountAvailable(account)
-    const current = grouped.get(localAccountID)
-    if (current) {
-      current.sources.push(account)
-      current.localGroupPlatforms = Array.from(new Set([
-        ...current.localGroupPlatforms,
-        ...healthGuardLocalGroupPlatforms(account),
-      ]))
-      if (available) {
-        current.available = true
-        current.platform = effectiveHealthGuardPlatform(account)
-        current.localAccountName = account.local_account_name || current.localAccountName
-      }
-      continue
-    }
-
-    grouped.set(localAccountID, {
-      localAccountID,
-      localAccountName: account.local_account_name || `账号 #${localAccountID}`,
-      platform: effectiveHealthGuardPlatform(account),
-      localGroupPlatforms: healthGuardLocalGroupPlatforms(account),
-      available,
-      sources: [account],
-    })
-  }
-  return Array.from(grouped.values()).sort((a, b) => a.localAccountName.localeCompare(b.localAccountName, 'zh-CN'))
-})
+const healthGuardAccountMappings = computed<HealthGuardAccountMapping[]>(() =>
+  buildHealthGuardAccountMappings(healthGuardSupplierAccounts.value)
+)
 
 const healthGuardAccountIDs = computed(() =>
   normalizePositiveAccountIDs(editForm.config.account_health_guard_account_ids)
@@ -2825,54 +1993,16 @@ const accountRateGuardDisabledGroupIDs = computed(() =>
 // 平台列表从当前数据里现算，而不是取全平台枚举：只列出「此刻确实有内容的平台」，
 // 避免用户点到一个筛完空空如也的标签，误以为筛选坏了。
 // 传数组而不是 Map，调用方不必先自己聚合；分组弹窗按分组数统计，账号弹窗按可用账号数统计。
-type PlatformFacet = { platform: string; count: number; label: string }
 
-function buildPlatformFacets(items: Array<{ platform: string }>): PlatformFacet[] {
-  const counts = new Map<string, number>()
-  for (const item of items) {
-    counts.set(item.platform, (counts.get(item.platform) ?? 0) + 1)
-  }
-  return Array.from(counts, ([platform, count]) => ({
-    platform,
-    count,
-    label: platformLabel(platform),
-  })).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
-}
 
 const groupPlatformFacets = computed(() => buildPlatformFacets(rateGuardGroups.value))
 
 // 标签是多选：点一下加入、再点一下移除。
 // 不做成单选切换 —— 切到下一个平台就会丢掉上一个的选择，而「同时看两个平台」
 // 恰恰是这个筛选最常见的用法。
-function togglePlatformFilter(current: string[], platform: string): string[] {
-  return current.includes(platform)
-    ? current.filter(item => item !== platform)
-    : [...current, platform]
-}
 
 // 空选 = 不按平台过滤。与「仅看已关闭」默认关保持一致：打开弹窗先看到全部。
-function matchesPlatformFilter(platform: string, selected: string[]): boolean {
-  return selected.length === 0 || selected.includes(platform)
-}
 
-// 平台筛选可能把结果筛空。这时沿用「当前没有可配置的分组」会误导 ——
-// 用户会以为分组被删光了，实际上只是筛选条件太窄。
-// 提示里只列出**真正生效**的筛选条件，别让用户去关一个本来就开着的开关。
-// 没按平台筛时保持原有两种文案不变（「当前没有已关闭的…」比通用文案更具体，不要丢）。
-function groupFilterEmptyHint(
-  selectedPlatformCount: number,
-  disabledOnly: boolean,
-  disabledEmptyText: string
-): string {
-  if (selectedPlatformCount === 0) {
-    return disabledOnly ? disabledEmptyText : '当前没有可配置的分组。'
-  }
-  const actions = ['减少选中的平台']
-  if (disabledOnly) {
-    actions.push('关闭「仅看已关闭」')
-  }
-  return `当前筛选条件下没有分组，试试${actions.join('或')}。`
-}
 
 const rateGuardGroupEmptyHint = computed(() =>
   groupFilterEmptyHint(
@@ -2882,221 +2012,39 @@ const rateGuardGroupEmptyHint = computed(() =>
   )
 )
 
-const electionGroupEmptyHint = computed(() =>
-  groupFilterEmptyHint(
-    electionGroupPlatformFilter.value.length,
-    electionGroupDisabledOnly.value,
-    '当前没有已关闭择优的分组。'
-  )
-)
-
-// 分组择优调度的分组开关：同样存"被关闭"的分组，空列表即所有分组都参与择优。
-const groupElectionDisabledGroupIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_disabled_group_ids)
-)
-
-// 在任者健康锁定：存"要锁定"的分组（force-on），空列表即都不强制锁定。
-const groupElectionKeepHealthyGroupIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids)
-)
-
-// 在任者健康锁定的"强制不锁定"名单（force-off），优先级最高：命中即不锁，无论全局开关与 force-on 名单。
-const groupElectionKeepHealthyExcludedGroupIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids)
-)
-
-// 演练名单：存"要演练"的分组（opt-in），空列表即都不演练（另有总开关可让全部分组演练）。
-const groupElectionDryRunGroupIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_dry_run_group_ids)
-)
-
-// 总开关用 === true 收敛：旧配置的 config_json 里没有这个键，读回来是 undefined，
-// 直接当布尔用会让后面所有判断都拿到 undefined 而不是 false。
-const electionDryRunAll = computed(() => editForm.config.group_scheduling_election_dry_run === true)
-
-// 在任者健康锁定的全局默认开关，同样用 === true 收敛 undefined（旧配置没有这个键）。
-const electionKeepHealthyAll = computed(
-  () => editForm.config.group_scheduling_election_keep_healthy_incumbent_global === true
-)
-
-// 账号优先级计分：存"要计入优先级"的分组（force-on），空列表即不强制开启（跟随全局开关）。
-const groupElectionPriorityEnabledGroupIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_priority_enabled_group_ids)
-)
-
-// 账号优先级计分的"强制关闭"名单（force-off），优先级最高：命中即不计，无论全局开关与 force-on 名单。
-const groupElectionPriorityDisabledGroupIDs = computed(() =>
-  normalizePositiveAccountIDs(editForm.config.group_scheduling_election_priority_disabled_group_ids)
-)
-
-// 优先级计分的全局默认开关，同样用 === true 收敛 undefined（旧配置没有这个键，默认不参与）。
-const electionPriorityAll = computed(
-  () => editForm.config.group_scheduling_election_priority_enabled_global === true
-)
-
-// 分组账号异常推送的总开关，同样用 === true 收敛 undefined（旧配置没有这个键，默认不推送）。
-const electionAlertEnabled = computed(
-  () => editForm.config.group_scheduling_election_alert_enabled === true
-)
-
-// 按分组覆盖推送开关：只保留正 groupID，值必须是真正的布尔。
-// 键存在即覆盖总开关（true=强制推送、false=静音），键不存在则跟随总开关。
-const electionAlertOverrides = computed<Record<number, boolean>>(() => {
-  const raw = editForm.config.group_scheduling_election_alert_group_overrides
-  if (!raw || typeof raw !== 'object') return {}
-  const out: Record<number, boolean> = {}
-  for (const [key, value] of Object.entries(raw)) {
-    const groupID = Number(key)
-    if (!Number.isSafeInteger(groupID) || groupID <= 0) continue
-    out[groupID] = value === true
-  }
-  return out
-})
-
-const electionAlertOverrideCount = computed(() => Object.keys(electionAlertOverrides.value).length)
-const electionAlertMutedCount = computed(
-  () => Object.values(electionAlertOverrides.value).filter(enabled => !enabled).length
-)
-const electionAlertForcedCount = computed(
-  () => Object.values(electionAlertOverrides.value).filter(enabled => enabled).length
-)
-
-// 分组默认账号：只保留正 groupID / accountID，键存在即表示该组指定了默认账号。
-const groupElectionDefaultAccountMap = computed<Record<string, number>>(() => {
-  const raw = editForm.config.group_scheduling_election_default_account_by_group
-  const out: Record<string, number> = {}
-  if (raw && typeof raw === 'object') {
-    for (const [key, value] of Object.entries(raw)) {
-      const groupID = Number(key)
-      const accountID = Number(value)
-      if (!Number.isSafeInteger(groupID) || groupID <= 0) continue
-      if (!Number.isSafeInteger(accountID) || accountID <= 0) continue
-      out[String(groupID)] = accountID
-    }
-  }
-  return out
-})
-
-const groupElectionDefaultAccountCount = computed(
-  () => Object.keys(groupElectionDefaultAccountMap.value).length
-)
-
-// 分组 → 成员账号（下拉候选）：一次遍历建好，避免模板里对每个分组都重扫一遍账号列表。
-// 只收可用账号 —— 不可用账号进不了择优的在任集合，指定它当默认账号没有意义。
-const electionGroupMemberAccountsMap = computed<Map<number, Array<{ id: number; name: string }>>>(() => {
-  const map = new Map<number, Array<{ id: number; name: string }>>()
-  for (const mapping of healthGuardAccountMappings.value) {
-    if (!mapping.available) continue
-    const seen = new Set<number>()
-    for (const source of mapping.sources) {
-      for (const group of source.binding_groups || []) {
-        const groupID = Number(group.id)
-        if (!Number.isSafeInteger(groupID) || groupID <= 0 || seen.has(groupID)) continue
-        seen.add(groupID)
-        const list = map.get(groupID) ?? []
-        list.push({ id: mapping.localAccountID, name: mapping.localAccountName })
-        map.set(groupID, list)
-      }
-    }
-  }
-  for (const list of map.values()) list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-  return map
-})
-
-// 模型名清洗：trim、去空、按小写去重保序。必需模型的录入与展示都走它，口径与后端一致。
-function normalizeRequiredModelList(models: unknown): string[] {
-  if (!Array.isArray(models)) return []
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const raw of models) {
-    const model = String(raw ?? '').trim()
-    if (!model) continue
-    const key = model.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(model)
-  }
-  return out
-}
-
-// 分组必需模型：group_id → 模型名列表。JSON 键是字符串，这里统一用 String(groupID) 归一读写。
-const groupElectionRequiredModelsMap = computed<Record<string, string[]>>(() => {
-  const raw = editForm.config.group_scheduling_election_required_models
-  const out: Record<string, string[]> = {}
-  if (raw && typeof raw === 'object') {
-    for (const [key, models] of Object.entries(raw)) {
-      const groupID = Number(key)
-      if (!Number.isFinite(groupID) || groupID <= 0) continue
-      const cleaned = normalizeRequiredModelList(models)
-      if (cleaned.length) out[String(groupID)] = cleaned
-    }
-  }
-  return out
-})
-
-const groupElectionRequiredModelsCount = computed(() => Object.keys(groupElectionRequiredModelsMap.value).length)
-
-// 每组开启账号数的分组级覆盖：group_id → TopN。JSON 键是字符串，统一用 String(groupID) 归一读写；
-// 只保留正整数（<=0 视为不覆盖、回落全局），与后端 normalize 同口径。
-const groupElectionTopNByGroupMap = computed<Record<string, number>>(() => {
-  const raw = editForm.config.group_scheduling_election_top_n_by_group
-  const out: Record<string, number> = {}
-  if (raw && typeof raw === 'object') {
-    for (const [key, value] of Object.entries(raw)) {
-      const groupID = Number(key)
-      if (!Number.isFinite(groupID) || groupID <= 0) continue
-      const topN = Number(value)
-      if (!Number.isInteger(topN) || topN <= 0) continue
-      out[String(groupID)] = topN
-    }
-  }
-  return out
-})
-
-const groupElectionTopNOverridesCount = computed(() => Object.keys(groupElectionTopNByGroupMap.value).length)
-
-// 分组择优列表按倍率升序：倍率低的分组排前面，方便一眼看到最便宜的优先级。
-// 完全没有可用倍率的分组排到最后 —— 用 0 代替会把「免费(0)」和「查不到倍率」混在一起，
-// 排序键口径与行上显示的 `倍率 xx` 一致（Number + Number.isFinite，同 healthGuard 那套）。
-function groupRateMultiplierSortKey(group: AdminGroup): number {
-  const rate = Number(group.rate_multiplier)
-  return Number.isFinite(rate) ? rate : Number.POSITIVE_INFINITY
-}
-
-const electionGroupScopeSummary = computed(() => {
-  const disabled = groupElectionDisabledGroupIDs.value.length
-  return {
-    disabled,
-    enabled: Math.max(rateGuardGroups.value.length - disabled, 0),
-  }
-})
-
-const electionFilteredGroups = computed(() => {
-  const keyword = electionGroupSearch.value.trim().toLowerCase()
-  let result = rateGuardGroups.value
-  if (electionGroupPlatformFilter.value.length > 0) {
-    result = result.filter(group =>
-      matchesPlatformFilter(group.platform, electionGroupPlatformFilter.value)
-    )
-  }
-  if (electionGroupDisabledOnly.value) {
-    result = result.filter(group => electionGroupIsDisabled(group.id))
-  }
-  if (keyword) {
-    result = result.filter(group =>
-      group.name.toLowerCase().includes(keyword) || String(group.id).includes(keyword)
-    )
-  }
-  // 筛选之后再排倍率序：排序基准固定，列表顺序不随筛选/开关翻转跳变。
-  return [...result].sort((a, b) => groupRateMultiplierSortKey(a) - groupRateMultiplierSortKey(b))
-})
-
-// 全选只作用于「当前筛选」的结果（与工具栏筛选联动），不是全部可选分组 ——
-// 否则在「仅看已关闭」下点全选，会把看不见的行也一起勾上，批量动作的范围和眼前看到的对不上。
-const electionGroupAllChecked = computed(
-  () =>
-    electionFilteredGroups.value.length > 0 &&
-    electionFilteredGroups.value.every(group => electionGroupCheckedIDs.value.includes(group.id))
+// 「分组择优调度」的派生值与分组级操作统一收在 useGroupElectionConfig 里 ——
+// 编辑弹窗里的「分组择优调度策略」摘要、保存时的归一化、以及「配置参与择优的分组」弹窗，
+// 三处读的必须是同一份口径（上游账号页复用那个弹窗时也走同一份），否则会出现
+// 「摘要说 3 个分组、弹窗里数出 4 个」这种没人能一眼看出是谁错的分叉。
+const {
+  groupElectionDisabledGroupIDs,
+  groupElectionKeepHealthyGroupIDs,
+  groupElectionKeepHealthyExcludedGroupIDs,
+  groupElectionDryRunGroupIDs,
+  electionDryRunAll,
+  electionKeepHealthyAll,
+  groupElectionPriorityEnabledGroupIDs,
+  groupElectionPriorityDisabledGroupIDs,
+  electionPriorityAll,
+  electionAlertEnabled,
+  electionAlertOverrides,
+  electionAlertOverrideCount,
+  electionAlertMutedCount,
+  electionAlertForcedCount,
+  groupElectionDefaultAccountMap,
+  groupElectionDefaultAccountCount,
+  groupElectionRequiredModelsMap,
+  groupElectionRequiredModelsCount,
+  groupElectionTopNByGroupMap,
+  groupElectionTopNOverridesCount,
+  setElectionDryRunAll,
+  setElectionKeepHealthyAll,
+  setElectionPriorityAll,
+  setElectionAlertEnabled,
+} = useGroupElectionConfig(
+  () => editForm.config,
+  () => rateGuardGroups.value,
+  () => healthGuardSupplierAccounts.value
 )
 
 // 编辑弹窗的宽度由「最宽那一行的列数」决定，不是区块个数 ——
@@ -3146,50 +2094,13 @@ const rateGuardFilteredGroups = computed(() => {
   )
 })
 
-const healthGuardAvailableAccountMappings = computed(() =>
-  healthGuardAccountMappings.value.filter(mapping => mapping.available)
-)
 
-const healthGuardSelectedAccountRows = computed(() =>
-  healthGuardSelectedRowsForConfig(editForm.config)
-)
 
-const healthGuardPlatformSummaries = computed<HealthGuardPlatformSummary[]>(() => {
-  const summaries = new Map<string, HealthGuardPlatformSummary>()
-  for (const mapping of healthGuardAvailableAccountMappings.value) {
-    const platform = mapping.platform
-    const current = summaries.get(platform)
-    if (current) {
-      current.accountCount += 1
-      continue
-    }
-    summaries.set(platform, {
-      platform,
-      accountCount: 1,
-    })
-  }
-  return Array.from(summaries.values()).sort((a, b) => platformLabel(a.platform).localeCompare(platformLabel(b.platform), 'zh-CN'))
-})
 
 // 入口区只显示一行摘要：配置搬进二级弹窗后，用户需要一个信号判断「有没有配过」，
 // 否则「未开调度账号按倍率间隔」开着却不知道配没配。
-const healthGuardMultiplierSummary = computed(() => {
-  const total = healthGuardPlatformSummaries.value.length
-  if (total === 0) return '当前没有可配置倍率间隔的平台。'
-  const configured = healthGuardPlatformSummaries.value.filter(
-    summary => healthGuardMultiplierRules(summary.platform).length > 0
-  ).length
-  if (configured === 0) return `共 ${total} 个平台，均未配置区间（每轮都会检查）。`
-  return `已为 ${configured}/${total} 个平台配置区间，其余平台每轮都会检查。`
-})
 
-function openMultiplierIntervalDialog() {
-  multiplierIntervalDialogVisible.value = true
-}
 
-function closeMultiplierIntervalDialog() {
-  multiplierIntervalDialogVisible.value = false
-}
 
 // 账号弹窗的平台标签与分组弹窗共用同一套渲染，只是统计口径换成「可用账号数」——
 // 与它替换掉的下拉选项口径一致，筛选行为不变。
@@ -3199,113 +2110,11 @@ function closeMultiplierIntervalDialog() {
 //   · 供应商下拉的候选与计数只统计「平台筛选后」的账号。
 // 两边各自只应用**对方**那一个条件 —— 不能拿最终列表（healthGuardWorkspaceAccounts）算候选，
 // 那会把当前选中项永远留在候选里，联动就退化成两个独立筛选。
-const healthGuardProviderScopedMappings = computed(() => {
-  const providerID = healthGuardAccountProviderFilter.value
-  if (!providerID) return healthGuardAvailableAccountMappings.value
-  return healthGuardAvailableAccountMappings.value.filter(mapping =>
-    mapping.sources.some(source => String(source.provider_id) === providerID)
-  )
-})
 
-const healthGuardPlatformScopedMappings = computed(() => {
-  const selected = healthGuardAccountPlatformFilter.value
-  if (!selected.length) return healthGuardAvailableAccountMappings.value
-  return healthGuardAvailableAccountMappings.value.filter(mapping =>
-    matchesPlatformFilter(mapping.platform, selected)
-  )
-})
 
-const healthGuardAccountPlatformFacets = computed(() =>
-  buildPlatformFacets(healthGuardProviderScopedMappings.value)
-)
 
-const healthGuardProviderFilterOptions = computed<SelectOption[]>(() => {
-  const providers = new Map<number, { name: string; accountIDs: Set<number> }>()
-  for (const mapping of healthGuardPlatformScopedMappings.value) {
-    for (const source of mapping.sources) {
-      const providerID = Number(source.provider_id)
-      if (!Number.isSafeInteger(providerID) || providerID <= 0) continue
-      const current = providers.get(providerID)
-      if (current) {
-        current.accountIDs.add(mapping.localAccountID)
-        if (!current.name && source.provider_name) current.name = source.provider_name
-        continue
-      }
-      providers.set(providerID, {
-        name: source.provider_name || `供应商 ${providerID}`,
-        accountIDs: new Set([mapping.localAccountID]),
-      })
-    }
-  }
 
-  return [
-    { value: '', label: '全部供应商' },
-    ...Array.from(providers.entries())
-      .sort(([, a], [, b]) => a.name.localeCompare(b.name, 'zh-CN'))
-      .map(([providerID, provider]) => ({
-        value: String(providerID),
-        label: `${provider.name}（${provider.accountIDs.size}）`,
-      })),
-  ]
-})
 
-// 联动必须把「已经选不到」的那一项收回去，否则会留下一个界面上根本不存在、又取消不掉的选中项：
-// 平台标签只在候选里有对应 facet 时才渲染，被挤掉的标签会连点击取消的机会都没有，
-// 结果是列表一直空着而用户找不到原因。
-//
-// 收回的是**被挤掉的那个**，而不是刚改的那个：用户点平台标签就是想看该平台，
-// 若把刚点的标签回退掉，表现就是「点了没反应」。所以两个 watch 都挂在「值」上
-// （谁变了就检查另一个），语义是「后改的生效」。
-// 不会成环：收回只会让对方的候选变多（空选 / 「全部供应商」一定在候选里），不会把对方也挤掉。
-watch(healthGuardAccountPlatformFilter, () => {
-  if (!healthGuardProviderFilterOptions.value.some(
-    option => option.value === healthGuardAccountProviderFilter.value
-  )) {
-    healthGuardAccountProviderFilter.value = ''
-  }
-})
-
-watch(healthGuardAccountProviderFilter, () => {
-  const available = new Set(healthGuardAccountPlatformFacets.value.map(facet => facet.platform))
-  const kept = healthGuardAccountPlatformFilter.value.filter(platform => available.has(platform))
-  if (kept.length !== healthGuardAccountPlatformFilter.value.length) {
-    healthGuardAccountPlatformFilter.value = kept
-  }
-})
-
-const healthGuardWorkspaceAccounts = computed(() => {
-  const accounts = [...healthGuardAvailableAccountMappings.value]
-  const includedAccountIDs = new Set(accounts.map(mapping => mapping.localAccountID))
-  for (const mapping of healthGuardSelectedAccountRows.value) {
-    if (includedAccountIDs.has(mapping.localAccountID)) continue
-    accounts.push(mapping)
-    includedAccountIDs.add(mapping.localAccountID)
-  }
-
-  const platformFilter = healthGuardAccountPlatformFilter.value
-  const providerID = healthGuardAccountProviderFilter.value
-  const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
-  const filtered = accounts.filter(mapping => {
-    if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
-    if (healthGuardUnselectedOnly.value && healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
-    if (healthGuardProviderClosedOnly.value && !healthGuardAccountProviderClosed(mapping)) return false
-    if (healthGuardProviderEnabledOnly.value && healthGuardAccountProviderClosed(mapping)) return false
-    if (!matchesPlatformFilter(mapping.platform, platformFilter)) return false
-    if (providerID && !mapping.sources.some(source => String(source.provider_id) === providerID)) return false
-    if (!keyword) return true
-    const searchableText = [
-      mapping.localAccountName,
-      String(mapping.localAccountID),
-      mapping.platform,
-      ...mapping.localGroupPlatforms,
-      ...mapping.sources.flatMap(source => [source.name, source.provider_name, source.upstream_account_key]),
-    ].filter(Boolean).join(' ').toLowerCase()
-    return searchableText.includes(keyword)
-  })
-  // 按倍率升序：倍率区间规则是按倍率落桶取间隔的，同一桶的账号相邻才看得出「这批账号走同一条区间」。
-  // 排序放在筛选之后，列表顺序不随筛选条件跳变（每次都从同一基准重排）。
-  return filtered.sort((a, b) => healthGuardAccountMultiplierSortKey(a) - healthGuardAccountMultiplierSortKey(b))
-})
 
 /**
  * 倍率升序的排序键。
@@ -3313,50 +2122,11 @@ const healthGuardWorkspaceAccounts = computed(() => {
  * 倍率取值与展示用的是同一套过滤（Number + Number.isFinite），避免排序键和行上显示的数字对不上。
  * 完全没有可用倍率的账号排到最后 —— 用 0 代替会让「免费的」和「查不到倍率的」混在一起。
  */
-function healthGuardAccountMultiplierSortKey(mapping: HealthGuardAccountMapping): number {
-  const rates = mapping.sources
-    .map(source => Number(source.rate_multiplier))
-    .filter(rate => Number.isFinite(rate))
-  return rates.length ? Math.min(...rates) : Number.POSITIVE_INFINITY
-}
 
-const healthGuardSelectionSummary = computed(() => {
-  const accountModels = normalizeStringMap(editForm.config.account_health_guard_account_models)
-  const platformModels = normalizeStringMap(editForm.config.account_health_guard_platform_models)
-  let platformDefault = 0
-  let overridden = 0
-  let missingModel = 0
-  let intervals = 0
-
-  for (const mapping of healthGuardSelectedAccountRows.value) {
-    if (!mapping.available) continue
-    if (accountModels[String(mapping.localAccountID)]?.trim()) {
-      overridden += 1
-    } else if (platformModels[mapping.platform]?.trim()) {
-      platformDefault += 1
-    } else {
-      missingModel += 1
-    }
-    if (healthGuardAccountIntervalValue(mapping.localAccountID)) intervals += 1
-  }
-
-  return {
-    selected: healthGuardAccountIDs.value.length,
-    platformDefault,
-    overridden,
-    missingModel,
-    intervals,
-  }
-})
 
 // 「仅看未开启」按钮上的计数。只数**可用**账号：不可用且未参与的账号根本不进列表
 // （列表基集 = 可用账号 + 已选账号），算进来会出现「按钮说 2、点开只有 1 行」。
 // 与「仅看已选」一样取全局口径，不跟着平台/供应商/搜索变，否则数字一直跳。
-const healthGuardUnselectedCount = computed(() =>
-  healthGuardAvailableAccountMappings.value.filter(
-    mapping => !healthGuardAccountIDs.value.includes(mapping.localAccountID)
-  ).length
-)
 
 /**
  * 账号的供应商是否已全部关闭。
@@ -3367,236 +2137,53 @@ const healthGuardUnselectedCount = computed(() =>
  * 供应商列表没拿到、或某个 provider_id 不在列表里时一律按「开启」处理 ——
  * 宁可漏标，也不要误标灰（误标会让人以为这个账号已经废了）。
  */
-function healthGuardAccountProviderClosed(mapping: HealthGuardAccountMapping): boolean {
-  if (!mapping.sources.length) return false
-  return mapping.sources.every(source =>
-    disabledSupplierProviderIDs.value.has(Number(source.provider_id))
-  )
-}
 
 // 供应商维度的两个计数，口径与另外两个按钮一致（全局可用账号，不随其它筛选变）。
 // 「开启数」用「总数 - 关闭数」而不是再 filter 一遍：两者互斥且互补，
 // 写成减法不会出现「两个数字加起来不等于总数」的口径漂移。
-const healthGuardProviderClosedCount = computed(() =>
-  healthGuardAvailableAccountMappings.value.filter(
-    mapping => healthGuardAccountProviderClosed(mapping)
-  ).length
-)
 
-const healthGuardProviderEnabledCount = computed(() =>
-  healthGuardAvailableAccountMappings.value.length - healthGuardProviderClosedCount.value
-)
 
 // 空态文案按当前生效的快捷过滤给出 —— 筛出空列表时必须说清是哪条筛出来的，
 // 否则用户看到「没有可配置账号」会去查数据，而不是去关掉刚点的那个过滤。
-const healthGuardEmptyHint = computed(() => {
-  if (healthGuardSelectedOnly.value) return '当前筛选条件下没有已选账号。'
-  if (healthGuardUnselectedOnly.value) return '当前筛选条件下没有未参与守护的账号。'
-  if (healthGuardProviderClosedOnly.value) return '当前筛选条件下没有供应商已关闭的账号。'
-  if (healthGuardProviderEnabledOnly.value) return '当前筛选条件下没有供应商开启的账号。'
-  return '当前筛选条件下没有可配置账号。'
-})
 
 // 两个快捷过滤互斥：同时开启只会得到空集，所以开一个就关掉另一个。
-function toggleHealthGuardSelectedOnly() {
-  healthGuardSelectedOnly.value = !healthGuardSelectedOnly.value
-  if (healthGuardSelectedOnly.value) healthGuardUnselectedOnly.value = false
-}
 
-function toggleHealthGuardUnselectedOnly() {
-  healthGuardUnselectedOnly.value = !healthGuardUnselectedOnly.value
-  if (healthGuardUnselectedOnly.value) healthGuardSelectedOnly.value = false
-}
 
 // 供应商维度的互斥对：开一个就关掉另一个。与上面那对（参与守护）互不干扰 ——
 // 两个维度正交，用户要能同时看「未参与守护 + 供应商已关闭」。
-function toggleHealthGuardProviderClosedOnly() {
-  healthGuardProviderClosedOnly.value = !healthGuardProviderClosedOnly.value
-  if (healthGuardProviderClosedOnly.value) healthGuardProviderEnabledOnly.value = false
-}
 
-function toggleHealthGuardProviderEnabledOnly() {
-  healthGuardProviderEnabledOnly.value = !healthGuardProviderEnabledOnly.value
-  if (healthGuardProviderEnabledOnly.value) healthGuardProviderClosedOnly.value = false
-}
-function healthGuardSelectedRowsForConfig(config: SupplierAutomationConfig): HealthGuardAccountMapping[] {
-  const mappings = new Map(healthGuardAccountMappings.value.map(mapping => [mapping.localAccountID, mapping]))
-  return normalizePositiveAccountIDs(config.account_health_guard_account_ids).map(id => mappings.get(id) || {
-    localAccountID: id,
-    localAccountName: `账号 #${id}`,
-    platform: 'unknown',
-    localGroupPlatforms: ['unknown'],
-    available: false,
-    sources: [],
-  })
-}
 
-function healthGuardSourceSummary(mapping: HealthGuardAccountMapping): string {
-  const sources = mapping.sources
-    .map(source => `${source.provider_name || `供应商 ${source.provider_id}`} · ${source.name || source.upstream_account_key}`)
-    .filter(Boolean)
-  return sources.length ? sources.join('；') : '供应商来源不可用'
-}
 
-function healthGuardAccountMultiplierText(mapping: HealthGuardAccountMapping): string {
-  const rates = Array.from(new Set(
-    mapping.sources
-      .map(source => Number(source.rate_multiplier))
-      .filter(rate => Number.isFinite(rate))
-      .map(rate => rate.toFixed(4).replace(/\.?0+$/, ''))
-  ))
-  if (!rates.length) return ''
-  return `（倍率：${rates.join(' / ')}）`
-}
 
-function healthGuardAccountGroups(mapping: HealthGuardAccountMapping): SupplierProviderAccount['binding_groups'] {
-  const groups = new Map<number, SupplierProviderAccount['binding_groups'][number]>()
-  for (const source of mapping.sources) {
-    for (const group of source.binding_groups) {
-      if (!groups.has(group.id)) groups.set(group.id, group)
-    }
-  }
-  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-}
 
-function healthGuardAccountGroupCount(mapping: HealthGuardAccountMapping): number {
-  return healthGuardAccountGroups(mapping).length
-}
 
-function healthGuardAccountGroupsTitle(mapping: HealthGuardAccountMapping): string {
-  const groups = healthGuardAccountGroups(mapping)
-  if (!groups.length) return '未绑定分组'
-  const names = groups.map(group => group.name || `分组 #${group.id}`)
-  return `绑定分组（${groups.length}）：${names.join('、')}`
-}
 
-const healthGuardModelCreatablePrefix = '使用模型'
 
-function healthGuardModelSelectOptions(platform: string, currentModel = ''): SelectOption[] {
-  const models = healthGuardModelOptionsByPlatform.value[platform] || []
-  const options: SelectOption[] = [
-    {
-      value: '',
-      label: healthGuardModelLoadingByPlatform.value[platform] ? '加载模型中…' : '未配置',
-    },
-    ...models.map(model => ({
-      value: model.id,
-      label: model.display_name || model.id,
-    })),
-  ]
-  const normalizedCurrentModel = currentModel?.trim()
-  if (normalizedCurrentModel && !models.some(model => model.id === normalizedCurrentModel)) {
-    options.splice(1, 0, {
-      value: normalizedCurrentModel,
-      label: `${normalizedCurrentModel}（当前配置）`,
-    })
-  }
-  return options
-}
-
-function healthGuardAccountIsSelected(accountID: number): boolean {
-  return healthGuardAccountIDs.value.includes(accountID)
-}
 
 // 多选集合：纯界面瞬时状态（不写进 config），只决定「批量设置 / 批量间隔」的作用范围。
 // 与上面的「参与守护」是两个概念 —— 那个是业务配置、保存后生效；勾选只是本次批量操作的选择。
 // 合并成一个控件会让「想批量设阈值」被迫先把账号纳入守护。
-const healthGuardCheckedAccountIDs = ref<number[]>([])
 
-function healthGuardAccountIsChecked(accountID: number): boolean {
-  return healthGuardCheckedAccountIDs.value.includes(accountID)
-}
 
-function toggleHealthGuardAccountCheck(accountID: number) {
-  healthGuardCheckedAccountIDs.value = healthGuardAccountIsChecked(accountID)
-    ? healthGuardCheckedAccountIDs.value.filter(item => item !== accountID)
-    : normalizePositiveAccountIDs([...healthGuardCheckedAccountIDs.value, accountID])
-}
 
-function healthGuardAccountOverrideModel(accountID: number): string {
-  return normalizeStringMap(editForm.config.account_health_guard_account_models)[String(accountID)]?.trim() || ''
-}
 
-function healthGuardPlatformDefaultModel(platform: string): string {
-  return normalizeStringMap(editForm.config.account_health_guard_platform_models)[platform]?.trim() || ''
-}
 
-function supplierAccountHealthGuardModelForMapping(
-  config: SupplierAutomationConfig,
-  mapping: HealthGuardAccountMapping
-): string {
-  const accountModels = normalizeStringMap(config.account_health_guard_account_models)
-  const platformModels = normalizeStringMap(config.account_health_guard_platform_models)
-  return accountModels[String(mapping.localAccountID)]?.trim()
-    || platformModels[mapping.platform]?.trim()
-    || ''
-}
 
 async function ensureHealthGuardAccountCandidatesLoaded() {
   loadingHealthGuardSupplierAccounts.value = true
   try {
     // 供应商状态与账号列表并行取，别串行加一轮等待。
-    // 失败时降级成「没有已关闭的供应商」而不是整体抛错：它是附加信息，
+    // 供应商状态拿不到时降级成「没有已关闭的供应商」而不是整体抛错：它是附加信息，
     // 拿不到只影响标灰与那个快捷过滤，不该把账号列表一起拖垮、也不该弹一个
     // 「加载健康守护账号失败」把用户引到错误的方向。
-    const providersPromise = listSupplierProviders({ page: 1, page_size: 200 }).catch(() => null)
-
-    const items: SupplierProviderAccount[] = []
-    let page = 1
-    let result = await listSupplierAccounts({
-      active: true,
-      match_status: 'matched',
-      page,
-      page_size: 200,
-    })
-    items.push(...(result.items || []))
-
-    while (items.length < result.total && result.items.length > 0) {
-      page += 1
-      result = await listSupplierAccounts({
-        active: true,
-        match_status: 'matched',
-        page,
-        page_size: 200,
-      })
-      items.push(...(result.items || []))
-    }
-    healthGuardSupplierAccounts.value = items
-
-    const providers = await providersPromise
-    disabledSupplierProviderIDs.value = new Set(
-      (providers?.items || [])
-        .filter(provider => provider.enabled === false)
-        .map(provider => Number(provider.id))
-        .filter(id => Number.isSafeInteger(id) && id > 0)
-    )
+    const providersPromise = fetchDisabledSupplierProviderIds()
+    healthGuardSupplierAccounts.value = await fetchEligibleSupplierAccounts()
+    disabledSupplierProviderIDs.value = await providersPromise
   } finally {
     loadingHealthGuardSupplierAccounts.value = false
   }
 }
 
-async function loadHealthGuardModels() {
-  const platforms = healthGuardPlatformSummaries.value.map(summary => summary.platform)
-  healthGuardModelOptionsByPlatform.value = {}
-  healthGuardModelLoadingByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, true]))
-  try {
-    const config = await adminAPI.modelSquareConfig.get()
-    const byPlatform: Record<string, { id: string; display_name?: string }[]> = {}
-    for (const platformConfig of config.platforms || []) {
-      byPlatform[platformConfig.platform] = (platformConfig.models || []).map(model => ({
-        id: model.id,
-        display_name: model.display_name,
-      }))
-    }
-    healthGuardModelOptionsByPlatform.value = Object.fromEntries(
-      platforms.map(platform => [platform, byPlatform[normalizeHealthGuardPlatform(platform)] || []])
-    )
-  } catch {
-    healthGuardModelOptionsByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, []]))
-  } finally {
-    healthGuardModelLoadingByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, false]))
-  }
-}
 
 function applyAccountHealthGuardDefaults() {
   const config = editForm.config
@@ -3712,60 +2299,7 @@ function applyGroupElectionDefaults() {
     groupElectionDefaultAccountMap.value as unknown as Record<number, number>
 }
 
-function validateAccountHealthGuardSelection(config: SupplierAutomationConfig): string {
-  const accountIDs = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
-  if (!accountIDs.length) return '请至少选择一个需要检查的账号'
 
-  const missingModelAccounts = healthGuardSelectedRowsForConfig(config)
-    .filter(mapping => mapping.available && !supplierAccountHealthGuardModelForMapping(config, mapping))
-    .map(mapping => mapping.localAccountName)
-  if (missingModelAccounts.length) {
-    return `以下账号尚未配置测试模型：${missingModelAccounts.join('、')}`
-  }
-  return ''
-}
-
-function validateAccountHealthGuardConfig(config: SupplierAutomationConfig = editForm.config): string {
-  const rules: Array<[number, number, number, string]> = [
-    [config.account_health_guard_max_accounts_per_run, 1, 1000, '单次检查账号数必须在 1 到 1000 之间'],
-    [config.account_health_guard_concurrency, 1, 32, '并发数必须在 1 到 32 之间'],
-    [config.account_health_guard_timeout_per_account_seconds, 5, 300, '单账号超时必须在 5 到 300 秒之间'],
-    [config.account_health_guard_failure_threshold, 1, Number.MAX_SAFE_INTEGER, '连续失败暂停阈值必须是正整数'],
-    [config.account_health_guard_slow_threshold, 1, Number.MAX_SAFE_INTEGER, '连续慢响应暂停阈值必须是正整数'],
-    [config.account_health_guard_recovery_threshold, 1, Number.MAX_SAFE_INTEGER, '连续健康恢复阈值必须是正整数'],
-    [config.account_health_guard_healthy_latency_ms, 1, Number.MAX_SAFE_INTEGER, '默认健康延迟必须是正整数毫秒'],
-  ]
-  for (const [value, min, max, message] of rules) {
-    if (!Number.isInteger(value) || value < min || value > max) return message
-  }
-  config.account_health_guard_account_ids = normalizePositiveAccountIDs(config.account_health_guard_account_ids)
-  config.account_health_guard_account_models = normalizeStringMap(config.account_health_guard_account_models)
-  config.account_health_guard_platform_models = normalizeStringMap(config.account_health_guard_platform_models)
-  const rawIntervals = config.account_health_guard_account_intervals || {}
-  for (const [accountID, interval] of Object.entries(rawIntervals)) {
-    const parsed = Math.floor(Number(interval))
-    if (Number.isFinite(parsed) && parsed > 0 && parsed < 60) {
-      return `账号 #${accountID} 的检查间隔不能小于 60 秒`
-    }
-  }
-  config.account_health_guard_account_intervals = normalizeAccountHealthGuardAccountIntervals(config.account_health_guard_account_intervals)
-  const accountThresholdRules: Array<[Record<string, number>, string]> = [
-    [config.account_health_guard_account_failure_thresholds || {}, '连续失败暂停阈值'],
-    [config.account_health_guard_account_slow_thresholds || {}, '连续慢响应暂停阈值'],
-    [config.account_health_guard_account_recovery_thresholds || {}, '连续健康恢复阈值'],
-  ]
-  for (const [thresholds, label] of accountThresholdRules) {
-    for (const [accountID, threshold] of Object.entries(thresholds)) {
-      if (!Number.isInteger(threshold) || threshold < 1) {
-        return `账号 #${accountID} 的${label}必须是正整数`
-      }
-    }
-  }
-  config.account_health_guard_account_failure_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_failure_thresholds)
-  config.account_health_guard_account_slow_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_slow_thresholds)
-  config.account_health_guard_account_recovery_thresholds = normalizeAccountHealthGuardAccountThresholds(config.account_health_guard_account_recovery_thresholds)
-  return validateAccountHealthGuardSelection(config)
-}
 
 async function openRateGuardGroups() {
   rateGuardGroupsVisible.value = true
@@ -3822,12 +2356,8 @@ function enableAllRateGuardGroups() {
 
 async function openElectionGroups() {
   electionGroupsVisible.value = true
-  electionGroupSearch.value = ''
-  electionGroupDisabledOnly.value = false
-  electionGroupPlatformFilter.value = []
-  // 勾选是上一次操作的残留，必须随弹窗一起重置：带着旧勾选打开，
-  // 用户看到「已选 3 个」却不知道是哪 3 个（尤其是被筛选挡住的行）。
-  electionGroupCheckedIDs.value = []
+  // 筛选与勾选由弹窗自己在打开时重置 —— 那几项状态已随弹窗搬进共享组件
+  // （上游账号页复用同一个弹窗），页面这边不再持有，也就不能在这里清。
   // 分组默认账号的下拉需要「分组 → 成员账号」这份数据，与健康守护账号弹窗共用同一份缓存，
   // 已加载过就不再请求。放在分组加载之外：两者互不依赖，没必要串行等。
   const accountsPromise = ensureHealthGuardAccountCandidatesLoaded().catch(() => {
@@ -3851,830 +2381,90 @@ function closeElectionGroups() {
   electionGroupsVisible.value = false
 }
 
-function electionGroupIsDisabled(groupID: number): boolean {
-  return groupElectionDisabledGroupIDs.value.includes(groupID)
-}
-
-// 「参与择优」开关列的生效值：不在关闭名单里就是参与。
-// 独立成一个函数而不是在模板里写 `!electionGroupIsDisabled(...)`，
-// 是因为批量操作也要用同一个口径判断「是否需要改」，两处写两份迟早会分叉。
-function electionGroupParticipates(groupID: number): boolean {
-  return !electionGroupIsDisabled(groupID)
-}
-
-function toggleElectionGroup(groupID: number) {
-  // 勾选 = 参与择优；勾掉的才进配置，因此写回的是"关闭列表"。
-  const disabled = groupElectionDisabledGroupIDs.value
-  const next = disabled.includes(groupID)
-    ? disabled.filter(id => id !== groupID)
-    : [...disabled, groupID]
-  editForm.config.group_scheduling_election_disabled_group_ids = normalizePositiveAccountIDs(next)
-  // 关闭择优的分组不该再留在"健康锁定"列表里（锁定对不择优的分组无意义）；
-  // 演练名单同理——不参与择优的分组根本不会产生切换建议，留着只会让摘要多算一个。
-  if (!disabled.includes(groupID)) {
-    const keep = groupElectionKeepHealthyGroupIDs.value
-    if (keep.includes(groupID)) {
-      editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids =
-        normalizePositiveAccountIDs(keep.filter(id => id !== groupID))
-    }
-    const keepExcluded = groupElectionKeepHealthyExcludedGroupIDs.value
-    if (keepExcluded.includes(groupID)) {
-      editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids =
-        normalizePositiveAccountIDs(keepExcluded.filter(id => id !== groupID))
-    }
-    const dryRun = groupElectionDryRunGroupIDs.value
-    if (dryRun.includes(groupID)) {
-      editForm.config.group_scheduling_election_dry_run_group_ids =
-        normalizePositiveAccountIDs(dryRun.filter(id => id !== groupID))
-    }
-    // 优先级计分名单同理：不参与择优的分组不该留在"计优先级"列表里。
-    if (groupElectionPriorityEnabledGroupIDs.value.includes(groupID)) {
-      editForm.config.group_scheduling_election_priority_enabled_group_ids = normalizePositiveAccountIDs(
-        groupElectionPriorityEnabledGroupIDs.value.filter(id => id !== groupID)
-      )
-    }
-    if (groupElectionPriorityDisabledGroupIDs.value.includes(groupID)) {
-      editForm.config.group_scheduling_election_priority_disabled_group_ids = normalizePositiveAccountIDs(
-        groupElectionPriorityDisabledGroupIDs.value.filter(id => id !== groupID)
-      )
-    }
-    // 每组开启数的分组级覆盖同理：不参与择优的分组留着覆盖没意义，清掉、回落全局默认。
-    if (groupElectionTopNByGroupMap.value[String(groupID)]) {
-      const next: Record<string, number> = { ...groupElectionTopNByGroupMap.value }
-      delete next[String(groupID)]
-      editForm.config.group_scheduling_election_top_n_by_group = next as unknown as Record<number, number>
-    }
-  }
-}
-
-function electionGroupKeepHealthy(groupID: number): boolean {
-  // 生效值口径与后端 keepHealthyForGroup 一致：强制不锁定→false（优先）、强制锁定→true、都不在→跟随全局。
-  if (groupElectionKeepHealthyExcludedGroupIDs.value.includes(groupID)) return false
-  if (groupElectionKeepHealthyGroupIDs.value.includes(groupID)) return true
-  return electionKeepHealthyAll.value
-}
-
-// Toggle 的事件值在组件里是 unknown，收敛成布尔再写回配置，避免把字符串 "false" 存进去。
-function setElectionDryRunAll(value: unknown) {
-  editForm.config.group_scheduling_election_dry_run = Boolean(value)
-}
-
-// 全局默认锁定开关：只改全局位，不动分组级覆盖名单 —— 已显式覆盖的分组在全局翻转后仍保持覆盖。
-function setElectionKeepHealthyAll(value: unknown) {
-  editForm.config.group_scheduling_election_keep_healthy_incumbent_global = Boolean(value)
-}
-
-// 异常推送总开关：只改全局位，不动分组级覆盖 —— 已显式覆盖的分组在全局翻转后仍保持覆盖。
-function setElectionAlertEnabled(value: unknown) {
-  editForm.config.group_scheduling_election_alert_enabled = Boolean(value)
-}
-
-// 分组覆盖的当前取值：undefined = 未覆盖（跟随总开关）。
-function electionAlertOverrideValue(groupID: number): boolean | undefined {
-  return electionAlertOverrides.value[groupID]
-}
-
-// 写入覆盖：undefined 表示清掉覆盖、回落到跟随总开关。
-function setElectionAlertOverride(groupID: number, value: boolean | undefined) {
-  if (!Number.isSafeInteger(groupID) || groupID <= 0) return
-  const next = { ...electionAlertOverrides.value }
-  if (value === undefined) delete next[groupID]
-  else next[groupID] = value
-  editForm.config.group_scheduling_election_alert_group_overrides = next
-}
-
-// 某分组当前的默认账号 ID（未指定返回 undefined）。
-function electionGroupDefaultAccount(groupID: number): number | undefined {
-  const value = groupElectionDefaultAccountMap.value[String(groupID)]
-  return Number.isSafeInteger(value) && value > 0 ? value : undefined
-}
-
-// 默认账号下拉的当前值：统一用字符串（'' = 不指定），与 SelectOption.value 的写法一致。
-function electionGroupDefaultAccountValue(groupID: number): string {
-  const current = electionGroupDefaultAccount(groupID)
-  return current === undefined ? '' : String(current)
-}
-
-// 默认账号下拉的选项：「不指定」+ 本组可用成员账号。
-// 已配置但不在候选里的账号（被停用 / 改名 / 移出分组）必须补一条，
-// 否则用户一打开弹窗就看到「不指定」，会误以为配置丢了。
-function electionGroupDefaultAccountOptions(groupID: number): SelectOption[] {
-  const options: SelectOption[] = [{ value: '', label: '不指定（按择优结果）' }]
-  for (const account of electionGroupMemberAccounts(groupID)) {
-    options.push({ value: String(account.id), label: account.name })
-  }
-  const current = electionGroupDefaultAccount(groupID)
-  if (current !== undefined && !options.some(option => option.value === String(current))) {
-    options.push({ value: String(current), label: `#${current}（不在候选里）` })
-  }
-  return options
-}
-
-// 写入分组默认账号：空值表示清除（该组回落正常择优）。
-function setElectionGroupDefaultAccount(groupID: number, raw: string | number | boolean | null) {
-  if (!Number.isSafeInteger(groupID) || groupID <= 0) return
-  const accountID = Number(raw)
-  const next = { ...groupElectionDefaultAccountMap.value }
-  if (!Number.isSafeInteger(accountID) || accountID <= 0) delete next[String(groupID)]
-  else next[String(groupID)] = accountID
-  editForm.config.group_scheduling_election_default_account_by_group =
-    next as unknown as Record<number, number>
-}
-
-// 某分组的成员账号候选。
-function electionGroupMemberAccounts(groupID: number): Array<{ id: number; name: string }> {
-  return electionGroupMemberAccountsMap.value.get(groupID) ?? []
-}
-
-function electionGroupDryRun(groupID: number): boolean {
-  // 总开关打开时全部分组都演练，行内开关显示成打开（此时改它不会让该分组真的生效）。
-  return electionDryRunAll.value || groupElectionDryRunGroupIDs.value.includes(groupID)
-}
-
-function toggleElectionGroupDryRun(groupID: number) {
-  const list = groupElectionDryRunGroupIDs.value
-  const next = list.includes(groupID)
-    ? list.filter(id => id !== groupID)
-    : [...list, groupID]
-  editForm.config.group_scheduling_election_dry_run_group_ids = normalizePositiveAccountIDs(next)
-}
-
-function toggleElectionKeepHealthyGroup(groupID: number) {
-  // 覆盖语义：目标 = 翻转当前生效值。与全局不一致才写显式覆盖，一致则清掉覆盖、回落继承全局。
-  const desired = !electionGroupKeepHealthy(groupID)
-  let included = groupElectionKeepHealthyGroupIDs.value.filter(id => id !== groupID)
-  let excluded = groupElectionKeepHealthyExcludedGroupIDs.value.filter(id => id !== groupID)
-  if (desired !== electionKeepHealthyAll.value) {
-    if (desired) included = [...included, groupID]
-    else excluded = [...excluded, groupID]
-  }
-  editForm.config.group_scheduling_election_keep_healthy_incumbent_group_ids = normalizePositiveAccountIDs(included)
-  editForm.config.group_scheduling_election_keep_healthy_incumbent_excluded_group_ids =
-    normalizePositiveAccountIDs(excluded)
-}
-
-// 优先级计分的生效值口径与后端 priorityEnabledForGroup 一致：
-// 强制关闭→false（优先）、强制开启→true、都不在→跟随全局开关。
-function electionGroupPriority(groupID: number): boolean {
-  if (groupElectionPriorityDisabledGroupIDs.value.includes(groupID)) return false
-  if (groupElectionPriorityEnabledGroupIDs.value.includes(groupID)) return true
-  return electionPriorityAll.value
-}
-
-// 全局默认开关：只改全局位，不动分组级覆盖名单 —— 已显式覆盖的分组在全局翻转后仍保持覆盖。
-function setElectionPriorityAll(value: unknown) {
-  editForm.config.group_scheduling_election_priority_enabled_global = Boolean(value)
-}
-
-function toggleElectionGroupPriority(groupID: number) {
-  // 覆盖语义与健康锁一致：目标 = 翻转当前生效值。与全局不一致才写显式覆盖，一致则清掉覆盖、回落继承全局。
-  const desired = !electionGroupPriority(groupID)
-  let included = groupElectionPriorityEnabledGroupIDs.value.filter(id => id !== groupID)
-  let excluded = groupElectionPriorityDisabledGroupIDs.value.filter(id => id !== groupID)
-  if (desired !== electionPriorityAll.value) {
-    if (desired) included = [...included, groupID]
-    else excluded = [...excluded, groupID]
-  }
-  editForm.config.group_scheduling_election_priority_enabled_group_ids = normalizePositiveAccountIDs(included)
-  editForm.config.group_scheduling_election_priority_disabled_group_ids = normalizePositiveAccountIDs(excluded)
-}
-
-function electionGroupRequiredModelsText(groupID: number): string {
-  return (groupElectionRequiredModelsMap.value[String(groupID)] || []).join(', ')
-}
-
-// 逗号（中英）或空白分隔录入；清洗后写回 map，空列表则删除该分组键（等于无强制要求）。
-function setElectionGroupRequiredModels(groupID: number, text: string) {
-  const models = normalizeRequiredModelList(String(text ?? '').split(/[,，\s]+/))
-  const next: Record<string, string[]> = { ...groupElectionRequiredModelsMap.value }
-  if (models.length) next[String(groupID)] = models
-  else delete next[String(groupID)]
-  editForm.config.group_scheduling_election_required_models = next as unknown as Record<number, string[]>
-}
-
-// 每组开启账号数的分组级覆盖：未设置返回空串，让输入框显示全局默认的 placeholder。
-function electionGroupTopNText(groupID: number): string {
-  const value = groupElectionTopNByGroupMap.value[String(groupID)]
-  return value ? String(value) : ''
-}
-
-// 录入分组级 TopN：正整数才写覆盖（钳到 [1,100] 与后端同口径），留空/非正/非法则删除该键、回落全局默认。
-function setElectionGroupTopN(groupID: number, text: string) {
-  const next: Record<string, number> = { ...groupElectionTopNByGroupMap.value }
-  const topN = Math.floor(Number(String(text ?? '').trim()))
-  if (Number.isFinite(topN) && topN > 0) next[String(groupID)] = Math.min(topN, 100)
-  else delete next[String(groupID)]
-  editForm.config.group_scheduling_election_top_n_by_group = next as unknown as Record<number, number>
-}
-
-function enableAllElectionGroups() {
-  const current = groupElectionDisabledGroupIDs.value
-  if (current.length > 1) {
-    const confirmed = window.confirm(`将 ${current.length} 个分组全部恢复为参与择优？此操作在保存任务后生效。`)
-    if (!confirmed) {
-      return
-    }
-  }
-  editForm.config.group_scheduling_election_disabled_group_ids = []
-  if (current.length > 0) {
-    appStore.showSuccess(`已将 ${current.length} 个分组恢复为参与择优，保存任务后生效`)
-  }
-}
-
-/* ---- 勾选与批量操作：勾选框只负责多选，不再兼任「是否参与择优」 ---- */
-
-function electionGroupIsChecked(groupID: number): boolean {
-  return electionGroupCheckedIDs.value.includes(groupID)
-}
-
-function toggleElectionGroupCheck(groupID: number) {
-  electionGroupCheckedIDs.value = electionGroupIsChecked(groupID)
-    ? electionGroupCheckedIDs.value.filter(id => id !== groupID)
-    : [...electionGroupCheckedIDs.value, groupID]
-}
-
-// 全选/取消全选都只动「当前筛选」的 id；已勾选但被筛掉的行保持原样 ——
-// 用户切换筛选正是为了分批处理，切一次筛选就把前面的勾选清掉等于白干一遍。
-function toggleElectionGroupCheckAll() {
-  const ids = electionFilteredGroups.value.map(group => group.id)
-  if (ids.length === 0) return
-  if (ids.every(id => electionGroupCheckedIDs.value.includes(id))) {
-    electionGroupCheckedIDs.value = electionGroupCheckedIDs.value.filter(id => !ids.includes(id))
-    return
-  }
-  electionGroupCheckedIDs.value = [...new Set([...electionGroupCheckedIDs.value, ...ids])]
-}
-
-function clearElectionGroupChecks() {
-  electionGroupCheckedIDs.value = []
-}
-
-// 批量操作的公共骨架：只对「当前值与目标值不一致」的分组调一次单行开关函数，
-// 复用同一套落库逻辑（该写哪个名单、该连带清哪些名单），不另写一份改配置的代码。
-// requireParticipating：不参与择优的行上根本没有「健康锁定 / 演练 / 计优先级」开关，
-// 批量时同样跳过 —— 否则会给一个不参与择优的分组写下一堆不生效的配置，摘要里还会多算一笔。
-function applyElectionGroupBatch(
-  label: string,
-  desired: boolean,
-  readCurrent: (groupID: number) => boolean,
-  apply: (groupID: number) => void,
-  requireParticipating = true
-) {
-  const targets = [...electionGroupCheckedIDs.value]
-  let changed = 0
-  let skipped = 0
-  for (const groupID of targets) {
-    if (requireParticipating && !electionGroupParticipates(groupID)) {
-      skipped += 1
-      continue
-    }
-    if (readCurrent(groupID) === desired) continue
-    apply(groupID)
-    changed += 1
-  }
-  const skipNote = skipped > 0 ? `，跳过 ${skipped} 个未参与择优的分组` : ''
-  if (changed > 0) {
-    appStore.showSuccess(
-      `已将 ${changed} 个分组的「${label}」设为${desired ? '开启' : '关闭'}${skipNote}，保存任务后生效`
-    )
-    return
-  }
-  if (skipped > 0) {
-    appStore.showError(`所选分组都不参与择优，无法设置「${label}」`)
-    return
-  }
-  appStore.showSuccess(`所选分组的「${label}」已是${desired ? '开启' : '关闭'}，无需修改`)
-}
-
-function batchElectionGroupsSelect(participates: boolean) {
-  applyElectionGroupBatch(
-    '参与择优',
-    participates,
-    groupID => electionGroupParticipates(groupID),
-    groupID => toggleElectionGroup(groupID),
-    false
-  )
-}
-
-function batchElectionGroupsKeepHealthy(enabled: boolean) {
-  applyElectionGroupBatch(
-    '健康锁定',
-    enabled,
-    groupID => electionGroupKeepHealthy(groupID),
-    groupID => toggleElectionKeepHealthyGroup(groupID)
-  )
-}
-
-function batchElectionGroupsDryRun(enabled: boolean) {
-  // 读「名单里的原始状态」而不是行上显示的生效值：总开关打开时全部分组都显示成演练中，
-  // 用生效值判断会让「批量关闭」对一个不在名单里的分组调 toggle，反倒把它加进名单。
-  applyElectionGroupBatch(
-    '演练',
-    enabled,
-    groupID => groupElectionDryRunGroupIDs.value.includes(groupID),
-    groupID => toggleElectionGroupDryRun(groupID)
-  )
-}
-
-function batchElectionGroupsPriority(enabled: boolean) {
-  applyElectionGroupBatch(
-    '计优先级',
-    enabled,
-    groupID => electionGroupPriority(groupID),
-    groupID => toggleElectionGroupPriority(groupID)
-  )
-}
-
 async function openHealthGuardAccounts() {
-  healthGuardAccountsVisible.value = true
-  healthGuardAccountPlatformFilter.value = []
-  healthGuardAccountProviderFilter.value = ''
-  healthGuardAccountSearch.value = ''
-  healthGuardSelectedOnly.value = false
-  healthGuardUnselectedOnly.value = false
-  healthGuardProviderClosedOnly.value = false
-  healthGuardProviderEnabledOnly.value = false
-  healthGuardBatchIntervalInput.value = ''
-  // 勾选是「本次批量操作的选择」，每次打开都清空：否则上一次的勾选会静默参与下一次批量设置。
-  healthGuardCheckedAccountIDs.value = []
   try {
     await ensureHealthGuardAccountCandidatesLoaded()
-    await loadHealthGuardModels()
   } catch (err) {
     appStore.showError(extractApiErrorMessage(err, '加载健康守护账号失败'))
+    return
   }
+  healthGuardAccountsVisible.value = true
 }
 
 function closeHealthGuardAccounts() {
   healthGuardAccountsVisible.value = false
 }
 
-function addHealthGuardAccount(id: number) {
-  editForm.config.account_health_guard_account_ids = normalizePositiveAccountIDs([
-    ...healthGuardAccountIDs.value,
-    id,
-  ])
-}
-function toggleHealthGuardAccount(id: number) {
-  if (healthGuardAccountIDs.value.includes(id)) {
-    removeHealthGuardAccount(id)
-    return
-  }
-  addHealthGuardAccount(id)
-}
 
-function removeHealthGuardAccount(id: number) {
-  editForm.config.account_health_guard_account_ids = healthGuardAccountIDs.value.filter(item => item !== id)
-  const accountModels = { ...editForm.config.account_health_guard_account_models }
-  delete accountModels[String(id)]
-  editForm.config.account_health_guard_account_models = accountModels
-  const accountIntervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
-  delete accountIntervals[String(id)]
-  editForm.config.account_health_guard_account_intervals = accountIntervals
-  const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
-  delete schedulingChange[String(id)]
-  editForm.config.account_health_guard_account_scheduling_change = schedulingChange
-  // 阈值覆盖与账号选择强绑定，取消选择后必须一并清掉，否则重新选中会带着旧覆盖值回来。
-  editForm.config.account_health_guard_account_failure_thresholds = deleteHealthGuardAccountThreshold(
-    editForm.config.account_health_guard_account_failure_thresholds, id)
-  editForm.config.account_health_guard_account_slow_thresholds = deleteHealthGuardAccountThreshold(
-    editForm.config.account_health_guard_account_slow_thresholds, id)
-  editForm.config.account_health_guard_account_recovery_thresholds = deleteHealthGuardAccountThreshold(
-    editForm.config.account_health_guard_account_recovery_thresholds, id)
-}
 
-function deleteHealthGuardAccountThreshold(value: unknown, accountID: number): Record<string, number> {
-  const thresholds = { ...normalizeAccountHealthGuardAccountThresholds(value) }
-  delete thresholds[String(accountID)]
-  return thresholds
-}
 
-function healthGuardAccountThresholdValue(
-  field: 'account_health_guard_account_failure_thresholds'
-    | 'account_health_guard_account_slow_thresholds'
-    | 'account_health_guard_account_recovery_thresholds',
-  accountID: number
-): number | undefined {
-  const threshold = Number(editForm.config[field]?.[String(accountID)])
-  return Number.isSafeInteger(threshold) && threshold > 0 ? threshold : undefined
-}
 
-function setHealthGuardAccountThreshold(
-  field: 'account_health_guard_account_failure_thresholds'
-    | 'account_health_guard_account_slow_thresholds'
-    | 'account_health_guard_account_recovery_thresholds',
-  accountID: number,
-  value: string | number
-) {
-  const thresholds = { ...normalizeAccountHealthGuardAccountThresholds(editForm.config[field]) }
-  const parsed = Math.floor(Number(value))
-  // 留空或非法输入一律回落到全局阈值，与「检查间隔」字段的留空语义保持一致。
-  if (Number.isSafeInteger(parsed) && parsed > 0) {
-    thresholds[String(accountID)] = parsed
-  } else {
-    delete thresholds[String(accountID)]
-  }
-  editForm.config[field] = thresholds
-}
-function normalizePositiveAccountIDs(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  return Array.from(new Set(
-    value
-      .map(item => Number(item))
-      .filter(item => Number.isSafeInteger(item) && item > 0)
-  )).sort((a, b) => a - b)
-}
 
-function normalizeStringMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => [key.trim(), String(item || '').trim()])
-      .filter(([key, item]) => key && item)
-  )
-}
 
-function healthGuardAccountIntervalValue(accountID: number): number | undefined {
-  const interval = Number(editForm.config.account_health_guard_account_intervals?.[String(accountID)])
-  return Number.isSafeInteger(interval) && interval >= 60 ? interval : undefined
-}
 
-function setHealthGuardAccountInterval(accountID: number, value: string | number) {
-  const intervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
-  const parsed = Math.floor(Number(value))
-  if (Number.isSafeInteger(parsed) && parsed >= 60) {
-    intervals[String(accountID)] = parsed
-  } else {
-    delete intervals[String(accountID)]
-  }
-  editForm.config.account_health_guard_account_intervals = intervals
-}
 
 // 批量间隔：解析当前输入框的秒数，非法（空/非整数/小于 60）时返回 null，供按钮禁用与函数守卫共用同一判据。
-const healthGuardBatchIntervalSeconds = computed<number | null>(() => {
-  const parsed = Math.floor(Number(healthGuardBatchIntervalInput.value))
-  return Number.isSafeInteger(parsed) && parsed >= 60 ? parsed : null
-})
-const healthGuardBatchIntervalValid = computed(() => healthGuardBatchIntervalSeconds.value !== null)
 // 批量操作只作用于「当前筛选结果里已勾选（行首勾选框）且可用」的账号：把筛选当子集选择器，
 // 就能筛选 A 组→设 300→应用、筛选 B 组→设 600→应用，两批互不覆盖。
 // 不可用账号运行时直接记为不可用、不参与检查，故排除在批量作用范围外。
-const healthGuardBatchTargetRows = computed(() =>
-  healthGuardWorkspaceAccounts.value.filter(
-    mapping => mapping.available && healthGuardCheckedAccountIDs.value.includes(mapping.localAccountID)
-  )
-)
-const healthGuardBatchTargetCount = computed(() => healthGuardBatchTargetRows.value.length)
 
 // 全选 / 取消全选只切换「当前筛选结果」里可用账号的**勾选状态**（多选），不动「参与守护」：
 // 否则点一下「全选」就会把几十个账号默默纳入守护，而纳入守护是有副作用的业务配置。
 // 批量纳入/移出守护改由「批量设置」弹窗的「参与守护」项完成，用户需要显式选一次。
-function selectAllFilteredHealthGuardAccounts() {
-  const ids = healthGuardWorkspaceAccounts.value
-    .filter(mapping => mapping.available)
-    .map(mapping => mapping.localAccountID)
-  healthGuardCheckedAccountIDs.value = normalizePositiveAccountIDs([
-    ...healthGuardCheckedAccountIDs.value,
-    ...ids,
-  ])
-}
 
 // 取消勾选「当前筛选结果」中的账号：只清勾选，保留账号已有的守护配置
 // （要连配置一起清掉请用「批量设置 → 移出守护」）。
-function deselectFilteredHealthGuardAccounts() {
-  const filtered = new Set(healthGuardWorkspaceAccounts.value.map(mapping => mapping.localAccountID))
-  healthGuardCheckedAccountIDs.value = healthGuardCheckedAccountIDs.value.filter(id => !filtered.has(id))
-}
 
 // 把批量间隔应用到「当前筛选结果里已勾选且可用」的账号，保存任务后生效。
-function applyHealthGuardBatchInterval() {
-  const seconds = healthGuardBatchIntervalSeconds.value
-  if (seconds === null) {
-    appStore.showError('检查间隔必须是不小于 60 秒的整数')
-    return
-  }
-  const intervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
-  let count = 0
-  for (const mapping of healthGuardBatchTargetRows.value) {
-    intervals[String(mapping.localAccountID)] = seconds
-    count += 1
-  }
-  editForm.config.account_health_guard_account_intervals = intervals
-  appStore.showSuccess(`已为 ${count} 个账号设置检查间隔 ${seconds} 秒，保存任务后生效`)
-}
 
 // 清除「当前筛选结果里已勾选」账号的间隔覆盖，回落到「按倍率区间 / 每轮都测」的默认行为。
-function clearHealthGuardSelectedIntervals() {
-  const intervals = { ...(editForm.config.account_health_guard_account_intervals || {}) }
-  let count = 0
-  for (const mapping of healthGuardBatchTargetRows.value) {
-    if (intervals[String(mapping.localAccountID)] !== undefined) {
-      delete intervals[String(mapping.localAccountID)]
-      count += 1
-    }
-  }
-  editForm.config.account_health_guard_account_intervals = intervals
-  appStore.showSuccess(`已清除 ${count} 个账号的检查间隔`)
-}
 
 // 全局「修改调度」开关：只有显式 false 才算关闭（旧配置里没有这个键），与后端归一化口径一致。
-const healthGuardGlobalSchedulingChange = computed(
-  () => editForm.config.account_health_guard_scheduling_change_enabled !== false
-)
 
 // 账号级开关显示的是「最终生效值」：有显式覆盖就用覆盖值，否则跟随全局默认。
-function healthGuardAccountSchedulingChangeValue(accountID: number): boolean {
-  const override = editForm.config.account_health_guard_account_scheduling_change?.[String(accountID)]
-  return typeof override === 'boolean' ? override : healthGuardGlobalSchedulingChange.value
-}
 
 // 与全局默认一致时不写覆盖值（等于「跟随全局」）；只有不一致才落库成显式覆盖。
 // 不写 false 占位：留着占位会让这个账号永远跟不上全局开关的后续变更。
-function setHealthGuardAccountSchedulingChange(accountID: number, value: boolean) {
-  const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
-  if (value === healthGuardGlobalSchedulingChange.value) {
-    delete schedulingChange[String(accountID)]
-  } else {
-    schedulingChange[String(accountID)] = value
-  }
-  editForm.config.account_health_guard_account_scheduling_change = schedulingChange
-}
 
 // 悬浮提示要能说清「这一行是覆盖还是跟随全局」，否则两个开关状态一样时分不清。
-function healthGuardAccountSchedulingChangeTitle(accountID: number): string {
-  const override = editForm.config.account_health_guard_account_scheduling_change?.[String(accountID)]
-  const globalHint = healthGuardGlobalSchedulingChange.value ? '全局默认开启' : '全局默认关闭'
-  const base = '关闭后仅检测账号健康，不会自动暂停或恢复调度'
-  return typeof override === 'boolean'
-    ? `${base}（账号级覆盖，${globalHint}）`
-    : `${base}（跟随全局：${globalHint}）`
-}
 
 // ── 批量设置（参与守护 / 修改调度 / 账号级测试模型 / 三项阈值）──
 //
 // 作用范围与批量间隔共用同一个 healthGuardBatchTargetRows：
 // 「多选」就是「当前筛选结果里已勾选（行首勾选框）的可用账号」，两处若各算一套口径，
 // 会出现「按钮说 12 个、实际只改了 8 个」这类对不上的情况。
-const healthGuardBatchSettingsVisible = ref(false)
 
 // 参与守护：不修改 / 纳入 / 移出。
 // 原先工具栏的「全选筛选结果 / 取消全选」顺带承担了批量纳入/移出守护；那两个按钮改成只管勾选后，
 // 这条能力平移到这里 —— 用户必须显式选一次，不会因为点「全选」就把几十个账号默默纳入守护。
 // 「移出」复用 removeHealthGuardAccount：与单行关掉开关一致，会一并清空该账号的模型/间隔/阈值/调度覆盖。
-const HEALTH_GUARD_BATCH_GUARD_KEEP = 'keep'
-const healthGuardBatchGuardInput = ref(HEALTH_GUARD_BATCH_GUARD_KEEP)
-const healthGuardBatchGuardOptions: SelectOption[] = [
-  { value: HEALTH_GUARD_BATCH_GUARD_KEEP, label: '不修改' },
-  { value: 'on', label: '纳入守护' },
-  { value: 'off', label: '移出守护（清空账号级配置）' },
-]
 
 // 修改调度：不修改 / 跟随全局（清掉账号级覆盖）/ 强制开启 / 强制关闭。
 // 「跟随全局」必须单独留一项 —— 全局开关改过之后，被批量写死 true/false 的账号否则再也回不到跟随状态。
-const HEALTH_GUARD_BATCH_SCHEDULING_KEEP = 'keep'
-const healthGuardBatchSchedulingChangeInput = ref(HEALTH_GUARD_BATCH_SCHEDULING_KEEP)
-const healthGuardBatchSchedulingChangeOptions: SelectOption[] = [
-  { value: HEALTH_GUARD_BATCH_SCHEDULING_KEEP, label: '不修改' },
-  { value: 'global', label: '跟随全局（清除账号级覆盖）' },
-  { value: 'on', label: '开启' },
-  { value: 'off', label: '关闭' },
-]
 
 // 账号级测试模型：不修改 / 清除覆盖 / 批量目标涉及平台的模型并集。
 // 账号级覆盖只能是一个模型值，跨平台批量设置本身就需要人工确认模型可用，
 // 因此这里给并集而不是按平台分组（按平台分组等于把「批量」拆成若干次单平台设置）。
-const HEALTH_GUARD_BATCH_MODEL_KEEP = 'keep'
-const HEALTH_GUARD_BATCH_MODEL_CLEAR = 'clear'
-const healthGuardBatchModelInput = ref(HEALTH_GUARD_BATCH_MODEL_KEEP)
-const healthGuardBatchModelOptions = computed<SelectOption[]>(() => {
-  const platforms = new Set(healthGuardBatchTargetRows.value.map(mapping => mapping.platform))
-  const models = new Map<string, string>()
-  for (const platform of platforms) {
-    for (const model of healthGuardModelOptionsByPlatform.value[platform] || []) {
-      if (!models.has(model.id)) models.set(model.id, model.display_name || model.id)
-    }
-  }
-  return [
-    { value: HEALTH_GUARD_BATCH_MODEL_KEEP, label: '不修改' },
-    { value: HEALTH_GUARD_BATCH_MODEL_CLEAR, label: '清除账号级覆盖（回落平台默认）' },
-    ...Array.from(models, ([value, label]) => ({ value, label })),
-  ]
-})
 
-const healthGuardBatchFailureThresholdInput = ref('')
-const healthGuardBatchSlowThresholdInput = ref('')
-const healthGuardBatchRecoveryThresholdInput = ref('')
 
-function openHealthGuardBatchSettings() {
-  // 每次打开都回到「全部不修改」：上一次的输入不该在下一次静默生效。
-  healthGuardBatchGuardInput.value = HEALTH_GUARD_BATCH_GUARD_KEEP
-  healthGuardBatchSchedulingChangeInput.value = HEALTH_GUARD_BATCH_SCHEDULING_KEEP
-  healthGuardBatchModelInput.value = HEALTH_GUARD_BATCH_MODEL_KEEP
-  healthGuardBatchFailureThresholdInput.value = ''
-  healthGuardBatchSlowThresholdInput.value = ''
-  healthGuardBatchRecoveryThresholdInput.value = ''
-  healthGuardBatchSettingsVisible.value = true
-}
 
-function closeHealthGuardBatchSettings() {
-  healthGuardBatchSettingsVisible.value = false
-}
 
 // 阈值输入解析：空或非法一律返回 null（= 该项不修改），合法则返回正整数。
-function healthGuardBatchThresholdValue(value: string): number | null {
-  const parsed = Math.floor(Number(value))
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
-}
 
-type HealthGuardAccountThresholdField =
-  | 'account_health_guard_account_failure_thresholds'
-  | 'account_health_guard_account_slow_thresholds'
-  | 'account_health_guard_account_recovery_thresholds'
-
-// 批量写入：只落「填过的项」，留空一律不动 —— 避免一次「应用」把没打算改的配置一起清掉。
-function applyHealthGuardBatchSettings() {
-  const targets = healthGuardBatchTargetRows.value
-  if (!targets.length) {
-    appStore.showError('当前筛选结果里没有已勾选的可用账号')
-    return
-  }
-
-  const thresholdFields: Array<{ input: string; label: string; field: HealthGuardAccountThresholdField }> = [
-    { input: healthGuardBatchFailureThresholdInput.value, label: '连续失败暂停阈值', field: 'account_health_guard_account_failure_thresholds' },
-    { input: healthGuardBatchSlowThresholdInput.value, label: '连续慢响应暂停阈值', field: 'account_health_guard_account_slow_thresholds' },
-    { input: healthGuardBatchRecoveryThresholdInput.value, label: '连续健康恢复阈值', field: 'account_health_guard_account_recovery_thresholds' },
-  ]
-  // 先整体校验再落库：任何一项非法就整批不动，不留「改了一半」的中间状态。
-  for (const item of thresholdFields) {
-    if (item.input.trim() && healthGuardBatchThresholdValue(item.input) === null) {
-      appStore.showError(`${item.label}必须是正整数`)
-      return
-    }
-  }
-
-  const changed: string[] = []
-
-  // 「参与守护」先处理，并据此收敛本次作用对象：「移出守护」会清空该账号的账号级配置，
-  // 若之后再把阈值/模型写进去就会被反手清掉，出现「提示说设了、实际没设」。
-  // 所以移出后不再处理其余项 —— 弹窗里已写明这一点，不是静默忽略。
-  const guardChoice = healthGuardBatchGuardInput.value
-  let effectiveTargets = targets
-  if (guardChoice === 'off') {
-    for (const mapping of targets) removeHealthGuardAccount(mapping.localAccountID)
-    effectiveTargets = []
-    changed.push('移出守护')
-  } else if (guardChoice === 'on') {
-    editForm.config.account_health_guard_account_ids = normalizePositiveAccountIDs([
-      ...healthGuardAccountIDs.value,
-      ...targets.map(mapping => mapping.localAccountID),
-    ])
-    changed.push('纳入守护')
-  }
-
-  if (effectiveTargets.length) {
-    const schedulingChoice = healthGuardBatchSchedulingChangeInput.value
-    if (schedulingChoice !== HEALTH_GUARD_BATCH_SCHEDULING_KEEP) {
-      const schedulingChange = { ...(editForm.config.account_health_guard_account_scheduling_change || {}) }
-      for (const mapping of effectiveTargets) {
-        const accountID = String(mapping.localAccountID)
-        if (schedulingChoice === 'global') {
-          delete schedulingChange[accountID]
-        } else {
-          schedulingChange[accountID] = schedulingChoice === 'on'
-        }
-      }
-      editForm.config.account_health_guard_account_scheduling_change = schedulingChange
-      changed.push('修改调度')
-    }
-
-    const modelChoice = healthGuardBatchModelInput.value
-    if (modelChoice !== HEALTH_GUARD_BATCH_MODEL_KEEP) {
-      const accountModels = { ...(editForm.config.account_health_guard_account_models || {}) }
-      for (const mapping of effectiveTargets) {
-        const accountID = String(mapping.localAccountID)
-        if (modelChoice === HEALTH_GUARD_BATCH_MODEL_CLEAR) {
-          delete accountModels[accountID]
-        } else {
-          accountModels[accountID] = modelChoice
-        }
-      }
-      editForm.config.account_health_guard_account_models = accountModels
-      changed.push('测试模型')
-    }
-
-    for (const item of thresholdFields) {
-      const threshold = healthGuardBatchThresholdValue(item.input)
-      if (threshold === null) continue
-      const thresholds = { ...normalizeAccountHealthGuardAccountThresholds(editForm.config[item.field]) }
-      for (const mapping of effectiveTargets) thresholds[String(mapping.localAccountID)] = threshold
-      editForm.config[item.field] = thresholds
-      changed.push(item.label)
-    }
-  }
-
-  if (!changed.length) {
-    appStore.showError('请先填写至少一项要批量设置的内容')
-    return
-  }
-  appStore.showSuccess(`已为 ${targets.length} 个账号设置${changed.join('、')}，保存任务后生效`)
-  closeHealthGuardBatchSettings()
-}
 
 // 返回某平台的倍率区间规则数组（不存在则就地建空数组），供模板 v-model 直接编辑。
-function healthGuardMultiplierRules(platform: string): SupplierAccountHealthGuardMultiplierInterval[] {
-  let map = editForm.config.account_health_guard_platform_multiplier_intervals
-  if (!map || typeof map !== 'object' || Array.isArray(map)) {
-    map = {}
-    editForm.config.account_health_guard_platform_multiplier_intervals = map
-  }
-  if (!Array.isArray(map[platform])) {
-    map[platform] = []
-  }
-  return map[platform]
-}
 
-function addHealthGuardMultiplierRule(platform: string) {
-  healthGuardMultiplierRules(platform).push({ min_multiplier: 0, max_multiplier: 0, interval_seconds: 3600 })
-}
 
-function removeHealthGuardMultiplierRule(platform: string, index: number) {
-  healthGuardMultiplierRules(platform).splice(index, 1)
-}
 
-function normalizeAccountHealthGuardSchedulingChange(value: unknown): Record<string, boolean> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([key, item]) => Boolean(key) && item === false)
-  ) as Record<string, boolean>
-}
 
-function normalizeAccountHealthGuardAccountIntervals(value: unknown): Record<string, number> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
-      .filter(([key, item]) => Boolean(key) && Number.isFinite(item) && Number(item) >= 60)
-  ) as Record<string, number>
-}
 
 // 清洗每个平台的倍率区间规则：平台 key 转小写、丢弃间隔<60 或非法区间（min<0、max>0 且 min>=max）的规则，
 // 并按下界升序排；某平台没有合法规则则整体丢弃。与后端归一化保持一致。
-function normalizeHealthGuardPlatformMultiplierIntervals(
-  value: unknown
-): Record<string, SupplierAccountHealthGuardMultiplierInterval[]> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const out: Record<string, SupplierAccountHealthGuardMultiplierInterval[]> = {}
-  for (const [rawPlatform, rawRules] of Object.entries(value as Record<string, unknown>)) {
-    const platform = rawPlatform.trim().toLowerCase()
-    if (!platform || !Array.isArray(rawRules)) continue
-    const cleaned: SupplierAccountHealthGuardMultiplierInterval[] = []
-    for (const rawRule of rawRules) {
-      if (!rawRule || typeof rawRule !== 'object') continue
-      const rule = rawRule as Record<string, unknown>
-      const min = Number(rule.min_multiplier)
-      const max = Number(rule.max_multiplier)
-      const interval = Math.floor(Number(rule.interval_seconds))
-      if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(interval)) continue
-      if (interval < 60 || min < 0) continue
-      if (max > 0 && min >= max) continue
-      cleaned.push({ min_multiplier: min, max_multiplier: max > 0 ? max : 0, interval_seconds: interval })
-    }
-    if (cleaned.length === 0) continue
-    cleaned.sort((a, b) => a.min_multiplier - b.min_multiplier)
-    out[platform] = cleaned
-  }
-  return out
-}
 
 // 账号级阈值只保留正整数；留空或非法值等于不覆盖，交由全局阈值生效。
-function normalizeAccountHealthGuardAccountThresholds(value: unknown): Record<string, number> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
-      .filter(([key, item]) => Boolean(key) && Number.isSafeInteger(item) && Number(item) > 0)
-  ) as Record<string, number>
-}
 
-function normalizePositiveNumberMap(value: unknown): Record<string, number> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => [key.trim(), Math.floor(Number(item))])
-      .filter(([key, item]) => Boolean(key) && Number.isFinite(item) && Number(item) > 0)
-  ) as Record<string, number>
-}
 
-function positiveIntegerOr(value: unknown, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
-}
 
-function toNumber(value: string | number, fallback: number): number {
-  const next = Number(value)
-  return Number.isFinite(next) ? next : fallback
-}
 
 function supplierMonitorCheckedAt(item: SupplierProviderMonitorSyncItem): number {
   const timestamp = Date.parse(item.checked_at)
@@ -5603,11 +3393,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: var(--sp-panel);
 }
 
-/* 倍率区间弹窗是内容型的，不需要「近全屏」那套 height: calc(100dvh - …)，
-   给一个上限让它在内容少时矮、内容多时顶到 70vh 由容器内部滚动。 */
-:global(.modal-content:has(.sp-multiplier-interval-dialog)) {
-  max-height: 70vh;
-}
+
 
 /* Input 组件的说明文字是全站通用样式（style.css 的 .input-hint = 12px 固定灰字），
    对本弹窗里动辄两三百字的策略说明太挤：12px 中文行距只有 1.33，读起来很累。
@@ -5741,63 +3527,17 @@ function intervalSecondsToCron(seconds: number): string | null {
   background: var(--sp-panel);
 }
 
-/* 批量设置弹窗是又一个独立 Teleport 出来的 modal-content（与「配置健康守护账号」是兄弟节点），
-   同样够不到页面根节点上的 --sp-* 变量，所以单独给它一份变量与布局。
-   选择器独立成组：上面那几组已被源码断言逐字钉住，往里面加选择器会直接打爆相邻用例。 */
-:global(.modal-content:has(.sp-health-guard-batch-dialog)) {
-  --sp-panel: #ffffff;
-  --sp-panel-2: #f8fafc;
-  --sp-panel-3: #eef2f7;
-  --sp-line: #d7e0ea;
-  --sp-soft: #e8eef5;
-  --sp-text: #172033;
-  --sp-muted: #607089;
-  --sp-cyan: #0284c7;
-  --sp-green: #16835d;
-  --sp-amber: #c56a0a;
-  --sp-orange: #dd5f16;
-  --sp-red: #d14343;
-  --sp-blue: #2563eb;
-  --sp-violet: #6d5bd0;
-  overflow: hidden;
-  border-color: #cbd7e5;
-  background: var(--sp-panel);
-  color: var(--sp-text);
-}
 
-:global(.dark .modal-content:has(.sp-health-guard-batch-dialog)) {
-  --sp-panel: #172033;
-  --sp-panel-2: #1d293d;
-  --sp-panel-3: #243249;
-  --sp-line: #35445c;
-  --sp-soft: #2c3a51;
-  --sp-text: #edf3fb;
-  --sp-muted: #a8b6ca;
-  border-color: #3b4b64;
-}
 
-:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-header) {
-  border-bottom-color: var(--sp-line);
-  background: var(--sp-panel);
-}
 
-:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-title) {
-  color: var(--sp-text);
-}
 
-:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-body) {
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--sp-panel);
-}
 
-:global(.modal-content:has(.sp-health-guard-batch-dialog) .modal-footer) {
-  border-top-color: var(--sp-line);
-  background: var(--sp-panel);
-}
+
+
+
+
+
+
 
 /* 宽度按 90% 视口给：用户要求把「配置分组」弹窗放宽到 90%。
    这个弹窗里是"摘要三块 + 搜索 + 每组多列开关"，列宽越大越好排。
@@ -7105,132 +4845,39 @@ function intervalSecondsToCron(seconds: number): string | null {
   font-size: 12px;
 }
 
-.sp-health-guard-account-dialog {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  height: 100%;
-  max-height: none;
-  overflow: hidden;
-}
 
-.sp-health-guard-platform-models,
-.sp-health-guard-account-workspace {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--sp-line);
-  border-radius: 12px;
-  background: var(--sp-panel);
-}
 
-.sp-health-guard-platform-models {
-  flex: 0 0 auto;
-  padding: 10px 14px 12px;
-  background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
-}
 
-/* 倍率区间原先按平台铺在主弹窗里，7 个平台会把账号工作区挤没（弹窗高度受 100dvh 约束）。
-   现在主弹窗只留「摘要 + 入口」一行，区间配置搬进 .sp-multiplier-interval-dialog 二级弹窗，
-   这里因此不再需要可收缩/内部滚动那套（它们正是「grid 被压成 0 高度」的根因）。 */
-.sp-health-guard-multiplier-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  padding-top: 10px;
-}
 
-.sp-health-guard-multiplier-entry > span {
-  color: var(--sp-muted);
-  font-size: 12px;
-}
 
-.sp-health-guard-multiplier-entry-button {
-  flex: 0 0 auto;
-}
 
-.sp-health-guard-account-workspace {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  min-height: 0;
-}
 
-.sp-health-guard-dialog-section-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 4px 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--sp-line);
-}
 
-.sp-health-guard-dialog-section-head strong {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: color-mix(in srgb, var(--sp-blue) 78%, var(--sp-text));
-}
 
-.sp-health-guard-dialog-section-head strong::before {
-  content: '';
-  width: 4px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--sp-blue);
-}
 
-.sp-health-guard-dialog-section-head > span {
-  color: color-mix(in srgb, var(--sp-blue) 52%, var(--sp-muted));
-}
 
-.sp-health-guard-platform-model-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-  align-content: start;
-  gap: 8px 12px;
-  margin-top: 10px;
-}
 
-.sp-health-guard-platform-model-grid article {
-  display: grid;
-  grid-template-columns: minmax(88px, 0.55fr) minmax(150px, 1.45fr);
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: var(--sp-panel);
-  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
-}
 
-.sp-health-guard-platform-model-grid article:hover {
-  border-color: color-mix(in srgb, var(--sp-blue) 30%, var(--sp-line));
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--sp-blue) 9%, transparent);
-}
 
-.sp-health-guard-platform-model-grid article > div {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
 
-.sp-health-guard-platform-model-grid article > div strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: inherit;
-}
 
-.sp-health-guard-platform-model-grid article > div span {
-  color: color-mix(in srgb, currentColor 58%, var(--sp-muted));
-  font-variant-numeric: tabular-nums;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 .sp-health-guard-multiplier-switch {
   display: flex;
@@ -7254,566 +4901,153 @@ function intervalSecondsToCron(seconds: number): string | null {
   color: var(--sp-muted);
 }
 
-/* 倍率区间弹窗容器：自己滚，不靠 modal-body（body 是 overflow: hidden，
-   内部不滚就会被 overflow 吞掉，正是之前主弹窗里 grid 消失的同一个坑）。 */
-.sp-multiplier-interval-dialog {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px 14px;
-}
-
-/* 列宽必须保持 460px：卡片内是「下限 / 上限 / 间隔 / 删除」四列 grid，
-   列宽一收窄，表头「倍率上限（不含，留空=无上界）」就会折成两行、「新增区间」按钮被压扁。
-   弹窗本身用 extra-wide 而不是 wide，就是为了在 460px 列宽下仍能排两列。 */
-.sp-multiplier-interval-dialog .sp-health-guard-multiplier-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
-  margin-top: 0;
-}
-
-.sp-multiplier-interval-hint {
-  color: var(--sp-muted);
-  font-size: 12px;
-}
-
-/* 批量设置弹窗：逐项一行「左侧说明 + 右侧控件」。
-   容器自己滚，不靠 modal-body（body 是 overflow: hidden，内部不滚会被吞掉）。 */
-.sp-health-guard-batch-dialog {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px 14px;
-}
-
-.sp-health-guard-batch-rows {
-  display: grid;
-  gap: 10px;
-}
-
-.sp-health-guard-batch-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.8fr);
-  align-items: center;
-  gap: 8px 16px;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: color-mix(in srgb, var(--sp-soft) 20%, transparent);
-}
-
-.sp-health-guard-batch-row > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.sp-health-guard-batch-row > div span {
-  color: var(--sp-muted);
-  font-size: 12px;
-}
-
-.sp-health-guard-batch-hint {
-  color: var(--sp-muted);
-  font-size: 12px;
-}
-
-.sp-health-guard-multiplier-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
-  align-content: start;
-  gap: 10px 14px;
-  margin-top: 12px;
-}
-
-.sp-health-guard-multiplier-grid article {
-  align-self: start;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 12%, var(--sp-line));
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--sp-panel);
-}
-
-.sp-health-guard-multiplier-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.sp-health-guard-multiplier-rows {
-  display: grid;
-  gap: 6px;
-}
-
-.sp-health-guard-multiplier-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) 40px;
-  align-items: center;
-  gap: 8px;
-}
-
-.sp-health-guard-multiplier-row-head span {
-  color: var(--sp-muted);
-  font-size: 12px;
-}
-
-.sp-health-guard-selection-summary {
-  display: grid;
-  flex: 0 0 auto;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  border-bottom: 1px solid var(--sp-line);
-  background: color-mix(in srgb, var(--sp-soft) 22%, transparent);
-}
-
-.sp-health-guard-selection-summary article {
-  --sp-summary-accent: var(--sp-muted);
-
-  position: relative;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  min-width: 0;
-  gap: 10px;
-  border-left: 1px solid var(--sp-line);
-  padding: 12px 14px 11px;
-}
-
-.sp-health-guard-selection-summary article:first-child {
-  border-left: 0;
-}
-
-.sp-health-guard-selection-summary article:nth-child(1) {
-  --sp-summary-accent: var(--sp-blue);
-}
-
-.sp-health-guard-selection-summary article:nth-child(2) {
-  --sp-summary-accent: var(--sp-violet);
-}
-
-.sp-health-guard-selection-summary article:nth-child(3) {
-  --sp-summary-accent: var(--sp-green);
-}
-
-.sp-health-guard-selection-summary article:nth-child(4) {
-  --sp-summary-accent: var(--sp-cyan);
-}
-
-.sp-health-guard-selection-summary article:nth-child(5) {
-  --sp-summary-accent: var(--sp-amber);
-}
-
-.sp-health-guard-selection-summary article::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 3px;
-  background: var(--sp-summary-accent);
-  opacity: 0.85;
-}
-
-.sp-health-guard-selection-summary article span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: color-mix(in srgb, var(--sp-summary-accent) 64%, var(--sp-muted));
-  font-size: 12px;
-}
-
-.sp-health-guard-selection-summary article span::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--sp-summary-accent);
-  opacity: 0.9;
-}
-
-.sp-health-guard-selection-summary article strong {
-  color: var(--sp-summary-accent);
-  font-size: 18px;
-  font-weight: 750;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.sp-health-guard-selection-summary article.warning {
-  background: color-mix(in srgb, var(--sp-amber) 10%, transparent);
-}
-
-.sp-health-guard-account-toolbar {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 10px 14px;
-}
-
-/* 三列：供应商下拉 / 搜索框 / 快捷过滤（仅看已选 + 仅看未开启）。平台筛选已改成独占一行的标签组、
-   移出这个 grid（flex-basis 在 grid 里不生效，塞进来只会把列挤变形），所以列数从 4 减到 3。
-   两个快捷过滤共用第 3 列的一个 flex 容器，不再各占一列 —— 否则列数会重新变回 4。
-   ⚠️ 被移除的是**第 1 个**子节点 ⇒ 移动端跨列阈值 nth-child 的落点会整体前移一位，
-   原来「搜索框 + 仅看已选通栏」会变成「只有仅看已选通栏」。移动端规则已按单列重写。 */
-.sp-health-guard-account-filters {
-  display: grid;
-  flex: 1 1 640px;
-  grid-template-columns: minmax(160px, 0.42fr) minmax(220px, 1fr) auto;
-  gap: 10px;
-  min-width: 0;
-}
-
-/* 两个快捷过滤按钮的容器：桌面端贴合内容宽度占住 grid 第 3 列，
-   移动端 grid 变单列后由 flex-wrap 自己换行。 */
-.sp-health-guard-quick-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.sp-health-guard-selected-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 38px;
-  border: 1px solid var(--sp-line);
-  border-radius: 9px;
-  padding: 0 12px;
-  color: var(--sp-muted);
-  background: var(--sp-panel);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
-}
-
-.sp-health-guard-selected-toggle:hover,
-.sp-health-guard-selected-toggle:focus-visible {
-  border-color: color-mix(in srgb, var(--sp-blue) 45%, var(--sp-line));
-  color: var(--sp-blue);
-}
-
-.sp-health-guard-selected-toggle:active {
-  transform: translateY(1px);
-}
-
-.sp-health-guard-selected-toggle:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--sp-blue) 28%, transparent);
-  outline-offset: 2px;
-}
-
-.sp-health-guard-selected-toggle.active {
-  border-color: color-mix(in srgb, var(--sp-blue) 52%, var(--sp-line));
-  color: var(--sp-blue);
-  background: color-mix(in srgb, var(--sp-blue) 10%, var(--sp-panel));
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--sp-blue) 20%, transparent);
-}
-
-.sp-health-guard-selected-toggle-mark {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--sp-muted);
-  transition: background-color 160ms ease, box-shadow 160ms ease;
-}
-
-.sp-health-guard-selected-toggle.active .sp-health-guard-selected-toggle-mark {
-  background: var(--sp-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-blue) 18%, transparent);
-}
-
-.sp-health-guard-selected-toggle strong {
-  min-width: 20px;
-  border-radius: 999px;
-  padding: 1px 7px;
-  color: inherit;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.sp-health-guard-filter-result {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  min-height: 24px;
-  border-radius: 999px;
-  padding: 0 9px;
-  color: var(--sp-muted);
-  background: color-mix(in srgb, var(--sp-soft) 72%, transparent);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.sp-health-guard-filter-result strong {
-  color: var(--sp-blue);
-  font-weight: 750;
-  font-variant-numeric: tabular-nums;
-}
-
-.sp-health-guard-batch-actions {
-  display: flex;
-  flex: 1 1 100%;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.sp-health-guard-batch-divider {
-  width: 1px;
-  align-self: stretch;
-  min-height: 24px;
-  background: var(--sp-line);
-}
-
-.sp-health-guard-batch-interval-input {
-  flex: 0 0 auto;
-  width: 132px;
-}
-
-.sp-health-guard-account-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-  overflow: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  border-top: 1px solid var(--sp-line);
-  background: color-mix(in srgb, var(--sp-soft) 12%, var(--sp-panel));
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--sp-line) 82%, transparent) transparent;
-}
-
-.sp-health-guard-account-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.sp-health-guard-account-list::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--sp-line) 85%, transparent);
-  background-clip: padding-box;
-}
-
-.sp-health-guard-account-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(140px, 0.35fr) minmax(320px, 0.8fr);
-  align-items: center;
-  min-width: 0;
-  gap: 8px 12px;
-  border-bottom: 1px solid var(--sp-line);
-  padding: 8px 14px;
-  background: var(--sp-panel);
-  transition: background-color 160ms ease, box-shadow 160ms ease;
-}
-
-.sp-health-guard-account-row:last-child {
-  border-bottom: 0;
-}
-
-.sp-health-guard-account-row:hover {
-  background: color-mix(in srgb, var(--sp-blue) 4%, var(--sp-panel));
-}
-
-.sp-health-guard-account-row.selected {
-  background: color-mix(in srgb, var(--sp-blue) 8%, var(--sp-panel));
-  box-shadow: inset 3px 0 0 var(--sp-blue);
-}
-
-.sp-health-guard-account-row.selected:hover {
-  background: color-mix(in srgb, var(--sp-blue) 11%, var(--sp-panel));
-}
-
-.sp-health-guard-account-row.missing-model {
-  background: color-mix(in srgb, var(--sp-amber) 6%, var(--sp-panel));
-  box-shadow: inset 3px 0 0 var(--sp-amber);
-}
-
-/* 供应商已关闭：整行弱化成中性灰。
-   刻意不跟 .unavailable 共用琥珀警示色 —— 账号本身没坏（开关、模型、间隔都还能配），
-   只是上游供应商被停用了，用警示色会被读成「这个账号出错了」。
-   信息列降透明度表达「这条已经不活跃」；勾选框与开关保持原样，
-   整行一起变淡会被当成禁用，用户就不敢再点了。 */
-.sp-health-guard-account-row.provider-closed {
-  background: color-mix(in srgb, var(--sp-muted) 7%, var(--sp-panel));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-muted) 55%, var(--sp-line));
-}
-
-.sp-health-guard-account-row.provider-closed .sp-health-guard-account-choice-copy,
-.sp-health-guard-account-row.provider-closed .sp-health-guard-account-group-summary {
-  opacity: 0.55;
-}
-
-.sp-health-guard-account-row.unavailable {
-  background: color-mix(in srgb, var(--sp-amber) 8%, var(--sp-panel));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sp-amber) 72%, var(--sp-line));
-}
-
-.sp-health-guard-account-row:not(:has(.sp-health-guard-account-model-editor)) {
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(140px, 0.35fr);
-}
-
-/* 多选列：只服务于「批量设置 / 批量间隔」的选择，与右侧「参与守护」开关（业务配置）无关。
-   和开关列一样是固定宽度列（auto），不参与伸缩。 */
-.sp-health-guard-account-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.sp-health-guard-account-check input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--sp-blue);
-  cursor: pointer;
-}
-
-/* 勾选列与开关列都是固定宽度列，账号信息才是唯一可伸缩的列：
-   开关用 fr 会随窗口变宽、把账号名挤成省略号。 */
-.sp-health-guard-account-choice {
-  min-width: 0;
-  cursor: help;
-}
-
-.sp-health-guard-account-choice-copy {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-  color: var(--sp-muted);
-  font-size: 12px;
-}
-
-.sp-health-guard-account-choice-copy strong {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-health-guard-account-id {
-  flex: 0 0 auto;
-  color: color-mix(in srgb, var(--sp-blue) 52%, var(--sp-muted));
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.sp-health-guard-account-source {
-  flex: 1 1 auto;
-  min-width: 48px;
-  overflow: hidden;
-  color: var(--sp-muted);
-  font-size: 11px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-health-guard-account-source.unavailable {
-  color: var(--sp-amber);
-  font-weight: 650;
-}
-
-.sp-health-guard-account-platform {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  border-width: 1px;
-  border-radius: 4px;
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-
-.sp-health-guard-account-group-summary {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 2px;
-  cursor: help;
-}
-
-.sp-health-guard-account-group-summary > span {
-  color: var(--sp-muted);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.sp-health-guard-account-group-summary > strong {
-  overflow: hidden;
-  max-width: 100%;
-  color: var(--sp-blue);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-health-guard-model-status {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--sp-blue) 26%, var(--sp-line));
-  border-radius: 999px;
-  padding: 1px 7px;
-  color: var(--sp-blue);
-  background: color-mix(in srgb, var(--sp-blue) 7%, var(--sp-panel));
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-
-.sp-health-guard-model-status.override {
-  color: var(--sp-green);
-  border-color: color-mix(in srgb, var(--sp-green) 30%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel));
-}
-
-.sp-health-guard-model-status.interval {
-  color: var(--sp-cyan);
-  border-color: color-mix(in srgb, var(--sp-cyan) 32%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-cyan) 8%, var(--sp-panel));
-}
-
-.sp-health-guard-model-status.missing,
-.sp-health-guard-model-status.unavailable {
-  color: var(--sp-amber);
-  border-color: color-mix(in srgb, var(--sp-amber) 34%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
-}
-
-.sp-health-guard-account-model-editor {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.45fr) auto;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* 行首的「参与守护」开关与行内的「修改调度」开关共用一套规格，
    两者都是「开关 + 说明文字」的小控件，分开写会各自漂移。 */
@@ -7830,13 +5064,7 @@ function intervalSecondsToCron(seconds: number): string | null {
   white-space: nowrap;
 }
 
-.sp-health-guard-account-model-editor :deep(.select-trigger) {
-  min-height: 34px;
-  border-radius: 8px;
-  padding: 5px 10px;
-  font-size: 12px;
-  line-height: 1.25;
-}
+
 
 .sp-rate-guard-detail {
   display: grid;
@@ -8421,91 +5649,35 @@ function intervalSecondsToCron(seconds: number): string | null {
     flex-direction: column;
   }
 
-  .sp-health-guard-account-dialog {
-    /* 高度由 modal-content 约束，避免独立 max-height 把账号列表裁切掉 */
-    max-height: none;
-    min-height: 0;
-  }
+  
 
-  .sp-health-guard-platform-models {
-    flex: 0 1 auto;
-    max-height: min(24vh, 180px);
-    min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-  }
+  
 
-  .sp-health-guard-account-workspace {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-  }
+  
 
-  .sp-health-guard-platform-model-grid,
-  .sp-health-guard-platform-model-grid article,
-  .sp-health-guard-account-row {
-    grid-template-columns: 1fr;
-  }
+  
 
-  /* 健康守护账号筛选：手机端纵向堆叠，三个控件各占一行通栏（第 3 行是快捷过滤容器）。
-     这里原先是「平台/供应商 2 列，搜索与快捷过滤通栏」—— 平台下拉改成
-     独占一行的标签组之后，剩下的下拉只剩一个，2 列配对的前提不再成立；
-     若只把跨列阈值从 n+3 改成 n+2，会剩下「下拉占半列、右边空一格」的残缺行。 */
-  .sp-health-guard-account-filters {
-    /* 手机端工具栏改为纵向布局后，桌面端 flex: 1 1 640px 的 640px 会变成高度基准，
-       导致筛选区被撑到约 640px 高、账号列表被挤出可视区域；这里改为按内容自适应 */
-    flex: 1 1 auto;
-    grid-template-columns: 1fr;
-  }
+  
 
-  .sp-health-guard-selection-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  
 
-  .sp-health-guard-selection-summary article {
-    padding: 8px 10px 7px;
-  }
+  
 
-  .sp-health-guard-selection-summary article strong {
-    font-size: 15px;
-  }
+  
 
-  .sp-health-guard-selection-summary article:nth-child(odd) {
-    border-left: 0;
-  }
+  
 
-  .sp-health-guard-selection-summary article:nth-child(n + 3) {
-    border-top: 1px solid var(--sp-line);
-  }
+  
 
-  .sp-health-guard-account-toolbar {
-    gap: 8px;
-    padding: 10px 12px;
-  }
+  
 
-  .sp-health-guard-account-list {
-    /* 优先占剩余空间，可收缩；列表内部滚动，避免整页被裁切 */
-    flex: 1 1 40vh;
-    min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-  }
+  
 
-  .sp-health-guard-account-model-editor {
-    grid-template-columns: minmax(0, 1fr);
-    min-width: 0;
-  }
+  
 
-  /* 批量设置：手机端「说明 + 控件」改纵向堆叠，控件通栏 */
-  .sp-health-guard-batch-row {
-    grid-template-columns: 1fr;
-  }
+  
 
-  .sp-health-guard-filter-result {
-    align-self: flex-start;
-  }
+  
 
   .sp-health-guard-account-card .sp-button {
     width: 100%;
