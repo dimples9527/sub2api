@@ -1,6 +1,10 @@
 <template>
   <SupplierModuleLayout>
-    <section class="sp-account-toolbar" aria-label="账号筛选与操作">
+    <section
+      class="sp-account-toolbar"
+      :class="{ 'is-filter-collapsed': !mobileFiltersExpanded }"
+      aria-label="账号筛选与操作"
+    >
       <button
         class="sp-account-mobile-filter-toggle"
         type="button"
@@ -9,7 +13,9 @@
         aria-controls="supplier-account-filter-fields"
         @click="mobileFiltersExpanded = !mobileFiltersExpanded"
       >
-        <span>筛选条件</span>
+        <!-- 文案带上「操作」：这一行现在同时控制下方筛选控件与操作按钮两组内容，
+             只写「筛选条件」会让展开后多出来的一排按钮显得没来由。 -->
+        <span>筛选与操作</span>
         <span class="sp-account-mobile-filter-state">{{ mobileFiltersExpanded ? '收起' : '展开' }}</span>
         <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': mobileFiltersExpanded }" />
       </button>
@@ -8374,6 +8380,19 @@ button.sp-guard-failure-hint:hover {
   .sp-account-mobile-filter-toggle :deep(svg) { transition: transform 160ms ease; }
 
   .sp-account-filter-fields:not(.is-expanded) { display: none; }
+
+  /*
+    折叠时把操作按钮一起收起。只收起筛选控件的话，8 个按钮在 2 列栅格下仍占 4 行，
+    手机首屏几乎全被这块吃掉；一起收起后整张卡片只剩顶部一行「筛选与操作」。
+    注意「调度告警」「倍率守护日志」的角标也在按钮区里，折叠态下看不到，展开即恢复。
+  */
+  .sp-account-toolbar.is-filter-collapsed .sp-account-filter-actions { display: none; }
+
+  /* 两组内容都收起后不能再留 body 的内边距，否则折叠态下方会空出一段。 */
+  .sp-account-toolbar.is-filter-collapsed .sp-account-filter-body { padding: 0; }
+
+  /* 折叠态卡片只剩这一行，保留分隔线会与卡片自身的下边框叠成双线。 */
+  .sp-account-toolbar.is-filter-collapsed .sp-account-mobile-filter-toggle { border-bottom: 0; }
 
   .sp-account-filter-body { padding: 0.65rem 0.75rem; }
   .sp-account-filter-actions {
