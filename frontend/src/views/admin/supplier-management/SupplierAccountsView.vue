@@ -133,6 +133,17 @@
           </div>
         </div>
         <div class="sp-account-filter-actions" data-test="supplier-account-filter-actions">
+          <!-- 刷新排在首位：这一排里只有它是「就地重取数据、不打开任何弹窗」的动作，
+               其余按钮都会开弹窗或跳到别处。放排头后一眼就能找到。 -->
+          <button
+            class="sp-button sp-account-toolbar-btn sp-account-toolbar-refresh sp-account-refresh"
+            type="button"
+            data-test="supplier-account-refresh"
+            :disabled="loading"
+            @click="refreshAccountsWorkbench"
+          >
+            {{ loading ? '刷新中…' : '刷新' }}
+          </button>
           <button
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-test"
             type="button"
@@ -158,8 +169,9 @@
           </button>
           <!-- 「健康守护详情」与上面的「倍率守护日志」同属守护任务的查看入口，刻意紧邻放置、
                并复用同一个琥珀色，让两者在工具栏里表现为一组（页面既有做法同此：
-               「绑定分组」「按分组绑定」共用青）。琥珀与下方「调度切换日志」的橙色之间仍隔着
-               「刷新」，那处「邻近色要排开」的约束不受影响。 -->
+               「绑定分组」「按分组绑定」共用青）。
+               注：刷新移到排头后，琥珀与下方「调度切换日志」的橙色之间不再隔着别的按钮。
+               若日后觉得这两色贴太近难分辨，把「调度切换日志」再往后挪一格即可。 -->
           <button
             class="sp-button sp-account-toolbar-btn sp-account-toolbar-health-guard"
             type="button"
@@ -167,15 +179,6 @@
             @click="openHealthGuardDetail"
           >
             健康守护详情
-          </button>
-          <button
-            class="sp-button sp-account-toolbar-btn sp-account-toolbar-refresh sp-account-refresh"
-            type="button"
-            data-test="supplier-account-refresh"
-            :disabled="loading"
-            @click="refreshAccountsWorkbench"
-          >
-            {{ loading ? '刷新中…' : '刷新' }}
           </button>
           <!-- 与「倍率守护日志」刻意不相邻：两者都属日志族但配色不同（琥珀 / 橙），
                挨在一起会因为两色本身接近而更难分辨。 -->
@@ -8600,6 +8603,9 @@ button.sp-guard-failure-hint:hover {
    所以下面先给 .modal-content 声明一份完整兜底变量，再写弹窗内部样式。 */
 .sp-account-toolbar-bind-groups {
   display: inline-flex;
+  /* 「更多」菜单里每个按钮都被拉成 width:100%，而本按钮是其中唯一用 inline-flex 的
+     （要放计数角标）⇒ 不给 justify-content 的话内容会贴左，与相邻按钮的居中文字不齐。 */
+  justify-content: center;
   align-items: center;
   gap: 0.375rem;
   border-color: color-mix(in srgb, var(--sp-cyan) 30%, var(--sp-line));
