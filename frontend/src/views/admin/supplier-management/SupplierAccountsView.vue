@@ -448,16 +448,24 @@
           <template #cell-group_name="{ row: account }">
             <div class="sp-account-group-stack">
               <div v-if="account.binding_groups?.length" class="sp-account-groups">
-                <GroupBadge
-                  v-for="group in account.binding_groups"
-                  :key="group.id"
-                  :name="group.name"
-                  :platform="group.platform"
-                  :subscription-type="group.subscription_type"
-                  :rate-multiplier="group.rate_multiplier"
-                  :show-rate="true"
-                  :always-show-rate="true"
-                />
+                <!-- 用 <template v-for> 而不是给徽标套一层 span：本页 spec 断言
+                     `.sp-account-groups > span` 恰好等于徽标数，套壳会让它数到包装元素。
+                     因此「默认」标记也只能用非 span 标签（small），否则同样会被数进去。 -->
+                <template v-for="group in account.binding_groups" :key="group.id">
+                  <GroupBadge
+                    :name="group.name"
+                    :platform="group.platform"
+                    :subscription-type="group.subscription_type"
+                    :rate-multiplier="group.rate_multiplier"
+                    :show-rate="true"
+                    :always-show-rate="true"
+                  />
+                  <small
+                    v-if="isGroupDefaultAccount(group.id, account)"
+                    class="sp-account-group-default-tag"
+                    title="该账号是本分组的默认账号：它健康时本组只开它一个，其余成员让位"
+                  >默认</small>
+                </template>
               </div>
               <span v-else class="sp-account-muted">—</span>
               <span
@@ -1747,6 +1755,58 @@
     </BaseDialog>
 
     <!--
+      分组默认账号的目标分组选择。只在候选分组多于一个时打开 ——
+      一个账号可以同属多个分组，而默认账号是按分组配置的，不能替用户猜。
+    -->
+    <BaseDialog
+      :show="groupDefaultAccountDialog.open"
+      title="分组默认账号"
+      width="normal"
+      @close="closeGroupDefaultAccountDialog"
+    >
+      <div v-if="groupDefaultAccountDialog.account" class="sp-group-default-account-dialog">
+        <p class="sp-group-default-account-lead">
+          本地账号「<strong>{{ groupDefaultAccountDialog.account.local_account_name || groupDefaultAccountDialog.account.name || `#${groupDefaultAccountDialog.account.local_account_id}` }}</strong>」
+        </p>
+        <p class="sp-group-default-account-hint">
+          默认账号健康时，本分组只开它一个、关闭其它成员；它失败或不可用时回退正常择优。再点一次即取消。
+        </p>
+        <div class="sp-group-default-account-list">
+          <div
+            v-for="group in groupDefaultAccountDialogGroups"
+            :key="group.id"
+            class="sp-group-default-account-row"
+            :class="{ 'is-default': dialogGroupIsDefaultAccount(group.id) }"
+          >
+            <GroupBadge
+              :name="group.name"
+              :platform="group.platform"
+              :subscription-type="group.subscription_type"
+              :rate-multiplier="group.rate_multiplier"
+              :show-rate="true"
+              :always-show-rate="true"
+            />
+            <button
+              type="button"
+              class="sp-group-default-account-action"
+              :class="{ 'is-default': dialogGroupIsDefaultAccount(group.id) }"
+              :disabled="savingGroupDefaultAccount"
+              @click="applyDialogGroupDefaultAccount(group.id)"
+            >{{ dialogGroupIsDefaultAccount(group.id) ? '取消默认' : '设为默认' }}</button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <button
+          class="sp-button ghost"
+          type="button"
+          :disabled="savingGroupDefaultAccount"
+          @click="closeGroupDefaultAccountDialog"
+        >{{ savingGroupDefaultAccount ? '保存中…' : '关闭' }}</button>
+      </template>
+    </BaseDialog>
+
+    <!--
       「更多」下拉：操作栏只留调度切换 / 测试 / 绑定三个高频动作，其余在这里按需展开。
       必须 Teleport 到 body —— 表格容器带 overflow，面板若留在单元格里会被裁掉，
       所以沿用分组管理页的做法：全屏遮罩 + fixed 定位 + 由点击位置换算坐标。
@@ -1841,6 +1901,20 @@
               <Icon name="cog" size="sm" />
               <span>配置业务平台</span>
             </button>
+            <!-- 分组默认账号：与自动化页「配置分组」里的同名下拉写的是同一份配置，
+                 只是换到「账号」的视角操作。只在该账号有「已绑定且参与择优」的分组时出现。 -->
+            <button
+              v-if="groupElectionDefaultAccountCandidateGroups(account).length > 0"
+              type="button"
+              class="sp-account-action-item sp-account-action-default"
+              :disabled="savingGroupDefaultAccount"
+              :data-test="`supplier-account-default-account-${account.local_account_id}`"
+              title="默认账号健康时，本分组只开它一个、关闭其它成员；它失败或不可用时回退正常择优"
+              @click="runAccountActionMenuAction(openGroupDefaultAccountAction)"
+            >
+              <Icon name="trophy" size="sm" />
+              <span>{{ groupDefaultAccountMenuLabel(account) }}</span>
+            </button>
           </template>
           <!-- 删除类动作统一压在面板底部，避免误点。 -->
           <div class="sp-account-action-divider"></div>
@@ -1908,7 +1982,10 @@ import {
 } from '@/api/admin/supplierProviderData'
 import Icon from '@/components/icons/Icon.vue'
 import { listAccountRateGuardUnbindLogs, listRuns, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'
-import type { SupplierAutomationRun } from '@/api/admin/supplierAutomation'
+// 「设为分组默认账号」要整份回写任务配置（更新接口是覆盖式的），所以还要拿到 updateTask。
+// 单独起一行、不并进上面那行：上面那行的写法被 SupplierLocalDataViews.spec.ts 逐字断言。
+import { updateTask as updateSupplierAutomationTask } from '@/api/admin/supplierAutomation'
+import type { SupplierAutomationRun, SupplierAutomationTask } from '@/api/admin/supplierAutomation'
 import {
   listSupplierAccountHealthRecords,
   type SupplierAccountHealthRecord,
@@ -2627,6 +2704,17 @@ const guardCronIntervalSeconds = ref(0)
 // 分组择优调度里「不参与择优」的本地分组 ID。调度告警只统计参与择优的分组，
 // 与任务配置弹窗「勾选 = 参与择优」的口径一致；空列表 = 所有分组都参与。
 const electionDisabledGroupIDs = ref<number[]>([])
+// 择优任务本体：设置「分组默认账号」要整份回写（更新接口是覆盖式更新），
+// 所以除了上面用到的「不参与择优分组」，这里还要留一份完整配置。
+const groupElectionTask = ref<SupplierAutomationTask | null>(null)
+// 分组默认账号：分组 ID（JSON 里键是字符串）→ 本地账号 ID。菜单项文案、行内标记、弹窗状态都由它派生。
+const groupElectionDefaultAccounts = ref<Record<string, number>>({})
+const savingGroupDefaultAccount = ref(false)
+// 「选择目标分组」弹窗：一个账号可同属多个分组，而默认账号是按分组配置的，多候选时必须让用户选。
+const groupDefaultAccountDialog = reactive<{ open: boolean; account: SupplierProviderAccount | null }>({
+  open: false,
+  account: null,
+})
 let guardFreshnessTimer: number | undefined
 
 const guardCheckStaleMinutes = computed(() => {
@@ -3537,7 +3625,8 @@ const accountActionMenuTargets = computed(() =>
 
 function openAccountActionMenu(account: SupplierProviderAccount, event: MouseEvent) {
   const menuWidth = 200
-  const menuHeight = 380
+  // 估算值只用于「贴边时上翻」，多一个菜单项就多一行高度，估小了会让底部被视口裁掉。
+  const menuHeight = 420
   const viewportPadding = 8
   accountActionMenu.open = true
   accountActionMenu.account = account
@@ -4275,6 +4364,120 @@ function accountParticipatesInElection(account: SupplierProviderAccount): boolea
   return groups.some(group => !electionDisabledGroupIDs.value.includes(group.id))
 }
 
+// ---- 分组默认账号 ----
+// 与自动化页「配置分组」里的同名配置是同一份数据（task.config.group_scheduling_election_default_account_by_group）。
+// 这里只是把它挪到账号页按「账号」的角度操作：本页的每一行是一个上游账号，用户更习惯在行上直接指定主账号。
+
+// 配置形态是「本地分组 ID → 本地账号 ID」。JSON 里键是字符串，统一收敛成字符串键的数字表，
+// 脏值（非正整数）直接丢弃 —— 留着会让「已是默认」的判断永远匹配不上，菜单项文案随之漂移。
+function normalizeGroupElectionDefaultAccounts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object') return {}
+  const out: Record<string, number> = {}
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const groupID = Number(key)
+    const accountID = Number(raw)
+    if (Number.isInteger(groupID) && groupID > 0 && Number.isInteger(accountID) && accountID > 0) {
+      out[String(groupID)] = accountID
+    }
+  }
+  return out
+}
+
+// 可指定为默认账号的分组 = 该账号已绑定、且参与择优的分组。
+// 不参与择优的分组设了也不会有任何效果（择优根本不跑），所以不进候选。
+function groupElectionDefaultAccountCandidateGroups(
+  account: SupplierProviderAccount
+): SupplierProviderAccount['binding_groups'] {
+  if (!canManageLocalAccount(account)) return []
+  return (account.binding_groups || []).filter(group => !electionDisabledGroupIDs.value.includes(group.id))
+}
+
+function isGroupDefaultAccount(groupID: number, account: SupplierProviderAccount): boolean {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null) return false
+  return Number(groupElectionDefaultAccounts.value[String(groupID)]) === localAccountID
+}
+
+// 菜单项文案随状态变：已经是某组默认账号时再写「设为默认」会误导（点下去其实是取消）。
+function groupDefaultAccountMenuLabel(account: SupplierProviderAccount): string {
+  const isDefaultSomewhere = groupElectionDefaultAccountCandidateGroups(account)
+    .some(group => isGroupDefaultAccount(group.id, account))
+  return isDefaultSomewhere ? '取消分组默认' : '设为分组默认'
+}
+
+const groupDefaultAccountDialogGroups = computed(() =>
+  groupDefaultAccountDialog.account
+    ? groupElectionDefaultAccountCandidateGroups(groupDefaultAccountDialog.account)
+    : []
+)
+
+function closeGroupDefaultAccountDialog() {
+  groupDefaultAccountDialog.open = false
+  groupDefaultAccountDialog.account = null
+}
+
+// 弹窗内按分组取状态。写成收 groupID 的闭包而不是在模板里传 account：
+// 弹窗内容挂在 v-if 下，模板里对可空 account 的收窄不可靠，这里集中兜一次。
+function dialogGroupIsDefaultAccount(groupID: number): boolean {
+  const account = groupDefaultAccountDialog.account
+  return account ? isGroupDefaultAccount(groupID, account) : false
+}
+
+function applyDialogGroupDefaultAccount(groupID: number) {
+  const account = groupDefaultAccountDialog.account
+  if (!account) return
+  void applyGroupDefaultAccountChange(account, groupID)
+}
+
+// 候选分组只有一个时不必弹窗 —— 多一步确认反而更慢；多候选才让用户选。
+function openGroupDefaultAccountAction(account: SupplierProviderAccount) {
+  const candidates = groupElectionDefaultAccountCandidateGroups(account)
+  if (candidates.length === 0) return
+  if (candidates.length === 1) {
+    void applyGroupDefaultAccountChange(account, candidates[0].id)
+    return
+  }
+  groupDefaultAccountDialog.account = account
+  groupDefaultAccountDialog.open = true
+}
+
+// 设置 / 取消某分组的默认账号。两个动作共用一条路径：该组当前就是这个账号 → 取消，否则设为它。
+// 之所以要先取整份 task 再回写：后端更新接口是覆盖式的，只发这一段会把其它配置清空。
+async function applyGroupDefaultAccountChange(account: SupplierProviderAccount, groupID: number) {
+  const localAccountID = manageableLocalAccountID(account)
+  if (localAccountID === null || savingGroupDefaultAccount.value) return
+  const task = groupElectionTask.value
+  if (!task) {
+    appStore.showError('未能读取择优调度配置，请刷新后重试')
+    return
+  }
+  savingGroupDefaultAccount.value = true
+  try {
+    const nextMap = { ...groupElectionDefaultAccounts.value }
+    const key = String(groupID)
+    const removing = Number(nextMap[key]) === localAccountID
+    if (removing) delete nextMap[key]
+    else nextMap[key] = localAccountID
+    const saved = await updateSupplierAutomationTask(task.task_code, {
+      ...task,
+      config: {
+        ...task.config,
+        group_scheduling_election_default_account_by_group: nextMap as unknown as Record<number, number>,
+      },
+    })
+    groupElectionTask.value = saved
+    groupElectionDefaultAccounts.value = normalizeGroupElectionDefaultAccounts(
+      saved.config?.group_scheduling_election_default_account_by_group
+    )
+    closeGroupDefaultAccountDialog()
+    appStore.showSuccess(removing ? '已取消该分组的默认账号' : '已设为该分组的默认账号')
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '保存分组默认账号失败'))
+  } finally {
+    savingGroupDefaultAccount.value = false
+  }
+}
+
 // 告警只针对已匹配、开启调度、且所属分组参与择优的账号:这些账号正在承接线上流量,异常才需要立即处置。
 // 择优里被关掉的分组不参与换人,其账号的调度开关是人工开的,不属于这条告警的处置范围。
 function accountSchedulingAlerts(account: SupplierProviderAccount): SchedulingAlert[] {
@@ -4547,10 +4750,16 @@ async function loadAutomationTaskHints() {
     guardCronIntervalSeconds.value = guardTask ? cronToIntervalSeconds(guardTask.cron_expression) || 0 : 0
     const electionTask = tasks.find(task => task.task_code === 'supplier_group_scheduling_election')
     electionDisabledGroupIDs.value = normalizeGroupIDs(electionTask?.config?.group_scheduling_election_disabled_group_ids)
+    groupElectionTask.value = electionTask || null
+    groupElectionDefaultAccounts.value = normalizeGroupElectionDefaultAccounts(
+      electionTask?.config?.group_scheduling_election_default_account_by_group
+    )
   } catch {
     // 拿不到配置时退回固定阈值，且不做分组过滤——宁可多显示告警，也不因一次请求失败漏报。
     guardCronIntervalSeconds.value = 0
     electionDisabledGroupIDs.value = []
+    groupElectionTask.value = null
+    groupElectionDefaultAccounts.value = {}
   }
 }
 
@@ -5316,6 +5525,21 @@ function formatTime(value?: string): string {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.375rem;
+}
+
+/* 「默认」标记跟在所属分组的徽标后面（同一行、同一换行节奏）。
+   刻意用 <small> 而不是 <span>：本页 spec 断言 `.sp-account-groups > span` 恰好等于徽标数。 */
+.sp-account-group-default-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--sp-green) 38%, var(--sp-line));
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--sp-green) 12%, var(--sp-panel));
+  color: var(--sp-green);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .sp-account-group-stack {
@@ -6203,6 +6427,117 @@ button.sp-guard-failure-hint:hover {
 
 .sp-account-action-menu .sp-account-action-health {
   color: var(--sp-cyan);
+}
+
+/* 「分组默认账号」用绿：面板里已占掉 recover(teal)/edit(琥珀)/rename(玫红)/copy(紫)/
+   platform(靛)/health(青)/view(灰)/delete(红)，绿是剩下唯一没被占的色相；
+   它落在「配置业务平台」(靛) 与「删除」(红) 之间，与上下邻居都拉得开。 */
+.sp-account-action-menu .sp-account-action-default {
+  color: var(--sp-green);
+}
+
+/* ---- 分组默认账号弹窗 ---- */
+/* BaseDialog Teleport 到 body ⇒ 页面根节点上的 --sp-* 在弹窗里取不到。
+   这里单独成块、不并进下面那组：那组选择器被多个 spec 逐字断言。
+   取值直接对齐 .supplier-management-page 本身，不另起一套色。 */
+:global(.modal-content:has(.sp-group-default-account-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-line: #e5e7eb;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-green: #16a34a;
+  --sp-red: #dc2626;
+}
+
+:global(.dark .modal-content:has(.sp-group-default-account-dialog)) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-line: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  /* 深色规则不从浅色规则继承（是同一元素的两条规则），语义色必须显式重声明。 */
+  --sp-green: #16a34a;
+  --sp-red: #dc2626;
+}
+
+.sp-group-default-account-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sp-group-default-account-lead {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sp-group-default-account-hint {
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.sp-group-default-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 0.125rem;
+}
+
+.sp-group-default-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--sp-line);
+  border-radius: 0.625rem;
+  background: var(--sp-panel-2);
+}
+
+.sp-group-default-account-row.is-default {
+  border-color: color-mix(in srgb, var(--sp-green) 45%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-green) 8%, var(--sp-panel-2));
+}
+
+.sp-group-default-account-action {
+  flex: none;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--sp-green) 45%, var(--sp-line));
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--sp-green);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.sp-group-default-account-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sp-green) 14%, transparent);
+}
+
+/* 已是默认的那一行，按钮语义反转成「取消」—— 用红色提示这是撤销动作，
+   而不是继续沿用绿色让人以为还能再设一次。 */
+.sp-group-default-account-action.is-default {
+  border-color: var(--sp-line);
+  color: var(--sp-muted);
+}
+
+.sp-group-default-account-action.is-default:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sp-red) 35%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-red) 10%, transparent);
+  color: var(--sp-red);
+}
+
+.sp-group-default-account-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 :global(.modal-content:has(.sp-guard-failure-dialog)),
