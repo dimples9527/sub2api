@@ -115,9 +115,54 @@ describe('SupplierGroupElectionChangeLogDialog', () => {
     expect(source).toContain('max-width: 95vw')
   })
 
-  it('空态区分「还没发生过切换」与「筛选太窄」', () => {
+  it('空态区分「还没发生过切换」与「筛选太窄」，两种视图共用一句', () => {
     // 用同一句话会让人以为功能坏了，直接去翻后端。
-    expect(source).toContain("hasActiveFilters ? '当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。' : '最近还没有发生调度切换。'")
+    expect(source).toContain("'当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。'")
+    expect(source).toContain("'最近还没有发生调度切换。'")
+    expect(source).toContain('const emptyText = computed(')
+    // 抽成 computed 而不是各写一遍：表格与时间线各写一份，改文案时必然漏掉一处。
+    // 两处引用 = 表格的空态 <td> 与时间线的空态 <div>。
+    expect(source.split('{{ emptyText }}').length - 1).toBe(2)
+  })
+
+  it('表格 / 时间线两种视图可切换，且共用同一份数据与排序方向', () => {
+    // 表格按分组归档、适合逐列比数值；时间线按批次时间归档、适合看「开了又关」的先后。
+    // 两者看的是同一份记录，差别只在归档维度，所以切换只重渲染、不重查。
+    // 默认给**时间线**：这份日志最常见的用途是回答「谁在什么时候被换了、换了多少次」，
+    // 那是个先后问题；表格是第二眼的核对动作（名次 / 综合分 / 用时）。
+    expect(source).toContain("const viewMode = ref<'table' | 'timeline'>('timeline')")
+    // 默认那一项必须排在分段控件最前：默认是时间线，它就得是第一个 ——
+    // 否则「打开就是它」与「它排在第二个」互相别扭，第一眼会以为默认是表格。
+    expect(source.indexOf('@click="viewMode = \'timeline\'"')).toBeLessThan(source.indexOf('@click="viewMode = \'table\'"'))
+    expect(source).toContain(":class=\"{ 'is-active': viewMode === 'table' }\"")
+    expect(source).toContain(":class=\"{ 'is-active': viewMode === 'timeline' }\"")
+    expect(source).toContain("@click=\"viewMode = 'timeline'\"")
+    // 时间线复用 sections，不另建数据源：批次、组名、原因依据必须还是同一套口径。
+    expect(source).toContain('const timelinePoints = computed<TimelinePoint[]>(() => {')
+    expect(source).toContain('for (const section of sections.value) {')
+    // 时间点按批次合并：同一次运行会散在好几个分组分块下，必须收回同一个时间点，
+    // 否则「10:06 开、10:09 又关」这种来回会被拆到两个点上，时间线就白做了。
+    expect(source).toContain('const map = new Map<number, TimelinePoint>()')
+    // 排序方向与表格共用 sortOrder：切视图后先后不能变。
+    expect(source).toContain("return sortOrder.value === 'asc' ? ascending : -ascending")
+    // 时间线没有表头，排序入口必须另外给一个，否则进了时间线就改不了方向。
+    expect(source).toContain('class="sp-election-log-timeline-order"')
+    expect(source).toContain(':title="timelineOrderTitle"')
+    // 分组名必须逐条标出：时间线把各组混在同一批里，不标就不知道这条是哪个组的决定；
+    // 也正是它让 reasonView 能挑到「本组那条依据」（依据是按分组存的，取错组会给出误导结论）。
+    expect(source).toContain('class="sp-election-log-timeline-group"')
+    expect(source).toContain('reasonView(entry.section, entry.log)')
+    // 高度链必须同样适用于时间线：滚动容器沿用 .sp-election-log-scroll
+    // （flex: 1 + min-height: 0 + overflow: auto），否则会退化成整层靠 .modal-body 滚动。
+    expect(cssBlock('.sp-election-log-scroll')).toContain('min-height: 0')
+    // 条目里复用的说明文字是块级（display: block），时间线条目必须是 flex 容器
+    // 才能让它们并排成一行、窄了自动折行；写成普通块级容器它们会各占一行。
+    expect(cssBlock('.sp-election-log-timeline-item')).toContain('display: flex')
+    expect(cssBlock('.sp-election-log-timeline-item')).toContain('flex-wrap')
+    // 轴要跟着内容长：竖线由每个时间点自己画一段（::before），不是绝对定位整条线 ——
+    // 后者会在内容比视口高时「线只画到一半、下面还有内容」。
+    expect(source).toContain('.sp-election-log-timeline-point::before')
+    expect(source).toContain('.sp-election-log-timeline-point:last-child::before')
   })
 
   it('按分组分节，且分组名查不到时不丢记录', () => {

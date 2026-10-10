@@ -10,7 +10,15 @@
           只显示调度开关真的被拨动的记录：择优调度把某个账号从「开」改成「关」，或重新选回「开」。
           未变更、未测试、写库失败的记录不在这里，勾选「含未切换」可把带原因的跳过记录一并带出。
         </template>
-        按分组归类展示，每组标出该组的开 / 关条数；组内再按批次分块，不同批次不混在一起。
+        <!-- 这句是两种视图唯一的差别：表格按分组归档，时间线按批次时间归档。
+             写在模板里而不是拼字符串，是因为它直接跟着 viewMode 走，不会漂。 -->
+        <template v-if="viewMode === 'table'">
+          按分组归类展示，每组标出该组的开 / 关条数；组内再按批次分块，不同批次不混在一起。
+        </template>
+        <template v-else>
+          按批次时间纵向排列：一次运行是一个时间点，点下列出这一批动了哪些账号，同批内按分组聚拢，
+          顺着往下读就是「谁在什么时候被开了、又被关了」的先后。
+        </template>
         顶部「最近批次」标签可多选，选中的几批会各自成块并排，方便对照「这批动了谁、那批又动了谁」。
         一个账号同属多个分组时，会在它所属的每个分组下各出现一次。
         分页按记录切分，所以同一个分组或同一个批次可能被分到相邻两页，上方条数也只统计当前这一页。
@@ -77,26 +85,71 @@
         </button>
       </div>
 
-      <!-- 最近批次快捷标签：点一下只看那一批，再点一下取消（与表格里的批次号按钮同一套行为）。
-           这批数据由后端给（最近 5 个真有变更的批次），**不随上面的筛选变化** ——
-           否则点一个标签其余标签就消失了，没法来回切换着对比。 -->
-      <div v-if="recentRuns.length > 0" class="sp-election-log-recent">
-        <span class="sp-election-log-recent-label">最近批次</span>
+      <!-- 工具栏：左边是「最近批次」快捷标签（点一下只看那一批），右边是视图切换。
+           两者同一行是因为它们是同一层级的「换着看」入口 —— 批次换的是「看哪几批」，
+           视图换的是「怎么看」，都不是筛选条件，所以都不进上面的筛选区。 -->
+      <div class="sp-election-log-toolbar">
+        <!-- 最近批次快捷标签：点一下只看那一批，再点一下取消（与表格里的批次号按钮同一套行为）。
+             这批数据由后端给（最近 5 个真有变更的批次），**不随上面的筛选变化** ——
+             否则点一个标签其余标签就消失了，没法来回切换着对比。 -->
+        <div v-if="recentRuns.length > 0" class="sp-election-log-recent">
+          <span class="sp-election-log-recent-label">最近批次</span>
+          <button
+            v-for="run in recentRuns"
+            :key="run.run_id"
+            type="button"
+            class="sp-election-log-recent-run"
+            :class="{ 'is-active': runFilters.includes(run.run_id) }"
+            :title="runFilters.includes(run.run_id) ? '已加入对照，再点移出' : `加入对照：批次 ${runSerial(run.changed_at)}`"
+            @click="filterByRun(run.run_id)"
+          >
+            {{ runSerial(run.changed_at) }}
+          </button>
+        </div>
+
+        <!-- 视图切换：时间线适合看「开了又关」的先后，表格适合逐列比数值（名次 / 综合分 / 用时）。
+             两种视图共用同一份数据、同一套筛选与分页，切换只重渲染、不重查。
+             ⚠️ 顺序有讲究：**默认那一项排在最前**。默认是时间线，它就得是第一个 ——
+             否则「打开就是它」与「它排在第二个」两件事互相别扭，第一眼会以为默认是表格。 -->
+        <div class="sp-election-log-view-switch" role="group" aria-label="日志视图">
+          <button
+            type="button"
+            class="sp-election-log-view-option"
+            :class="{ 'is-active': viewMode === 'timeline' }"
+            :aria-pressed="viewMode === 'timeline'"
+            title="时间线视图：按批次时间纵向排列，适合看「谁在什么时候被开了、又被关了」"
+            @click="viewMode = 'timeline'"
+          >
+            时间线
+          </button>
+          <button
+            type="button"
+            class="sp-election-log-view-option"
+            :class="{ 'is-active': viewMode === 'table' }"
+            :aria-pressed="viewMode === 'table'"
+            title="表格视图：按分组分节，适合逐列比数值"
+            @click="viewMode = 'table'"
+          >
+            表格
+          </button>
+        </div>
+
+        <!-- 排序方向在表格视图里由「切换时间」表头那个可点的列头承担，时间线视图没有表头，
+             所以这里补一个同源（sortOrder）的按钮，两种视图的排序方向始终一致。 -->
         <button
-          v-for="run in recentRuns"
-          :key="run.run_id"
+          v-if="viewMode === 'timeline'"
           type="button"
-          class="sp-election-log-recent-run"
-          :class="{ 'is-active': runFilters.includes(run.run_id) }"
-          :title="runFilters.includes(run.run_id) ? '已加入对照，再点移出' : `加入对照：批次 ${runSerial(run.changed_at)}`"
-          @click="filterByRun(run.run_id)"
+          class="sp-election-log-timeline-order"
+          :title="timelineOrderTitle"
+          @click="toggleSort('changed_at')"
         >
-          {{ runSerial(run.changed_at) }}
+          {{ sortOrder === 'desc' ? '最新在上' : '最早在上' }}
         </button>
       </div>
 
       <div class="sp-election-log-table-region">
-        <div class="sp-election-log-scroll">
+        <!-- 表格视图：按分组分节，一行一个账号，适合逐列比数值。 -->
+        <div v-if="viewMode === 'table'" class="sp-election-log-scroll">
           <table class="sp-election-log-table">
             <thead>
               <tr>
@@ -132,10 +185,9 @@
             </tbody>
             <tbody v-else-if="sections.length === 0">
               <tr>
-                <!-- 空态要区分「真的没有切换」和「筛选太窄」—— 用同一句话会让人以为功能坏了。 -->
-                <td :colspan="columns.length" class="sp-election-log-empty">
-                  {{ hasActiveFilters ? '当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。' : '最近还没有发生调度切换。' }}
-                </td>
+                <!-- 空态要区分「真的没有切换」和「筛选太窄」—— 用同一句话会让人以为功能坏了。
+                     文案抽成 emptyText：两种视图共用一句，写两遍迟早会漂。 -->
+                <td :colspan="columns.length" class="sp-election-log-empty">{{ emptyText }}</td>
               </tr>
             </tbody>
             <tbody v-else>
@@ -244,6 +296,53 @@
             </tbody>
           </table>
         </div>
+
+        <!-- 时间线视图：以「批次」为时间点纵向排列，同一次运行里动了哪些账号全列在点下。
+             它和表格看的是同一份记录，差别只在归档维度：表格按分组归档（便于逐列比数值），
+             时间线按批次归档（便于看先后 —— 例如某账号在 10:06 被开、10:09 又被关）。
+             复用同一份 sections：批次、组名、原因依据都还是那套口径，不另建数据源。 -->
+        <div v-else class="sp-election-log-scroll">
+          <div v-if="loading" class="sp-election-log-timeline-skeleton">
+            <span v-for="i in 6" :key="`ts-${i}`" class="sp-election-log-skeleton"></span>
+          </div>
+          <div v-else-if="timelinePoints.length === 0" class="sp-election-log-empty">{{ emptyText }}</div>
+          <ol v-else class="sp-election-log-timeline">
+            <li v-for="point in timelinePoints" :key="point.key" class="sp-election-log-timeline-point">
+              <div class="sp-election-log-timeline-head">
+                <span class="sp-election-log-batch-id">批次 {{ runSerial(point.changedAt) }}</span>
+                <span class="sp-election-log-batch-time">{{ formatDateTime(point.changedAt) }}</span>
+                <span class="sp-election-log-batch-status" :class="runStatusClass(point.runStatus)">{{ runStatusText(point.runStatus) }}</span>
+                <small class="sp-election-log-batch-count">本批次 {{ point.rows.length }} 条</small>
+                <!-- 本批次的开 / 关条数：与表格的分组标题行同一套配色，一眼看出这一批是「开多」还是「关多」。 -->
+                <span class="sp-election-log-group-stat">
+                  <em class="good">{{ point.enabled }} 开</em>
+                  <em class="bad">{{ point.disabled }} 关</em>
+                  <em v-if="point.skipped" class="skip">{{ point.skipped }} 跳过</em>
+                </span>
+              </div>
+              <ul class="sp-election-log-timeline-items">
+                <li v-for="entry in point.rows" :key="entry.key" class="sp-election-log-timeline-item">
+                  <span class="sp-election-log-direction" :class="directionClass(entry.log)">{{ directionText(entry.log) }}</span>
+                  <strong class="sp-election-log-account">{{ entry.log.account_name || `账号 ${entry.log.account_id}` }}</strong>
+                  <span v-if="entry.log.platform" class="sp-election-log-platform" :class="platformTextClass(entry.log.platform)">{{ entry.log.platform }}</span>
+                  <!-- 分组名必须逐条给：时间线把各组混在同一批里，不标就不知道这条是哪个组的决定。
+                       也正是它让 reasonView 能挑到「本组那条依据」（依据是按分组存的）。 -->
+                  <span class="sp-election-log-timeline-group">{{ entry.groupName }}</span>
+                  <span class="sp-election-log-switch">{{ entry.log.schedulable_before ? '开' : '关' }} → {{ entry.log.schedulable_after ? '开' : '关' }}</span>
+                  <span v-if="entry.log.suggested" class="sp-election-log-suggested" title="演练模式：本条只是建议，调度开关没有被修改">建议</span>
+                  <template v-if="reasonView(entry.section, entry.log).badge">
+                    <span class="sp-election-log-reason-badge" :class="reasonBadgeClass(reasonView(entry.section, entry.log).badge)">{{ reasonView(entry.section, entry.log).badge?.label }}</span>
+                    <span v-if="reasonView(entry.section, entry.log).rank" class="sp-election-log-reason-rank">{{ reasonView(entry.section, entry.log).rank }}</span>
+                    <small v-if="reasonView(entry.section, entry.log).note" class="sp-election-log-reason-note">{{ reasonView(entry.section, entry.log).note }}</small>
+                  </template>
+                  <small v-else class="sp-election-log-reason">{{ reasonView(entry.section, entry.log).fallback }}</small>
+                  <small v-if="entry.log.error_message" class="sp-election-log-error">{{ entry.log.error_message }}</small>
+                </li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+
         <Pagination
           v-if="total > 0"
           class="sp-election-log-pagination"
@@ -380,6 +479,14 @@ const hasActiveFilters = computed(() => (
   || runFilters.value.length > 0
 ))
 
+// 空态文案：两种视图共用一句。同一件事写两遍，改文案时必然漏掉一处。
+// 必须区分「真的没有切换」和「筛选太窄」—— 用同一句话会让人以为功能坏了。
+const emptyText = computed(() => (
+  hasActiveFilters.value
+    ? '当前筛选条件下没有调度切换记录，试试放宽时间范围或换个方向。'
+    : '最近还没有发生调度切换。'
+))
+
 const directionOptions: SelectOption[] = [
   { value: 'all', label: '全部方向' },
   { value: 'disabled', label: '只看关闭' },
@@ -444,6 +551,14 @@ const columns: Column[] = [
   { key: 'reason', label: '原因', class: 'min-w-[200px]' },
 ]
 
+// 视图模式：时间线（默认，按批次时间纵向排列，看「开了又关」的先后）/ 表格（按分组分节，逐列比数值）。
+// 默认给时间线：这份日志最常见的用途是回答「谁在什么时候被换了、换了多少次」，
+// 那是个先后问题 —— 表格适合的是「这个账号的名次/综合分是多少」，属于第二眼的核对动作。
+// 只影响渲染：两种视图共用同一份 sections、同一套筛选、同一个分页与排序方向，切换不重查。
+// 刻意不在 watch(show) 里重置 —— 它是「用户选的看法」，不是本次查看的临时筛选；
+// 关掉再打开还是上次那个视图，符合「同一个排查动作要连着看」的预期。
+const viewMode = ref<'table' | 'timeline'>('timeline')
+
 // 「切换时间」列当前的排序方向，默认倒序（最新在前）—— 与后端 ORDER BY changed_at DESC 同向，
 // 所以「默认」和升级前的观感完全一致，排序控件只是把这件事变得可调。
 // 作用范围是**每组内部的批次块**：表格按分组分节，组的顺序按变更条数排，
@@ -467,6 +582,14 @@ const sortTitle = computed(() => (
   sortOrder.value === 'desc'
     ? '每组内按切换时间倒序（最新在前），点击改为正序'
     : '每组内按切换时间正序（最早在前），点击改为倒序'
+))
+
+// 时间线视图没有表头，排序方向由工具栏那个按钮承担 —— title 同样说清「点下去会变成什么」。
+// 措辞与 sortTitle 分开：表头的排序范围是「每组内」，时间线的范围是「所有批次混排」，说成一样会误导。
+const timelineOrderTitle = computed(() => (
+  sortOrder.value === 'desc'
+    ? '时间线当前最新在上，点击改为最早在上'
+    : '时间线当前最早在上，点击改为最新在上'
 ))
 
 // 同一次运行里可能有多个账号同时变更，run_id 会重复 —— 键必须用 run_id + account_id。
@@ -889,6 +1012,73 @@ const sections = computed<LogSection[]>(() => {
   return list
 })
 
+/** 时间线上的一个条目：某账号在某个分组下的一条变更。带 section 是因为原因依据按分组存。 */
+interface TimelineEntry {
+  key: string
+  section: LogSection
+  log: SupplierGroupElectionChangeLog
+  groupName: string
+}
+
+/** 时间线上的一个时间点：一次运行（批次）。 */
+interface TimelinePoint {
+  key: string
+  runID: number
+  runStatus: string
+  changedAt: string
+  enabled: number
+  disabled: number
+  skipped: number
+  rows: TimelineEntry[]
+}
+
+// 时间线按「批次」归档 —— 一次运行就是一个时间点。
+// 这是它与表格的唯一差别：表格按分组切块（一个批次会散在好几个分组下），
+// 时间线把同一次运行的所有变更收回一个点，于是「10:06 开、10:09 又关」这种来回能连成一条线读出来。
+//
+// 直接复用 sections，不另建数据源：批次、组名、开/关/跳过计数、原因依据都还是那套口径。
+// 排序方向与表格共用 sortOrder，所以两个视图的先后永远一致（切视图不会「顺序变了」）。
+const timelinePoints = computed<TimelinePoint[]>(() => {
+  const map = new Map<number, TimelinePoint>()
+  for (const section of sections.value) {
+    for (const batch of section.batches) {
+      let point = map.get(batch.runID)
+      if (!point) {
+        point = {
+          key: String(batch.runID),
+          runID: batch.runID,
+          runStatus: batch.runStatus,
+          changedAt: batch.changedAt,
+          enabled: 0,
+          disabled: 0,
+          skipped: 0,
+          rows: [],
+        }
+        map.set(batch.runID, point)
+      }
+      // 条数是各分组分块的累加：同一个批次出现在几个分组下，就在这个点上各贡献自己那一份。
+      point.enabled += batch.enabled
+      point.disabled += batch.disabled
+      point.skipped += batch.skipped
+      for (const log of batch.rows) {
+        point.rows.push({ key: `${section.key}::${rowKey(log)}`, section, log, groupName: section.groupName })
+      }
+    }
+  }
+  // 时间点排序与表格的组内批次排序同一套规则（时间解析失败时用批次号兜底，保证顺序稳定不跳）。
+  const list = Array.from(map.values()).sort((a, b) => {
+    const diff = Date.parse(a.changedAt) - Date.parse(b.changedAt)
+    const ascending = Number.isFinite(diff) && diff !== 0 ? diff : a.runID - b.runID
+    return sortOrder.value === 'asc' ? ascending : -ascending
+  })
+  // 点内按分组名聚拢（同名相邻），组内保持后端给的原始顺序。
+  // 用 localeCompare 排序即可：Array#sort 是稳定排序，同组条目的相对次序不会被这一步打乱。
+  for (const point of list) {
+    point.rows.sort((a, b) => a.groupName.localeCompare(b.groupName, 'zh-Hans-CN'))
+  }
+  return list
+})
+
 // 每行的原因视图预先算好一份，模板里多处引用同一份，省得反复分类。
 // 键要拼分组：同一个账号在它所属的每个分组分节下各出现一次，本组结论可以不同。
 function buildReasonView(section: LogSection, log: SupplierGroupElectionChangeLog): ReasonView {
@@ -1226,15 +1416,25 @@ watch(() => props.accountId, () => {
   color: #fff;
 }
 
-/* 最近批次快捷标签行。与上面的筛选区并排但不混在一起：它是「换着看」的入口，
-   不是筛选条件本身，所以单独一行、更紧凑（标签比下拉框小一档）。
-   换行时保持左对齐，标签多了也不会把行撑破。 */
+/* 工具栏：左边「最近批次」标签，右边视图切换（+ 时间线视图下的排序按钮）。
+   与上面的筛选区并排但不混在一起：它们是「换着看」的入口，不是筛选条件本身，
+   所以单独一行、更紧凑（标签比下拉框小一档）。 */
+.sp-election-log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .sp-election-log-recent {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  /* 吃掉本行剩余宽度，把右侧的视图切换顶到最右；min-width: 0 让标签多到换行时能正常收缩。 */
+  flex: 1;
+  min-width: 0;
 }
 
 .sp-election-log-recent-label {
@@ -1264,6 +1464,189 @@ watch(() => props.accountId, () => {
   background: var(--sp-election-log-accent);
   border-color: var(--sp-election-log-accent);
   color: #fff;
+}
+
+/* ── 视图切换 ─────────────────────────────────────────────────────────
+   两段式分段控件（表格 / 时间线）：选中态用 accent 实心块，未选中只有文字。
+   用 aria-pressed 标出当前项，不靠颜色单独传达状态。 */
+.sp-election-log-view-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  /* 右侧留一点余量：标签行换行后这一组会落到下一行，左对齐也不至于贴着边缘。 */
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 30%, var(--sp-election-log-line));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sp-election-log-view-option {
+  border: 0;
+  padding: 3px 12px;
+  background: transparent;
+  color: var(--sp-election-log-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sp-election-log-view-option:hover {
+  color: var(--sp-election-log-accent);
+  background: color-mix(in srgb, var(--sp-election-log-accent) 12%, var(--sp-election-log-panel));
+}
+
+.sp-election-log-view-option.is-active {
+  background: var(--sp-election-log-accent);
+  color: #fff;
+}
+
+/* 键盘可达：分段控件在工具栏里，focus 环不能盖住相邻那一半。 */
+.sp-election-log-view-option:focus-visible {
+  outline: 2px solid var(--sp-election-log-accent);
+  outline-offset: -2px;
+}
+
+/* 时间线视图下的排序按钮。表格视图里这个动作由「切换时间」列头承担，
+   时间线没有表头，所以补一个同源（sortOrder）的按钮 —— 视觉与批次号按钮同一套。 */
+.sp-election-log-timeline-order {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--sp-election-log-accent) 30%, var(--sp-election-log-line));
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--sp-election-log-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sp-election-log-timeline-order:hover {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 12%, var(--sp-election-log-panel));
+}
+
+/* ── 时间线视图 ───────────────────────────────────────────────────────
+   纵向一条轴，一次运行一个点。轴靠每个 <li> 自己画一段竖线（::before）+ 一个圆点（::after）拼成，
+   不用绝对定位整条线：这样内容多高线就多长，不会出现「线画到一半、下面还有内容」。 */
+.sp-election-log-timeline-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.sp-election-log-timeline {
+  margin: 0;
+  padding: 14px 14px 6px 0;
+  list-style: none;
+}
+
+.sp-election-log-timeline-point {
+  position: relative;
+  padding-left: 26px;
+  padding-bottom: 14px;
+}
+
+.sp-election-log-timeline-point::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 8px;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--sp-election-log-accent) 22%, var(--sp-election-log-line));
+}
+
+/* 最后一个点不再往下连线：留一小截，否则会拖出一条「后面还有」的假尾巴。 */
+.sp-election-log-timeline-point:last-child::before {
+  bottom: auto;
+  height: 14px;
+}
+
+.sp-election-log-timeline-point::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--sp-election-log-accent);
+  border-radius: 9999px;
+  background: var(--sp-election-log-panel);
+}
+
+/* 时间点的标题块：底色比分组标题行更淡 —— 它下面挂着一组条目，不该比条目本身更抢眼。 */
+.sp-election-log-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--sp-election-log-accent) 7%, var(--sp-election-log-panel));
+}
+
+/* 这几个类沿用表格那几块的排版（字号 / 字重 / 颜色），只收回它们的 margin-left：
+   表格里靠 margin 拉开间距，这里由父级 flex 的 gap 统一控制，两套叠加会宽窄不匀。 */
+.sp-election-log-timeline-head .sp-election-log-batch-time,
+.sp-election-log-timeline-head .sp-election-log-batch-status,
+.sp-election-log-timeline-head .sp-election-log-batch-count,
+.sp-election-log-timeline-head .sp-election-log-group-stat {
+  margin-left: 0;
+}
+
+.sp-election-log-timeline-items {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 一条变更一行，可换行：账号 / 分组 / 开关 / 原因徽标 / 说明并排，窄屏或说明长时自动折到下一行。
+   ⚠️ 这里必须是 flex 容器：条目里复用的 .sp-election-log-switch / -reason-note 是 display: block，
+   在 flex 容器里会被「块化」成一行内的 flex 项，正好是想要的并排效果；在普通块级容器里它们会各占一行。 */
+.sp-election-log-timeline-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.sp-election-log-timeline-item:hover {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 4%, var(--sp-election-log-panel));
+}
+
+/* 上面那两个块级说明文字在 flex 行里不需要自带的上外边距（间距由 gap 给）。 */
+.sp-election-log-timeline-item .sp-election-log-switch,
+.sp-election-log-timeline-item .sp-election-log-reason-note {
+  margin-top: 0;
+}
+
+/* 分组名：时间线把各组混在同一批里，必须逐条标出这条是哪个组的决定。
+   用中性底色的胶囊，不染 accent —— 它是坐标而不是结论，不该跟原因徽标抢注意力。 */
+.sp-election-log-timeline-group {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--sp-election-log-line);
+  border-radius: 9999px;
+  background: var(--sp-election-log-soft);
+  color: var(--sp-election-log-muted);
+  font-size: 11px;
+  font-weight: 700;
+  /* 分组名可能很长（「TKAPI2-Codex｜应急专用｜pro号池」）：宁可裁掉尾巴，也不要折行把条目撑高。 */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dark .sp-election-log-timeline-head {
+  background: color-mix(in srgb, var(--sp-election-log-accent) 13%, var(--sp-election-log-panel));
 }
 
 .sp-election-log-account {
