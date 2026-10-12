@@ -203,7 +203,7 @@
                     <span class="truncate">{{ primaryGroup(model)?.name }}</span>
                     <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
                   </button>
-                  <!-- 已按分组过滤时：卡片价已是该分组价，详情（列全部分组）就多余了，隐藏。 -->
+                  <!-- 已按分组过滤时：卡片价已是该分组价，详情里也只有这一个分组，重复，隐藏。 -->
                   <button
                     type="button"
                     v-if="!activeFilterGroup"
@@ -627,7 +627,15 @@ const groupDialogTitle = computed(() => {
   const id = groupDialogModel.value?.id || t('admin.modelSquare.unnamedModel')
   return t('admin.modelSquare.groupDialogTitle', { id })
 })
-const detailGroups = computed(() => detailModel.value ? filterMonitorVisibleGroups(modelDetailGroups(detailModel.value)) : [])
+/*
+  详情弹窗的分组只取模型自己绑定的那些，与卡片胶囊、列表胶囊、分组弹窗同源（modelGroups）。
+
+  这里曾经按「模型平台」兜底展开：分组平台与模型平台一致、或无平台/composite，就一并列出来。
+  那套口径是分组归属还「由渠道反推」时代的遗留 —— 现在归属的唯一来源是配置页手动绑定的
+  group_ids（见 buildConfiguredModelSquareResult）。继续兜底会把模型根本没绑的分组摆进详情，
+  管理员读到的是「这个模型在这个分组下可用」，而它在那个分组里其实用不了。
+*/
+const detailGroups = computed(() => detailModel.value ? filterMonitorVisibleGroups(modelGroups(detailModel.value)) : [])
 const detailRate = computed(() => detailModel.value ? modelEffectiveRate(detailModel.value) : 1)
 /*
   detailPriceColumns 随「价格列改成卡片」一并删除：卡片自带标签，列头不再需要四个价格名。
@@ -736,21 +744,6 @@ function modelGroups(model: ModelSquareModel): ModelSquareGroup[] {
     .map(id => groupById.value.get(String(id)))
     .filter(Boolean)
     .sort((a, b) => groupRate(a) - groupRate(b)) as ModelSquareGroup[]
-}
-
-function modelDetailGroups(model: ModelSquareModel): ModelSquareGroup[] {
-  const directGroupIds = new Set((model.group_ids || []).map(id => String(id)))
-  const candidates = groups.value.filter(group => {
-    if (directGroupIds.has(String(group.id))) return true
-    const platform = group.platform?.trim().toLowerCase()
-    const modelPlatform = model.platform?.trim().toLowerCase()
-    return !platform || platform === 'composite' || (Boolean(modelPlatform) && platform === modelPlatform)
-  })
-  return candidates.sort((a, b) => {
-    const rateDiff = groupRate(a) - groupRate(b)
-    if (rateDiff !== 0) return rateDiff
-    return String(a.name).localeCompare(String(b.name))
-  })
 }
 
 function primaryGroupRate(model: ModelSquareModel) {

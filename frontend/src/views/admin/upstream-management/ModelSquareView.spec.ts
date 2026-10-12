@@ -339,13 +339,58 @@ describe('ModelSquareView', () => {
     expect(groupOptionLabels).not.toContain('Premium Group')
   })
 
-  it('详情弹窗一次列出全部可用分组的价格，并高亮卡片倍率对应的分组', async () => {
+  it('详情弹窗只列出模型绑定的分组，同平台但未绑定的分组不出现', async () => {
+    // 默认 payload：gpt-5.5 只绑了 Default Group(1)，Premium Group(2) 同属 openai 平台却没绑定。
+    // 详情弹窗曾经按「模型平台」兜底展开，把 Premium 一并列出来 —— 管理员会读成
+    // 「这个模型在 Premium 下可用」，而它在那个分组里其实用不了。
     const wrapper = mountView()
     await flushPromises()
 
-    const openAICard = wrapper.findAll('[data-test="model-card"]')
-      .find(card => card.text().includes('GPT-5.5 Flagship'))
-    await openAICard?.find('.model-detail-button').trigger('click')
+    const card = wrapper.findAll('[data-test="model-card"]')
+      .find(c => c.text().includes('GPT-5.5 Flagship'))
+    await card!.find('.model-detail-button').trigger('click')
+
+    const rows = wrapper.findAll('[data-test="detail-group-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Default Group')
+    expect(wrapper.find('[data-test="dialog"]').text()).not.toContain('Premium Group')
+  })
+
+  it('详情弹窗一次列出模型绑定的全部分组的价格，并高亮卡片倍率对应的分组', async () => {
+    getMock.mockResolvedValue({
+      provider_slug: 'configured',
+      provider_name: 'Model Square Config',
+      provider_type: 'local',
+      payload: {
+        groups: [
+          { id: 1, name: 'Default Group', platform: 'openai', rate_multiplier: 1 },
+          { id: 2, name: 'Premium Group', platform: 'openai', rate_multiplier: 0.5 },
+        ],
+        models: [
+          /*
+            故意不给 rate_multiplier：模型自带倍率时优先用它，分组切换就看不出效果。
+            必须同时绑两个分组 —— 只绑一个的话，「列全绑定的分组」与「只列其中一个」写出来是同一件事。
+          */
+          {
+            id: 'multi-group-detail',
+            display_name: 'Multi Group Detail',
+            provider: 'OpenAI Official',
+            platform: 'openai',
+            available: true,
+            mode: 'chat',
+            input_price: 5,
+            output_price: 30,
+            group_ids: [1, 2],
+          },
+        ],
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const card = wrapper.findAll('[data-test="model-card"]')
+      .find(c => c.text().includes('Multi Group Detail'))
+    await card!.find('.model-detail-button').trigger('click')
 
     const dialog = wrapper.find('[data-test="dialog"]')
     expect(dialog.exists()).toBe(true)
@@ -359,7 +404,7 @@ describe('ModelSquareView', () => {
     expect(rows).toHaveLength(2)
 
     // 分组按倍率升序：Premium(0.5) 在前、Default(1) 在后。
-    // 价格 = input_price 5 ÷ 模型倍率 0.5 × 分组倍率，所以两行分别是 $5 与 $10。
+    // 价格 = input_price 5 ÷ 基准倍率 0.5 × 分组倍率，所以两行分别是 $5 与 $10。
     const premiumRow = rows.find(row => row.text().includes('Premium Group'))
     const defaultRow = rows.find(row => row.text().includes('Default Group'))
     expect(premiumRow?.text()).toContain('0.5x')
