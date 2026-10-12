@@ -1069,7 +1069,7 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('class="sp-account-filter-actions"')
     expect(accountsSource).toContain('sp-account-table-shell')
     expect(accountsSource).toContain('sp-account-pagination')
-    expect(accountsSource).toContain('pageSize = ref(20)')
+    expect(accountsSource).toContain('pageSize = ref(100)')
     expect(accountsSource).toContain(':options="pageSizeOptions"')
     expect(accountsSource).toContain('v-model="platformFilter"')
     expect(accountsSource).toContain(':options="platformFilterOptions"')
