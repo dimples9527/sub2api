@@ -546,7 +546,8 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
          inactive_group_record.id IS NOT NULL
          AND inactive_group_record.rate_guard_selected = FALSE,
          FALSE
-       ) AS group_record_delete_eligible
+       ) AS group_record_delete_eligible,
+       a.remark
 FROM supplier_provider_accounts a
 JOIN supplier_providers p ON p.id = a.provider_id
 LEFT JOIN supplier_provider_runtime_stats runtime ON runtime.provider_id = p.id
@@ -1174,6 +1175,25 @@ WHERE a.id = $1`, accountID)
 	}
 	if affected == 0 {
 		return service.ErrSupplierProviderAccountDeleteConflict
+	}
+	return nil
+}
+
+// UpdateAccountRemark 覆写某个上游账号行的备注（人工维护，不参与上游同步覆盖）。
+func (r *supplierProviderDataRepository) UpdateAccountRemark(ctx context.Context, accountID int64, remark string) error {
+	result, err := r.db.ExecContext(ctx, `
+UPDATE supplier_provider_accounts
+SET remark = $2
+WHERE id = $1`, accountID, remark)
+	if err != nil {
+		return fmt.Errorf("update supplier provider account remark: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier provider account remark update result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderAccountNotFound
 	}
 	return nil
 }
@@ -2682,7 +2702,8 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&bindingGroupsJSON,
 		&item.SupplierCurrentBalance, &item.SupplierTodayCost,
 		&supplierEstimatedDays,
-		&groupRecordID, &item.GroupRecordDeleteEligible)
+		&groupRecordID, &item.GroupRecordDeleteEligible,
+		&item.Remark)
 	if err != nil {
 		return service.SupplierProviderAccount{}, err
 	}

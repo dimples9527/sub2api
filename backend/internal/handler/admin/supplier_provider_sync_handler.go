@@ -54,6 +54,7 @@ type SupplierProviderDataRepositoryPort interface {
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
 	DeleteAccount(ctx context.Context, accountID int64) error
+	UpdateAccountRemark(ctx context.Context, accountID int64, remark string) error
 	SetAccountLocalMapping(ctx context.Context, accountID int64, localAccountID *int64) error
 }
 
@@ -914,6 +915,30 @@ func (h *SupplierProviderSyncHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"account_id": accountID})
+}
+
+// UpdateAccountRemark 覆写某个上游账号行的备注（供应商账号管理页的「备注维护」）。
+// 备注描述的是这一行本身，与是否匹配到本地账号无关，所以不要求本地账号存在。
+func (h *SupplierProviderSyncHandler) UpdateAccountRemark(c *gin.Context) {
+	accountID, ok := parseSupplierAccountID(c)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		Remark *string `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil || payload.Remark == nil {
+		response.ErrorFrom(c, badRequest("备注参数格式无效"))
+		return
+	}
+
+	remark := strings.TrimSpace(*payload.Remark)
+	if err := h.dataRepo.UpdateAccountRemark(c.Request.Context(), accountID, remark); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"account_id": accountID, "remark": remark})
 }
 
 // UpdateAccountLocalMapping 手动指定/清除某个上游账号绑定的本地账号（传 local_account_id: null 即解绑）。

@@ -125,6 +125,10 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 		// 上游账号 ↔ 本地账号的持久化绑定（:id 是上游账号 id，不是本地账号 id）。
 		// 单独起一个静态段，避免与 PUT /accounts/:local_account_id/... 的 :local_account_id 通配段冲突。
 		supplier.PUT("/account-local-mappings/:id", h.Admin.SupplierProviderSync.UpdateAccountLocalMapping)
+		// 上游账号行的备注维护（:id 同样是上游账号 id）。
+		// 不能写成 /accounts/:id/remark：PUT 树里 /accounts/:local_account_id/platform-override
+		// 已占用该位置的通配段，通配段名不一致会让 gin 在注册路由时直接 panic。
+		supplier.PUT("/account-remarks/:id", h.Admin.SupplierProviderSync.UpdateAccountRemark)
 		supplier.GET("/monitor-targets", h.Admin.SupplierProviderSync.ListMonitorTargets)
 		supplier.GET("/monitor-targets/local-accounts", h.Admin.SupplierProviderSync.ListBindableLocalAccounts)
 		supplier.PUT("/monitor-targets/:id/binding", h.Admin.SupplierProviderSync.BindMonitorTarget)

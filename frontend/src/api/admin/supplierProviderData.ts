@@ -99,6 +99,8 @@ export interface SupplierProviderAccount {
   group_record_id?: number
   group_record_delete_eligible: boolean
   account_record_delete_eligible: boolean
+  // 行级备注：人工维护，上游重新同步不会覆盖它，与本地账号匹配状态无关。
+  remark?: string
   rate_multiplier: number
   binding_groups: SupplierProviderAccountBindingGroup[]
   raw_status: string
@@ -527,6 +529,18 @@ export async function deleteSupplierAccount(id: number): Promise<{ account_id: n
   return data
 }
 
+// 覆写某个上游账号行的备注（供应商账号管理页的「备注维护」）。
+export async function updateSupplierAccountRemark(
+  accountID: number,
+  remark: string
+): Promise<{ account_id: number; remark: string }> {
+  const { data } = await apiClient.put<{ account_id: number; remark: string }>(
+    `/admin/supplier-management/account-remarks/${accountID}`,
+    { remark }
+  )
+  return data
+}
+
 // 手动指定/清除某个上游账号绑定的本地账号（localAccountID 传 null 即解绑）。
 // 自动绑定猜错时的兜底入口；绑定本身持久化在 supplier_provider_accounts.local_account_id。
 export async function updateSupplierAccountLocalMapping(
@@ -891,6 +905,7 @@ export const supplierProviderDataAPI = {
   unbindSupplierMonitorTarget,
   autoMatchSupplierMonitorTargets,
   deleteSupplierAccount,
+  updateSupplierAccountRemark,
   setSupplierLocalAccountPlatformOverride,
   clearSupplierLocalAccountPlatformOverride,
   startSupplierAccountBatchTest,

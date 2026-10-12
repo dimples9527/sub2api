@@ -504,13 +504,21 @@
           </template>
 
           <template #cell-local_account_status="{ row: account }">
-            <span
-              v-if="isMatchedLocalAccount(account)"
-              :class="['sp-local-status', localAccountStatusTone(account.local_account_status)]"
-            >
-              {{ localAccountStatusLabel(account.local_account_status) }}
-            </span>
-            <span v-else class="sp-account-muted">—</span>
+            <div class="sp-local-status-cell">
+              <span
+                v-if="isMatchedLocalAccount(account)"
+                :class="['sp-local-status', localAccountStatusTone(account.local_account_status)]"
+              >
+                {{ localAccountStatusLabel(account.local_account_status) }}
+              </span>
+              <span v-else class="sp-account-muted">—</span>
+              <!-- 备注是行级信息，未匹配到本地账号的行同样会有，所以不跟着状态一起隐藏。 -->
+              <span
+                v-if="account.remark"
+                class="sp-account-remark"
+                :title="account.remark"
+              >{{ account.remark }}</span>
+            </div>
           </template>
 
           <template #cell-upstream_account_status="{ row: account }">
@@ -829,6 +837,41 @@
           :disabled="savingBusinessPlatform"
           @click="saveBusinessPlatform"
         >{{ savingBusinessPlatform ? '保存中' : '保存' }}</button>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="Boolean(remarkAccount)"
+      title="维护备注"
+      @close="closeAccountRemarkDialog"
+    >
+      <div v-if="remarkAccount" class="sp-account-remark-dialog">
+        <p class="sp-account-remark-target">
+          <span>{{ remarkAccount.provider_name }}</span>
+          <strong>{{ remarkAccount.name || remarkAccount.upstream_account_key }}</strong>
+        </p>
+        <TextArea
+          v-model="remarkDraft"
+          label="备注"
+          :rows="4"
+          :disabled="savingAccountRemark"
+          placeholder="留空即清除备注"
+          hint="备注会显示在列表的「本地账号状态」列，最多显示两行。"
+        />
+      </div>
+      <template #footer>
+        <button
+          class="sp-button"
+          type="button"
+          :disabled="savingAccountRemark"
+          @click="closeAccountRemarkDialog"
+        >取消</button>
+        <button
+          class="sp-button primary"
+          type="button"
+          :disabled="savingAccountRemark"
+          @click="saveAccountRemark"
+        >{{ savingAccountRemark ? '保存中' : '保存' }}</button>
       </template>
     </BaseDialog>
 
@@ -1856,6 +1899,18 @@
             <Icon name="eye" size="sm" />
             <span>查看</span>
           </button>
+          <!-- 备注描述的是这一行上游账号本身，未匹配到本地账号的行同样要能维护，
+               所以刻意留在 canManageLocalAccount 之外。 -->
+          <button
+            type="button"
+            class="sp-account-action-item sp-account-action-remark"
+            :data-test="`supplier-account-remark-${account.id}`"
+            title="维护这一行的备注，备注会显示在「本地账号状态」列"
+            @click="runAccountActionMenuAction(openAccountRemarkDialog)"
+          >
+            <Icon name="document" size="sm" />
+            <span>备注维护</span>
+          </button>
           <button
             v-if="account.local_account_match_status === 'matched' && account.local_account_id"
             type="button"
@@ -2004,6 +2059,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import Input from '@/components/common/Input.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import TextArea from '@/components/common/TextArea.vue'
 import supplierProvidersAPI, { type SupplierProvider } from '@/api/admin/supplierProviders'
 import { customPlatformsAPI, type CustomPlatform } from '@/api/admin/customPlatforms'
 import {
@@ -2019,6 +2075,7 @@ import {
   setSupplierLocalAccountPlatformOverride,
   startSupplierAccountBatchTest,
   startSyncUpstreamModelsBatchJob,
+  updateSupplierAccountRemark,
   type SupplierAccountGroupBindItemResult,
   type SupplierAccountGroupBindResult,
   type SupplierBindableLocalAccount,
@@ -2167,6 +2224,9 @@ const healthGuardDetailRun = ref<SupplierAutomationRun | null>(null)
 const businessPlatformAccount = ref<SupplierProviderAccount | null>(null)
 const businessPlatformDraft = ref('')
 const savingBusinessPlatform = ref(false)
+const remarkAccount = ref<SupplierProviderAccount | null>(null)
+const remarkDraft = ref('')
+const savingAccountRemark = ref(false)
 const batchTestPreparing = ref(false)
 const batchTesting = ref(false)
 const batchTestCancelling = ref(false)
@@ -3804,7 +3864,7 @@ const accountActionMenuTargets = computed(() =>
 function openAccountActionMenu(account: SupplierProviderAccount, event: MouseEvent) {
   const menuWidth = 200
   // 估算值只用于「贴边时上翻」，多一个菜单项就多一行高度，估小了会让底部被视口裁掉。
-  const menuHeight = 420
+  const menuHeight = 445
   const viewportPadding = 8
   accountActionMenu.open = true
   accountActionMenu.account = account
@@ -4030,6 +4090,38 @@ async function saveBusinessPlatform() {
     appStore.showError(extractApiErrorMessage(err, '保存业务平台失败'))
   } finally {
     savingBusinessPlatform.value = false
+  }
+}
+
+// 备注维护：改的是上游账号行自己的 remark，与本地账号匹配状态无关。
+function openAccountRemarkDialog(account: SupplierProviderAccount) {
+  if (savingAccountRemark.value) return
+  remarkAccount.value = account
+  remarkDraft.value = account.remark || ''
+}
+
+function closeAccountRemarkDialog() {
+  if (savingAccountRemark.value) return
+  remarkAccount.value = null
+  remarkDraft.value = ''
+}
+
+async function saveAccountRemark() {
+  const account = remarkAccount.value
+  if (!account || savingAccountRemark.value) return
+
+  const remark = remarkDraft.value.trim()
+  savingAccountRemark.value = true
+  try {
+    await updateSupplierAccountRemark(account.id, remark)
+    appStore.showSuccess(remark ? '备注已保存' : '备注已清除')
+    remarkAccount.value = null
+    remarkDraft.value = ''
+    await loadAccounts()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '保存备注失败'))
+  } finally {
+    savingAccountRemark.value = false
   }
 }
 
@@ -5854,6 +5946,42 @@ function formatTime(value?: string): string {
   color: var(--sp-muted);
 }
 
+/* 本地账号状态列 = 状态徽标 + 行备注（最多两行）。备注做成印章：
+   方角 + 实边 + 淡底 + 加粗微字距，与同列圆角的状态徽标拉开形态差异。
+   色值取比页面主橙（--sp-orange = #ea580c）更深一档的橙，让它在一列状态徽标里
+   一眼跳出来；不能直接改 --sp-orange —— 那是页面级变量，状态徽标和工具栏按钮共用。
+   超过两行截断，完整内容走 title，避免长备注把整行撑高。 */
+.sp-local-status-cell {
+  display: grid;
+  justify-items: start;
+  gap: 0.3rem;
+}
+
+.sp-account-remark {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  border: 1px solid #c2410c;
+  border-radius: 0.125rem;
+  padding: 0.18rem 0.45rem;
+  background: color-mix(in srgb, #c2410c 14%, var(--sp-panel));
+  color: #c2410c;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+
+/* 暗色下深橙会糊进深色面板（--sp-panel = #1f2937），换成亮橙才谈得上「明显」。 */
+.dark .sp-account-remark {
+  border-color: #fb923c;
+  background: color-mix(in srgb, #fb923c 20%, var(--sp-panel));
+  color: #fb923c;
+}
+
 .sp-test-status {
   font-weight: 700;
 }
@@ -6716,6 +6844,51 @@ button.sp-guard-failure-hint:hover {
 .sp-group-default-account-action:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* 备注维护弹窗。BaseDialog 会 Teleport 到 body，取不到 .supplier-management-page 上的
+   --sp-* 变量，所以在 modal-content 上显式兜底一份（否则弹窗内的 sp-button 会退回浅色）。 */
+:global(.modal-content:has(.sp-account-remark-dialog)) {
+  --sp-panel: #ffffff;
+  --sp-panel-2: #f9fafb;
+  --sp-line: #e5e7eb;
+  --sp-soft: #f1f5f9;
+  --sp-text: #111827;
+  --sp-muted: #64748b;
+  --sp-cyan: #3b82f6;
+}
+
+:global(.dark .modal-content:has(.sp-account-remark-dialog)) {
+  --sp-panel: #1f2937;
+  --sp-panel-2: #111827;
+  --sp-line: #374151;
+  --sp-soft: #374151;
+  --sp-text: #f9fafb;
+  --sp-muted: #9ca3af;
+  --sp-cyan: #3b82f6;
+}
+
+.sp-account-remark-dialog {
+  display: grid;
+  gap: 1rem;
+  padding: 0.15rem 0.05rem 0.25rem;
+}
+
+.sp-account-remark-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0;
+  color: var(--sp-muted);
+  font-size: 0.8rem;
+}
+
+.sp-account-remark-target strong {
+  color: var(--sp-text);
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 :global(.modal-content:has(.sp-guard-failure-dialog)),

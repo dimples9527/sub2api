@@ -132,6 +132,9 @@ func (r *supplierProviderDataRepoStub) DeleteGroup(context.Context, int64) error
 func (r *supplierProviderDataRepoStub) DeleteAccount(context.Context, int64) error {
 	return nil
 }
+func (r *supplierProviderDataRepoStub) UpdateAccountRemark(context.Context, int64, string) error {
+	return nil
+}
 func (r *supplierProviderDataRepoStub) ReconcileAccountLocalMappings(context.Context, int64) (SupplierAccountAutoMatchResult, error) {
 	return SupplierAccountAutoMatchResult{}, nil
 }

@@ -87,6 +87,7 @@ type SupplierProviderAccount struct {
 	GroupRecordID                        *int64                                `json:"group_record_id,omitempty"`
 	GroupRecordDeleteEligible            bool                                  `json:"group_record_delete_eligible"`
 	AccountRecordDeleteEligible          bool                                  `json:"account_record_delete_eligible"`
+	Remark                               string                                `json:"remark,omitempty"`
 }
 
 // SupplierAccountAutoMatchResult 是一次「上游账号 → 本地账号」绑定扫描的结果。
@@ -252,6 +253,7 @@ type SupplierProviderDataRepository interface {
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
 	DeleteAccount(ctx context.Context, accountID int64) error
+	UpdateAccountRemark(ctx context.Context, accountID int64, remark string) error
 	// ReconcileAccountLocalMappings 在同步写入上游账号后，把「上游账号 → 本地账号」的绑定落库；
 	// 已绑定的行不会被重置，所以上游改密钥名不会断链。
 	ReconcileAccountLocalMappings(ctx context.Context, providerID int64) (SupplierAccountAutoMatchResult, error)

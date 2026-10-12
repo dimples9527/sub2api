@@ -234,6 +234,9 @@ type supplierProviderSyncHandlerDataStub struct {
 	deleteGroupErr          error
 	deletedAccountID        int64
 	deleteAccountErr        error
+	remarkAccountID         int64
+	remark                  string
+	remarkErr               error
 }
 
 type supplierCustomPlatformResolverStub struct {
@@ -414,6 +417,12 @@ func (s *supplierProviderSyncHandlerDataStub) DeleteGroup(_ context.Context, gro
 func (s *supplierProviderSyncHandlerDataStub) DeleteAccount(_ context.Context, accountID int64) error {
 	s.deletedAccountID = accountID
 	return s.deleteAccountErr
+}
+
+func (s *supplierProviderSyncHandlerDataStub) UpdateAccountRemark(_ context.Context, accountID int64, remark string) error {
+	s.remarkAccountID = accountID
+	s.remark = remark
+	return s.remarkErr
 }
 
 func (s *supplierProviderSyncHandlerDataStub) SetAccountLocalMapping(_ context.Context, _ int64, _ *int64) error {
