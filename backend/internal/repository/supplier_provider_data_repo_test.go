@@ -542,6 +542,7 @@ var supplierProviderAccountListColumns = []string{
 	"group_key", "group_name", "platform", "group_status", "rate_multiplier", "raw_status", "active",
 	"last_seen_at", "inactive_at",
 	"local_account_match_status", "local_account_match_count",
+	"auto_match_status", "matched_upstream_name", "name_change_pending",
 	"suspected_local_account_id", "suspected_local_account_name",
 	"local_account_id", "local_account_name", "local_account_platform", "local_account_type", "platform_override", "effective_platform", "local_account_priority",
 	"local_account_status", "local_account_schedulable",
@@ -585,17 +586,21 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        a.rate_multiplier, a.raw_status, a.active,
        a.last_seen_at, a.inactive_at,
        CASE
+         WHEN bound_account.id IS NOT NULL THEN 'matched'
          WHEN local_match.match_count = 0 THEN 'unmatched'
          WHEN local_match.match_count = 1 THEN 'matched'
          ELSE 'conflict'
        END AS local_account_match_status,
-       local_match.match_count AS local_account_match_count,
+       CASE WHEN bound_account.id IS NOT NULL THEN 1 ELSE local_match.match_count END AS local_account_match_count,
+       COALESCE(a.auto_match_status, '') AS auto_match_status,
+       COALESCE(a.matched_upstream_name, '') AS matched_upstream_name,
+       ` + supplierProviderAccountNameChangePendingSQL() + ` AS name_change_pending,
        CASE
-         WHEN suspected_match.orphan_count = 1 AND unmatched_upstream.unmatched_upstream_count = 1
+         WHEN suspected_match.orphan_count = 1 AND suspected_match.orphan_claim_count = 1
          THEN suspected_account.id
        END AS suspected_local_account_id,
        CASE
-         WHEN suspected_match.orphan_count = 1 AND unmatched_upstream.unmatched_upstream_count = 1
+         WHEN suspected_match.orphan_count = 1 AND suspected_match.orphan_claim_count = 1
          THEN COALESCE(suspected_account.name, '')
          ELSE ''
        END AS suspected_local_account_name,
@@ -675,10 +680,10 @@ LEFT JOIN LATERAL (
   FROM accounts local_account
   WHERE local_account.deleted_at IS NULL
     AND ` + supplierProviderLocalAccountMatchCondition("local_account.name", "a.name") + `) local_match ON TRUE
+` + supplierProviderAccountBoundAccountJoinSQL() + `
 ` + supplierProviderSuspectedLocalAccountMatchSQL() + `
 LEFT JOIN accounts matched_account
-  ON matched_account.id = local_match.local_account_id
- AND local_match.match_count = 1
+  ON matched_account.id = COALESCE(bound_account.id, CASE WHEN local_match.match_count = 1 THEN local_match.local_account_id END)
 LEFT JOIN supplier_local_account_platform_overrides platform_override
   ON platform_override.local_account_id = matched_account.id
 LEFT JOIN LATERAL (
@@ -962,7 +967,7 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
-			"matched", 1, nil, "", int64(101), "prefix-key-1", "anthropic", "apikey", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed", int64(1234), "2026-08-27T08:30:00Z", 3, 1,
+			"matched", 1, "auto_matched", "Primary", false, nil, "", int64(101), "prefix-key-1", "anthropic", "apikey", "", "anthropic", 80, "active", true, "success", "2026-07-16T09:30:00Z", "upstream authentication failed", int64(1234), "2026-08-27T08:30:00Z", 3, 1,
 			6, 5, int64(280),
 			`[{"id":202,"name":"Claude 订阅","platform":"anthropic","rate_multiplier":2,"subscription_type":"subscription"},{"id":201,"name":"OpenAI 专线","platform":"openai","rate_multiplier":1.5,"subscription_type":"standard"}]`,
 			12.5, 3.25, 1.5, nil, false,
@@ -1029,7 +1034,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesInactiveGroupDeleteMet
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "account-1", "Primary", "active", "group-1", "VIP", "", "inactive",
 			2.5, "active", true, now, nil,
-			"unmatched", 0, nil, "", nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil,
+			"unmatched", 0, "unmatched", "", false, nil, "", nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil,
 			int64(88), true,
 		))
 
@@ -1070,11 +1075,11 @@ func TestSupplierProviderDataRepositoryListAccountsSQLContractMapsUnmatchedAndCo
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).
 			AddRow(
 				int64(7), int64(42), "Supplier A", "missing-key", "Missing", "active", "group-1", "VIP", "openai", "active", 2.5, "active", true, now, nil,
-				"unmatched", 0, nil, "", nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
+				"unmatched", 0, "unmatched", "", false, nil, "", nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
 			).
 			AddRow(
 				int64(8), int64(42), "Supplier A", "duplicate-key", "Duplicate", "active", "group-2", "Standard", "openai", "active", 1.5, "active", true, now, nil,
-				"conflict", 2, nil, "", nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
+				"conflict", 2, "unmatched", "", false, nil, "", nil, "", "", "", "", "", nil, "", nil, "", "", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
 			))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -1125,6 +1130,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 		"group_key", "group_name", "platform", "group_status", "rate_multiplier", "raw_status", "active",
 		"last_seen_at", "inactive_at",
 		"local_account_match_status", "local_account_match_count",
+		"auto_match_status", "matched_upstream_name", "name_change_pending",
 		"suspected_local_account_id", "suspected_local_account_name",
 		"local_account_id", "local_account_name", "local_account_platform", "local_account_type", "platform_override", "effective_platform", "local_account_priority",
 		"local_account_status", "local_account_schedulable",
@@ -1143,7 +1149,7 @@ func TestSupplierProviderDataRepositoryListAccountsExposesLocalAccountTypeForDup
 		WithArgs(int64(42), 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
-			"matched", 1, nil, "", int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
+			"matched", 1, "auto_matched", "Primary", false, nil, "", int64(101), "local-account", "openai", "apikey", "", "openai", 80, "active", true, "success", "2026-07-28T09:30:00Z", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{
@@ -1174,7 +1180,7 @@ func TestSupplierProviderDataRepositoryListAccountsUsesBusinessPlatformOverride(
 		WithArgs(int64(42), "grok", 20, 0).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(7), int64(42), "Supplier A", "upstream-key", "Primary", "active", "group-1", "VIP", "openai", "active", 1.5, "active", true, now, nil,
-			"matched", 1, nil, "", int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
+			"matched", 1, "manual", "Primary", true, nil, "", int64(101), "local-account", "openai", "apikey", "grok", "grok", 80, "active", true, "success", "2026-07-27T11:30:00Z", "", int64(0), "", 0, 0, 0, 0, int64(0), `[]`, 12.5, 3.25, nil, nil, false,
 		))
 
 	result, err := repo.ListAccounts(context.Background(), service.SupplierProviderDataListParams{

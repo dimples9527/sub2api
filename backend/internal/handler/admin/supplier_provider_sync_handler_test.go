@@ -416,6 +416,10 @@ func (s *supplierProviderSyncHandlerDataStub) DeleteAccount(_ context.Context, a
 	return s.deleteAccountErr
 }
 
+func (s *supplierProviderSyncHandlerDataStub) SetAccountLocalMapping(_ context.Context, _ int64, _ *int64) error {
+	return nil
+}
+
 func TestSupplierProviderSyncHandlerRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	syncStub := &supplierProviderSyncHandlerSyncStub{}

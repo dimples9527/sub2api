@@ -54,6 +54,7 @@ type SupplierProviderDataRepositoryPort interface {
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
 	DeleteAccount(ctx context.Context, accountID int64) error
+	SetAccountLocalMapping(ctx context.Context, accountID int64, localAccountID *int64) error
 }
 
 type SupplierProviderGroupMatcherPort interface {
@@ -913,6 +914,42 @@ func (h *SupplierProviderSyncHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"account_id": accountID})
+}
+
+// UpdateAccountLocalMapping 手动指定/清除某个上游账号绑定的本地账号（传 local_account_id: null 即解绑）。
+// 与 UpdateGroupMapping 同构：这是持久化绑定的兜底入口 —— 自动绑定猜错时可以手动改回来。
+func (h *SupplierProviderSyncHandler) UpdateAccountLocalMapping(c *gin.Context) {
+	accountID, ok := parseSupplierAccountID(c)
+	if !ok {
+		return
+	}
+
+	var payload map[string]json.RawMessage
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		response.ErrorFrom(c, badRequest("映射参数格式无效"))
+		return
+	}
+	rawLocalAccountID, ok := payload["local_account_id"]
+	if !ok {
+		response.ErrorFrom(c, badRequest("缺少本地账号 ID"))
+		return
+	}
+
+	var localAccountID *int64
+	if string(rawLocalAccountID) != "null" {
+		var value int64
+		if err := json.Unmarshal(rawLocalAccountID, &value); err != nil || value <= 0 {
+			response.ErrorFrom(c, badRequest("本地账号 ID 无效"))
+			return
+		}
+		localAccountID = &value
+	}
+
+	if err := h.dataRepo.SetAccountLocalMapping(c.Request.Context(), accountID, localAccountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"account_id": accountID, "local_account_id": localAccountID})
 }
 
 func (h *SupplierProviderSyncHandler) AutoMatchGroups(c *gin.Context) {

@@ -83,6 +83,7 @@ func TestSupplierProviderSyncServiceEmitsProgressForAccountSync(t *testing.T) {
 			SupplierSyncProgressStageAccounts,
 			SupplierSyncProgressStagePersist,
 			SupplierSyncProgressStagePersist,
+			SupplierSyncProgressStagePersist,
 			SupplierSyncProgressStageAccounts,
 		},
 		progressStages(events),

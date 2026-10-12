@@ -122,6 +122,9 @@ func registerSupplierManagementRoutes(admin *gin.RouterGroup, h *handler.Handler
 			accountHealth.GET("/records", h.Admin.SupplierAccountHealth.ListRecords)
 		}
 		supplier.DELETE("/accounts/:id", h.Admin.SupplierProviderSync.DeleteAccount)
+		// 上游账号 ↔ 本地账号的持久化绑定（:id 是上游账号 id，不是本地账号 id）。
+		// 单独起一个静态段，避免与 PUT /accounts/:local_account_id/... 的 :local_account_id 通配段冲突。
+		supplier.PUT("/account-local-mappings/:id", h.Admin.SupplierProviderSync.UpdateAccountLocalMapping)
 		supplier.GET("/monitor-targets", h.Admin.SupplierProviderSync.ListMonitorTargets)
 		supplier.GET("/monitor-targets/local-accounts", h.Admin.SupplierProviderSync.ListBindableLocalAccounts)
 		supplier.PUT("/monitor-targets/:id/binding", h.Admin.SupplierProviderSync.BindMonitorTarget)

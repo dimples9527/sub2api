@@ -424,6 +424,13 @@
             >
               <span class="sp-match-badge matched">已匹配</span>
               <strong>{{ displayValue(account.local_account_name) }}</strong>
+              <!-- 绑定是持久化的，上游改名不会把这一行打散；这里只提示本地名还是旧的，
+                   点「快捷改名」对齐后标记自动消失。 -->
+              <span
+                v-if="account.name_change_pending"
+                class="sp-account-upstream-group-warn"
+                :title="UPSTREAM_NAME_CHANGED_HINT"
+              >上游已改名</span>
             </div>
             <span v-else class="sp-account-muted">—</span>
           </template>
@@ -2222,6 +2229,10 @@ const UNBINDABLE_ACCOUNT_HINT = '没有匹配到唯一的本地账号，无法�
 // 上游改过密钥名时本地旧名会对不上，行会变成未匹配。后端在能唯一确定时给出「疑似」账号，
 // 提示里必须说清这是按名字推断的，别让用户把它当成已确认的匹配。
 const SUSPECTED_LOCAL_ACCOUNT_HINT = '上游可能改过密钥名，本地账号名还没同步。这是按名字推断出的疑似账号，可点「快捷改名」把名字对齐回去。'
+
+// 行仍绑在原来的本地账号上（绑定已持久化，不会因为上游改名而断），但本地账号名还是旧的上游名。
+// 提示用户点「快捷改名」把本地名对齐；对齐后这个标记会自动消失。
+const UPSTREAM_NAME_CHANGED_HINT = '上游改过密钥名，本地账号名还是旧的。关联不会断，可点「快捷改名」把本地账号名对齐成「供应商名称-上游密钥名称」。'
 
 const selectedUnbindableAccountCount = computed(
   () => selectedAccounts.value.length - selectedBindableAccounts.value.length

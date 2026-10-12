@@ -47,6 +47,12 @@ func (s *supplierProviderMonitorAutoMatchDataStub) GetGroupForAutoMatch(context.
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateGroupMapping(context.Context, int64, *int64) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) DeleteGroup(context.Context, int64) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) DeleteAccount(context.Context, int64) error { return nil }
+func (s *supplierProviderMonitorAutoMatchDataStub) ReconcileAccountLocalMappings(context.Context, int64) (SupplierAccountAutoMatchResult, error) {
+	return SupplierAccountAutoMatchResult{}, nil
+}
+func (s *supplierProviderMonitorAutoMatchDataStub) SetAccountLocalMapping(context.Context, int64, *int64) error {
+	return nil
+}
 func (s *supplierProviderMonitorAutoMatchDataStub) ApplyAutoMatch(context.Context, int64, int64, string) (bool, error) { return false, nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateAutoMatchState(context.Context, int64, string, bool) error { return nil }
 func (s *supplierProviderMonitorAutoMatchDataStub) UpdateAutoMatchIgnored(context.Context, int64, bool) error { return nil }

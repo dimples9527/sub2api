@@ -107,6 +107,13 @@ export interface SupplierProviderAccount {
   inactive_at?: string
   local_account_match_status: 'unmatched' | 'matched' | 'conflict'
   local_account_match_count: number
+  // 上游账号 → 本地账号的持久化绑定状态：auto_matched（同步后按名字自动绑定）/ manual（人工指定）/ unmatched。
+  auto_match_status?: string
+  // 建立绑定时记录的上游密钥名。上游改名后它保持不变，是「历史匹配」的依据。
+  matched_upstream_name?: string
+  // 绑定还在，但绑定的本地账号名已不满足当前匹配判据 —— 即上游改过密钥名、本地名还没对齐。
+  // 点「快捷改名」把本地名对齐后会自动变回 false。
+  name_change_pending?: boolean
   // 上游改了密钥名后本地旧名对不上，行会变成未匹配。后端在能唯一确定时给出「疑似就是它」的本地账号，
   // 让页面仍能显示本地账号名、并允许「快捷改名」把它对齐。只在未匹配时有值。
   suspected_local_account_id?: number
@@ -516,6 +523,19 @@ export async function autoMatchSupplierMonitorTargets(
 export async function deleteSupplierAccount(id: number): Promise<{ account_id: number }> {
   const { data } = await apiClient.delete<{ account_id: number }>(
     `/admin/supplier-management/accounts/${id}`
+  )
+  return data
+}
+
+// 手动指定/清除某个上游账号绑定的本地账号（localAccountID 传 null 即解绑）。
+// 自动绑定猜错时的兜底入口；绑定本身持久化在 supplier_provider_accounts.local_account_id。
+export async function updateSupplierAccountLocalMapping(
+  accountID: number,
+  localAccountID: number | null
+): Promise<{ account_id: number; local_account_id: number | null }> {
+  const { data } = await apiClient.put<{ account_id: number; local_account_id: number | null }>(
+    `/admin/supplier-management/account-local-mappings/${accountID}`,
+    { local_account_id: localAccountID }
   )
   return data
 }

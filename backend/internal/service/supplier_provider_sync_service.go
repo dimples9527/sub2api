@@ -20,6 +20,8 @@ var ErrSupplierProviderMonitorTargetNotFound = infraerrors.NotFound("SUPPLIER_PR
 var ErrSupplierProviderMonitorBindingInvalid = infraerrors.BadRequest("SUPPLIER_PROVIDER_MONITOR_BINDING_INVALID", "supplier provider monitor binding is invalid")
 var ErrSupplierProviderGroupDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_GROUP_DELETE_CONFLICT", "供应商上游分组记录不存在或已删除")
 var ErrSupplierProviderAccountDeleteConflict = infraerrors.Conflict("SUPPLIER_PROVIDER_ACCOUNT_DELETE_CONFLICT", "供应商上游账号记录不存在或已删除")
+var ErrSupplierProviderAccountNotFound = infraerrors.NotFound("SUPPLIER_PROVIDER_ACCOUNT_NOT_FOUND", "supplier provider account not found")
+var ErrSupplierLocalAccountNotFound = infraerrors.NotFound("SUPPLIER_LOCAL_ACCOUNT_NOT_FOUND", "active local account not found")
 
 type SupplierProviderAccountBindingGroup struct {
 	ID               int64   `json:"id"`
@@ -51,6 +53,9 @@ type SupplierProviderAccount struct {
 	InactiveAt                           *time.Time                            `json:"inactive_at,omitempty"`
 	LocalAccountMatchStatus              string                                `json:"local_account_match_status"`
 	LocalAccountMatchCount               int                                   `json:"local_account_match_count"`
+	AutoMatchStatus                      string                                `json:"auto_match_status,omitempty"`
+	MatchedUpstreamName                  string                                `json:"matched_upstream_name,omitempty"`
+	NameChangePending                    bool                                  `json:"name_change_pending"`
 	SuspectedLocalAccountID              *int64                                `json:"suspected_local_account_id,omitempty"`
 	SuspectedLocalAccountName            string                                `json:"suspected_local_account_name,omitempty"`
 	LocalAccountID                       *int64                                `json:"local_account_id,omitempty"`
@@ -82,6 +87,14 @@ type SupplierProviderAccount struct {
 	GroupRecordID                        *int64                                `json:"group_record_id,omitempty"`
 	GroupRecordDeleteEligible            bool                                  `json:"group_record_delete_eligible"`
 	AccountRecordDeleteEligible          bool                                  `json:"account_record_delete_eligible"`
+}
+
+// SupplierAccountAutoMatchResult 是一次「上游账号 → 本地账号」绑定扫描的结果。
+// AutoMatched：本次按名字唯一命中并首次落库的绑定数；Unbound：因本地账号已删除而清掉的失效绑定数。
+type SupplierAccountAutoMatchResult struct {
+	ProviderID  int64 `json:"provider_id"`
+	AutoMatched int   `json:"auto_matched"`
+	Unbound     int   `json:"unbound"`
 }
 
 type SupplierProviderGroup struct {
@@ -239,6 +252,11 @@ type SupplierProviderDataRepository interface {
 	UpdateGroupMapping(ctx context.Context, groupID int64, localGroupID *int64) error
 	DeleteGroup(ctx context.Context, groupID int64) error
 	DeleteAccount(ctx context.Context, accountID int64) error
+	// ReconcileAccountLocalMappings 在同步写入上游账号后，把「上游账号 → 本地账号」的绑定落库；
+	// 已绑定的行不会被重置，所以上游改密钥名不会断链。
+	ReconcileAccountLocalMappings(ctx context.Context, providerID int64) (SupplierAccountAutoMatchResult, error)
+	// SetAccountLocalMapping 手动指定/清除某个上游账号绑定的本地账号。
+	SetAccountLocalMapping(ctx context.Context, accountID int64, localAccountID *int64) error
 	ApplyAutoMatch(ctx context.Context, groupID, localGroupID int64, matchedUpstreamName string) (bool, error)
 	UpdateAutoMatchState(ctx context.Context, groupID int64, status string, nameChangePending bool) error
 	UpdateAutoMatchIgnored(ctx context.Context, groupID int64, ignored bool) error
@@ -1522,6 +1540,13 @@ func (s *SupplierProviderSyncService) executeStage(ctx context.Context, provider
 		if err != nil {
 			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
 			return supplierSyncStageExecution{Counts: counts}, err
+		}
+		// 落「上游账号 → 本地账号」的绑定：只补未绑定的行、已绑定的行不动，
+		// 所以上游改密钥名不会再把已匹配的行打散（见 ReconcileAccountLocalMappings）。
+		SupplierSyncProgress(ctx, SupplierSyncProgressStagePersist, "正在更新账号本地绑定关系", nil)
+		if _, err := s.dataRepo.ReconcileAccountLocalMappings(ctx, provider.ID); err != nil {
+			SupplierSyncProgressFail(ctx, SupplierSyncProgressStagePersist, err)
+			return supplierSyncStageExecution{Counts: counts}, fmt.Errorf("reconcile supplier account local mappings: %w", err)
 		}
 		SupplierSyncProgressOK(ctx, SupplierSyncProgressStagePersist, "API Key 数据写入完成")
 		return supplierSyncStageExecution{Counts: counts}, nil

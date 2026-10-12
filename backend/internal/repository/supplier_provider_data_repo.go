@@ -471,17 +471,21 @@ SELECT a.id, a.provider_id, p.name AS provider_name, a.upstream_account_key, a.n
        a.rate_multiplier, a.raw_status, a.active,
        a.last_seen_at, a.inactive_at,
        CASE
+         WHEN bound_account.id IS NOT NULL THEN 'matched'
          WHEN local_match.match_count = 0 THEN 'unmatched'
          WHEN local_match.match_count = 1 THEN 'matched'
          ELSE 'conflict'
        END AS local_account_match_status,
-       local_match.match_count AS local_account_match_count,
+       CASE WHEN bound_account.id IS NOT NULL THEN 1 ELSE local_match.match_count END AS local_account_match_count,
+       COALESCE(a.auto_match_status, '') AS auto_match_status,
+       COALESCE(a.matched_upstream_name, '') AS matched_upstream_name,
+       `+supplierProviderAccountNameChangePendingSQL()+` AS name_change_pending,
        CASE
-         WHEN suspected_match.orphan_count = 1 AND unmatched_upstream.unmatched_upstream_count = 1
+         WHEN suspected_match.orphan_count = 1 AND suspected_match.orphan_claim_count = 1
          THEN suspected_account.id
        END AS suspected_local_account_id,
        CASE
-         WHEN suspected_match.orphan_count = 1 AND unmatched_upstream.unmatched_upstream_count = 1
+         WHEN suspected_match.orphan_count = 1 AND suspected_match.orphan_claim_count = 1
          THEN COALESCE(suspected_account.name, '')
          ELSE ''
        END AS suspected_local_account_name,
@@ -562,10 +566,10 @@ LEFT JOIN LATERAL (
   WHERE local_account.deleted_at IS NULL
     AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
 ) local_match ON TRUE
+`+supplierProviderAccountBoundAccountJoinSQL()+`
 `+supplierProviderSuspectedLocalAccountMatchSQL()+`
 LEFT JOIN accounts matched_account
-  ON matched_account.id = local_match.local_account_id
- AND local_match.match_count = 1
+  ON matched_account.id = COALESCE(bound_account.id, CASE WHEN local_match.match_count = 1 THEN local_match.local_account_id END)
 LEFT JOIN supplier_local_account_platform_overrides platform_override
   ON platform_override.local_account_id = matched_account.id
 LEFT JOIN LATERAL (
@@ -1170,6 +1174,123 @@ WHERE a.id = $1`, accountID)
 	}
 	if affected == 0 {
 		return service.ErrSupplierProviderAccountDeleteConflict
+	}
+	return nil
+}
+
+// ReconcileAccountLocalMappings 在同步写入上游账号之后，把「上游账号 → 本地账号」的绑定落到
+// supplier_provider_accounts.local_account_id 上。
+//
+// 为什么必须持久化：supplierProviderLocalAccountMatchCondition 的 6 个候选全部由上游「当前名」派生，
+// 上游一改密钥名，本地旧名就对不上 —— 列表变成未匹配、本地账号列空白，而且没有任何入口能改回去
+// （快捷改名挂在 canManageLocalAccount 下）。上游账号的 upstream_account_key（上游密钥 id）改名不变，
+// 所以把「首次匹配到的本地账号」记下来，之后改名就不再断链。分组侧早已这么做
+// （supplier_provider_groups.local_group_id，见 migrations/182、183），这里补齐账号侧。
+//
+// 两步都在同一个 provider 范围内做：
+//  1. 解绑：绑定的本地账号已被软删时清空绑定，让它重新参与匹配；
+//  2. 绑定：尚未绑定的活跃上游账号，按名字**唯一**命中本地账号时写入绑定，并记下当时的上游名
+//     （matched_upstream_name，即「历史匹配」的依据）。
+//
+// ⚠️ 只写 local_account_id IS NULL 的行，已绑定的行一律不动 —— 否则每次同步都会把绑定重置成
+// 「按当前名重算」，改名照样断链。名字匹配只在首次绑定时用一次。
+func (r *supplierProviderDataRepository) ReconcileAccountLocalMappings(ctx context.Context, providerID int64) (service.SupplierAccountAutoMatchResult, error) {
+	result := service.SupplierAccountAutoMatchResult{ProviderID: providerID}
+	if providerID <= 0 {
+		return result, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return result, fmt.Errorf("begin supplier account mapping reconcile: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	unbound, err := tx.ExecContext(ctx, `
+UPDATE supplier_provider_accounts a
+SET local_account_id = NULL,
+    auto_match_status = 'unmatched',
+    matched_upstream_name = NULL,
+    updated_at = NOW()
+WHERE a.provider_id = $1
+  AND a.local_account_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM accounts local_account
+    WHERE local_account.id = a.local_account_id
+      AND local_account.deleted_at IS NULL
+  )`, providerID)
+	if err != nil {
+		return result, fmt.Errorf("unbind stale supplier account mappings: %w", err)
+	}
+	if affected, err := unbound.RowsAffected(); err == nil {
+		result.Unbound = int(affected)
+	}
+
+	bound, err := tx.ExecContext(ctx, `
+UPDATE supplier_provider_accounts a
+SET local_account_id = candidate.local_account_id,
+    auto_match_status = 'auto_matched',
+    matched_upstream_name = a.name,
+    updated_at = NOW()
+FROM (
+  SELECT a2.id AS account_id, matched.local_account_id
+  FROM supplier_provider_accounts a2
+  JOIN supplier_providers p ON p.id = a2.provider_id
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS match_count,
+           MIN(local_account.id) AS local_account_id
+    FROM accounts local_account
+    WHERE local_account.deleted_at IS NULL
+      AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a2.name")+`
+  ) matched ON TRUE
+  WHERE a2.provider_id = $1
+    AND a2.active = TRUE
+    AND a2.local_account_id IS NULL
+    AND matched.match_count = 1
+) candidate
+WHERE a.id = candidate.account_id`, providerID)
+	if err != nil {
+		return result, fmt.Errorf("bind supplier account mappings: %w", err)
+	}
+	if affected, err := bound.RowsAffected(); err == nil {
+		result.AutoMatched = int(affected)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return result, fmt.Errorf("commit supplier account mapping reconcile: %w", err)
+	}
+	return result, nil
+}
+
+// SetAccountLocalMapping 手动指定/清除某个上游账号绑定的本地账号（列表页的「手动关联」）。
+// 与 UpdateGroupMapping 同构：传 NULL 时退回未匹配并清掉历史名，传具体账号时标记为人工指定。
+func (r *supplierProviderDataRepository) SetAccountLocalMapping(ctx context.Context, accountID int64, localAccountID *int64) error {
+	if localAccountID != nil {
+		var exists bool
+		if err := r.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM accounts WHERE id = $1 AND deleted_at IS NULL)", *localAccountID).Scan(&exists); err != nil {
+			return fmt.Errorf("check supplier local account: %w", err)
+		}
+		if !exists {
+			return service.ErrSupplierLocalAccountNotFound
+		}
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+UPDATE supplier_provider_accounts
+SET local_account_id = $2::bigint,
+    auto_match_status = CASE WHEN $2::bigint IS NULL THEN 'unmatched' ELSE 'manual' END,
+    matched_upstream_name = CASE WHEN $2::bigint IS NULL THEN NULL ELSE name END,
+    updated_at = NOW()
+WHERE id = $1`, accountID, localAccountID)
+	if err != nil {
+		return fmt.Errorf("update supplier account local mapping: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read supplier account local mapping result: %w", err)
+	}
+	if affected == 0 {
+		return service.ErrSupplierProviderAccountNotFound
 	}
 	return nil
 }
@@ -2544,6 +2665,7 @@ func scanSupplierProviderAccount(scanner supplierProviderAccountScanner) (servic
 		&item.Name, &item.Status, &item.GroupKey, &item.GroupName, &item.Platform, &item.GroupStatus, &item.RateMultiplier,
 		&item.RawStatus, &item.Active, &item.LastSeenAt, &inactiveAt,
 		&item.LocalAccountMatchStatus, &item.LocalAccountMatchCount,
+		&item.AutoMatchStatus, &item.MatchedUpstreamName, &item.NameChangePending,
 		&suspectedLocalAccountID, &item.SuspectedLocalAccountName,
 		&localAccountID, &item.LocalAccountName, &item.LocalAccountPlatform, &item.LocalAccountType, &item.PlatformOverride, &item.EffectivePlatform, &localAccountPriority,
 		&item.LocalAccountStatus, &localAccountSchedulable,
@@ -2769,6 +2891,41 @@ func supplierProviderSuspectedLocalAccountSuffixSQL(localAccountNameSQL string) 
 		normalizedLocal, normalizedProvider, normalizedProvider, normalizedLocal, normalizedProvider, normalizedLocal)
 }
 
+// supplierProviderAccountBoundAccountJoinSQL 把「上游账号 → 本地账号」的持久化绑定接进列表查询。
+//
+// local_account_id 由同步后的 ReconcileAccountLocalMappings 写入，记的是「首次名字匹配到谁」。
+// 它不随上游改名失效（上游的 upstream_account_key 改名不变），所以列表优先用它；绑定的本地账号
+// 已被删除时（软删）这里 JOIN 不上，自动退回按名字匹配。
+func supplierProviderAccountBoundAccountJoinSQL() string {
+	return `LEFT JOIN accounts bound_account
+  ON bound_account.id = a.local_account_id
+ AND bound_account.deleted_at IS NULL`
+}
+
+// supplierProviderAccountNameChangePendingSQL 判断「上游改过密钥名、本地账号名还没对齐」：
+// 绑定还在（bound_account 来自 a.local_account_id），但绑定的那个本地账号名已经不满足当前的匹配
+// 判据 —— 即上游名变了、本地名没跟上。用户点「快捷改名」把本地名对齐后这个条件自然为假，
+// 所以不需要额外的「确认」入口，也不会出现状态漂移。
+func supplierProviderAccountNameChangePendingSQL() string {
+	return fmt.Sprintf("(bound_account.id IS NOT NULL AND NOT (%s))",
+		supplierProviderLocalAccountMatchCondition("bound_account.name", "a.name"))
+}
+
+// supplierProviderSuspectedLocalAccountSimilaritySQL 判断「本地账号名去掉供应商前缀后的后缀」与
+// 「上游账号名」（两者都已归一化）是否指向同一个账号。
+//
+// 上游改名的常见形态有两种：① 在原名首尾追加词（Kiro-特价 → Kiro-特价-新版），两边仍互为前缀；
+// ② 在原名中间插入或替换词（Kiro-特价 → Kiro Claude-特价），两边都不再互为前缀，但首尾两端都还在。
+// 因此除互为前缀外，再补一条「首 2 字符与末 2 字符都相同」。
+func supplierProviderSuspectedLocalAccountSimilaritySQL(suffixSQL, normalizedUpstreamSQL string) string {
+	return fmt.Sprintf(
+		"(%s LIKE %s || '%%' OR %s LIKE %s || '%%' OR (left(%s, 2) = left(%s, 2) AND right(%s, 2) = right(%s, 2)))",
+		normalizedUpstreamSQL, suffixSQL,
+		suffixSQL, normalizedUpstreamSQL,
+		normalizedUpstreamSQL, suffixSQL,
+		normalizedUpstreamSQL, suffixSQL)
+}
+
 // supplierProviderSuspectedLocalAccountMatchSQL 推导「疑似就是它」的本地账号，供列表页在断链时
 // 仍能显示本地账号名、并把「快捷改名」开出来。
 //
@@ -2777,8 +2934,13 @@ func supplierProviderSuspectedLocalAccountSuffixSQL(localAccountNameSQL string) 
 // canManageLocalAccount 下，于是没有任何入口能把本地名对齐回去，形成死锁。
 //
 // 这里只开一条很窄的通道：该供应商名下「没有被任何上游账号匹配到」的本地账号（下称孤儿）里，
-// 名字去掉供应商名前缀后与上游当前名互为前缀的那一个。为了不改错账号，同时要求该供应商
-// 「未匹配的上游账号」也恰好只有 1 个 —— 否则无法确定这个孤儿对应的是哪一行。
+// 名字去掉供应商名前缀后与上游当前名相似（见 supplierProviderSuspectedLocalAccountSimilaritySQL）
+// 的那一个。为了不改错账号，同时要求该孤儿「只被当前这一个未匹配的上游账号认领」——
+// 若多个未匹配上游都指向同一个孤儿，说明无法确定对应关系，宁可不给。
+//
+// ⚠️ 判据必须是「孤儿侧唯一」，不能是「该供应商未匹配上游恰好 1 个」：后者会被历史遗留的
+// 永久未匹配（本地账号早已删除、根本不存在孤儿，如「GPT-PRO」）整体拖死 —— 只要供应商名下
+// 存在 1 个这种残留，再有任何 1 次上游改名，兜底入口就会全部关闭。
 func supplierProviderSuspectedLocalAccountMatchSQL() string {
 	normalize := supplierProviderLocalAccountNormalizeSQL
 	normalizedOrphan := normalize("orphan.name")
@@ -2786,9 +2948,22 @@ func supplierProviderSuspectedLocalAccountMatchSQL() string {
 	normalizedPrefix := normalize("COALESCE(p.account_name_prefix, '')")
 	normalizedUpstream := normalize("a.name")
 	suffix := supplierProviderSuspectedLocalAccountSuffixSQL("orphan.name")
+	orphanMatch := supplierProviderLocalAccountMatchCondition("orphan.name", "sibling.name")
+	claimantMatch := supplierProviderLocalAccountMatchCondition("claimant_match.name", "claimant.name")
 	return fmt.Sprintf(`LEFT JOIN LATERAL (
   SELECT COUNT(*) AS orphan_count,
-         MIN(orphan.id) AS orphan_id
+         MIN(orphan.id) AS orphan_id,
+         MIN((
+           SELECT COUNT(*)
+           FROM supplier_provider_accounts claimant
+           WHERE claimant.provider_id = a.provider_id
+             AND NOT EXISTS (
+               SELECT 1 FROM accounts claimant_match
+               WHERE claimant_match.deleted_at IS NULL
+                 AND %s
+             )
+             AND %s
+         )) AS orphan_claim_count
   FROM accounts orphan
   WHERE local_match.match_count = 0
     AND orphan.deleted_at IS NULL
@@ -2799,26 +2974,17 @@ func supplierProviderSuspectedLocalAccountMatchSQL() string {
         AND %s
     )
     AND length(%s) >= 2
-    AND (%s LIKE %s || '%%' OR %s LIKE %s || '%%')
+    AND %s
 ) suspected_match ON TRUE
 LEFT JOIN accounts suspected_account
   ON suspected_account.id = suspected_match.orphan_id
- AND suspected_match.orphan_count = 1
-LEFT JOIN LATERAL (
-  SELECT COUNT(*) AS unmatched_upstream_count
-  FROM supplier_provider_accounts sibling
-  WHERE sibling.provider_id = a.provider_id
-    AND NOT EXISTS (
-      SELECT 1 FROM accounts sibling_match
-      WHERE sibling_match.deleted_at IS NULL
-        AND %s
-    )
-) unmatched_upstream ON TRUE`,
+ AND suspected_match.orphan_count = 1`,
+		claimantMatch,
+		supplierProviderSuspectedLocalAccountSimilaritySQL(suffix, normalize("claimant.name")),
 		normalizedOrphan, normalizedProvider, normalizedPrefix, normalizedOrphan, normalizedPrefix,
-		supplierProviderLocalAccountMatchCondition("orphan.name", "sibling.name"),
+		orphanMatch,
 		suffix,
-		normalizedUpstream, suffix, suffix, normalizedUpstream,
-		supplierProviderLocalAccountMatchCondition("sibling_match.name", "sibling.name"))
+		supplierProviderSuspectedLocalAccountSimilaritySQL(suffix, normalizedUpstream))
 }
 
 func (r *supplierProviderDataRepository) GetLocalAccountEffectivePlatform(ctx context.Context, localAccountID int64) (string, error) {
