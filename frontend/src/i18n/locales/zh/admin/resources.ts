@@ -1340,6 +1340,8 @@ export default {
           searchPlaceholder: '搜索模型、提供商或类型...',
           allGroups: '全部分组',
           allProviders: '全部提供商',
+          catalogTitle: '平台目录',
+          catalogSummary: '{count} 个分组 · 倍率 {rate}',
           allModes: '全部类型',
           gridView: '网格视图',
           listView: '列表视图',

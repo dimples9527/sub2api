@@ -3,25 +3,44 @@
     <TablePageLayout>
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
-          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-            <div class="summary-pill">
-              <span>{{ t('admin.modelSquare.modelCount') }}</span>
-              <strong>{{ models.length }}</strong>
+          <!--
+            顶部统计从原来的灰色小 pill 提升为 KPI 卡组：三个数（模型 / 可用 / 分组）
+            各带图标与语义色顶条，页面顶部才有「头」——原先只有 h-11 的灰边框 pill，
+            视觉重量几乎为零，整页看起来没有起点。
+            形态对齐同模块 PlatformOverridesView 的 po-kpi（图标块 + 标签 + 数值 + 脚注），
+            但配色走本页 --ms-* 主题变量，深色下自动跟随。
+          -->
+          <div class="ms-kpi-grid">
+            <div class="ms-kpi ms-kpi-models">
+              <span class="ms-kpi-icon"><Icon name="grid" size="md" aria-hidden="true" /></span>
+              <span class="ms-kpi-body">
+                <span class="ms-kpi-label">{{ t('admin.modelSquare.modelCount') }}</span>
+                <strong class="ms-kpi-value">{{ models.length }}</strong>
+                <span class="ms-kpi-foot">配置进展示目录的模型</span>
+              </span>
             </div>
-            <div class="summary-pill">
-              <span>{{ t('admin.modelSquare.availableCount') }}</span>
-              <strong>{{ availableCount }}</strong>
+            <div class="ms-kpi ms-kpi-available">
+              <span class="ms-kpi-icon"><Icon name="checkCircle" size="md" aria-hidden="true" /></span>
+              <span class="ms-kpi-body">
+                <span class="ms-kpi-label">{{ t('admin.modelSquare.availableCount') }}</span>
+                <strong class="ms-kpi-value">{{ availableCount }}</strong>
+                <span class="ms-kpi-foot">已绑定分组，能被筛到</span>
+              </span>
             </div>
-            <div class="summary-pill">
-              <span>{{ t('admin.modelSquare.groupCount') }}</span>
-              <strong>{{ groups.length }}</strong>
+            <div class="ms-kpi ms-kpi-groups">
+              <span class="ms-kpi-icon"><Icon name="users" size="md" aria-hidden="true" /></span>
+              <span class="ms-kpi-body">
+                <span class="ms-kpi-label">{{ t('admin.modelSquare.groupCount') }}</span>
+                <strong class="ms-kpi-value">{{ groups.length }}</strong>
+                <span class="ms-kpi-foot">参与展示的分组</span>
+              </span>
             </div>
             <span v-if="hasActiveFilters" class="result-count">
               {{ t('admin.modelSquare.filteredCount', { filtered: sortedModels.length, total: models.length }) }}
             </span>
           </div>
 
-          <div class="flex flex-wrap items-center justify-end gap-2">
+          <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               class="btn btn-secondary"
@@ -48,13 +67,6 @@
               :placeholder="t('admin.modelSquare.searchPlaceholder')"
             />
           </div>
-
-          <Select
-            v-model="providerFilter"
-            :options="providerFilterOptions"
-            class="w-full sm:w-44"
-            :aria-label="t('admin.modelSquare.allProviders')"
-          />
 
           <Select
             v-model="groupFilter"
@@ -94,180 +106,140 @@
       </template>
 
       <template #table>
-        <div v-if="loading" class="grid min-h-64 place-items-center text-sm text-gray-500 dark:text-gray-400">
-          <div class="flex items-center gap-2">
-            <Icon name="refresh" size="sm" class="animate-spin" />
-            <span>{{ t('admin.modelSquare.loading') }}</span>
-          </div>
-        </div>
+        <!--
+          平台筛选从顶部下拉移到左侧目录卡片。
 
-        <div v-else-if="loadError" class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300">
-          {{ loadError }}
-        </div>
+          下拉的问题是「看不见有多少个平台、各自几个模型」—— 要挨个展开才知道有什么，
+          而且筛完平台之后顶部那一行看不出还剩哪些可选项。目录把全部平台平铺出来，
+          每个带自己的平台色圆点与模型数，当前选中项直接高亮，一眼就能横向比较。
 
-        <EmptyState
-          v-else-if="filteredModels.length === 0"
-          :title="hasActiveFilters ? t('admin.modelSquare.noMatchTitle') : t('admin.modelSquare.emptyTitle')"
-          :description="hasActiveFilters ? t('admin.modelSquare.noMatchDescription') : emptyDescription"
-        >
-          <template #action>
-            <button v-if="hasActiveFilters" type="button" class="btn btn-primary" @click="clearFilters">
-              <Icon name="x" size="sm" />
-              {{ t('admin.modelSquare.clearFilters') }}
-            </button>
-            <button v-else type="button" class="btn btn-primary" @click="reload">
-              <Icon name="refresh" size="sm" />
-              {{ t('common.refresh') }}
-            </button>
-          </template>
-        </EmptyState>
-
-        <div v-else-if="viewMode === 'grid'" class="model-square-board">
-          <section
-            v-for="section in providerSections"
-            :key="section.provider"
-            class="provider-section"
-            :style="providerAccent(section.provider)"
-          >
-            <div class="provider-section-header">
-              <div class="min-w-0">
-                <div class="provider-title">
-                  <span class="provider-dot"></span>
-                  <span class="truncate">{{ providerLabel(section.provider) }}</span>
-                </div>
-                <div class="provider-meta">
-                  {{ t('admin.modelSquare.providerSummary', { count: section.models.length, rate: formatRate(section.lowestRate) }) }}
-                </div>
-              </div>
-              <span class="provider-count">{{ section.models.length }}</span>
+          目录是 aside，其余状态块（加载 / 报错 / 空态 / 网格 / 列表）是它的兄弟节点，
+          靠 .ms-shell > :not(.ms-catalog) 统一撑满剩余宽度 —— 这样不必把它们再包一层。
+        -->
+        <div class="ms-shell">
+          <aside class="ms-catalog" :aria-label="t('admin.modelSquare.catalogTitle')">
+            <div class="ms-catalog-head">
+              <span class="ms-catalog-title">{{ t('admin.modelSquare.catalogTitle') }}</span>
             </div>
-
-            <div class="model-card-grid">
-              <article
-                v-for="(model, index) in section.models"
-                :key="modelKey(model, index)"
-                data-test="model-card"
-                class="model-card"
-                role="button"
-                tabindex="0"
-                :title="modelCardTitle(model)"
-                :style="providerAccent(model.provider)"
-                @click="copyModelId(model)"
-                @keydown.enter.prevent="copyModelId(model)"
+            <nav class="ms-catalog-list">
+              <button
+                type="button"
+                class="ms-catalog-item ms-catalog-item-all"
+                :class="{ active: !providerFilter }"
+                :aria-pressed="!providerFilter"
+                @click="providerFilter = ''"
               >
-                <div class="model-card-top">
-                  <span class="model-provider">
-                    <span class="model-provider-dot"></span>
-                    <span class="truncate">{{ providerLabel(model.provider) }}</span>
-                  </span>
-                </div>
+                <span class="ms-catalog-dot"></span>
+                <span class="ms-catalog-main">
+                  <span class="ms-catalog-name">{{ t('admin.modelSquare.allProviders') }}</span>
+                  <span class="ms-catalog-sub">{{ catalogSubtitle(catalogStats) }}</span>
+                </span>
+                <span class="ms-catalog-count">{{ catalogTotal }}</span>
+              </button>
+              <button
+                v-for="item in providerCatalog"
+                :key="item.provider"
+                type="button"
+                class="ms-catalog-item"
+                :class="{ active: providerFilter === item.provider }"
+                :aria-pressed="providerFilter === item.provider"
+                :style="providerAccent(item.provider)"
+                :title="providerLabel(item.provider)"
+                @click="toggleProviderFilter(item.provider)"
+              >
+                <span class="ms-catalog-dot"></span>
+                <span class="ms-catalog-main">
+                  <span class="ms-catalog-name">{{ providerLabel(item.provider) }}</span>
+                  <span class="ms-catalog-sub">{{ catalogSubtitle(item) }}</span>
+                </span>
+                <span class="ms-catalog-count">{{ item.count }}</span>
+              </button>
+            </nav>
+          </aside>
 
-                <div class="model-title-row">
-                  <h3 class="model-title">
-                    {{ modelDisplayName(model) }}
-                  </h3>
-                  <button
-                    type="button"
-                    class="copy-button"
-                    :title="t('admin.modelSquare.copyTitle')"
-                    @click.stop="copyModelId(model)"
-                  >
-                    <Icon :name="copiedModelId === model.id ? 'check' : 'copy'" size="sm" />
-                  </button>
-                </div>
+          <div v-if="loading" class="grid min-h-64 place-items-center text-sm text-gray-500 dark:text-gray-400">
+            <div class="flex items-center gap-2">
+              <Icon name="refresh" size="sm" class="animate-spin" />
+              <span>{{ t('admin.modelSquare.loading') }}</span>
+            </div>
+          </div>
 
-                <div class="price-grid">
-                  <div
-                    v-for="slot in modelPriceSlots(model, modelEffectiveRate(model))"
-                    :key="slot.key"
-                    :class="['price-box', slot.toneClass]"
-                  >
-                    <span>{{ slot.label }}</span>
-                    <strong>{{ formatPriceOrZero(slot.value) }}</strong>
-                    <s v-if="slot.originalValue != null" class="price-original">{{ formatPrice(slot.originalValue) }}</s>
-                    <small v-if="slot.unit">{{ slot.unit }}</small>
+          <div v-else-if="loadError" class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300">
+            {{ loadError }}
+          </div>
+
+          <EmptyState
+            v-else-if="filteredModels.length === 0"
+            :title="hasActiveFilters ? t('admin.modelSquare.noMatchTitle') : t('admin.modelSquare.emptyTitle')"
+            :description="hasActiveFilters ? t('admin.modelSquare.noMatchDescription') : emptyDescription"
+          >
+            <template #action>
+              <button v-if="hasActiveFilters" type="button" class="btn btn-primary" @click="clearFilters">
+                <Icon name="x" size="sm" />
+                {{ t('admin.modelSquare.clearFilters') }}
+              </button>
+              <button v-else type="button" class="btn btn-primary" @click="reload">
+                <Icon name="refresh" size="sm" />
+                {{ t('common.refresh') }}
+              </button>
+            </template>
+          </EmptyState>
+
+          <div v-else-if="viewMode === 'grid'" class="model-square-board">
+            <section
+              v-for="section in providerSections"
+              :key="section.provider"
+              class="provider-section"
+              :style="providerAccent(section.provider)"
+            >
+              <div class="provider-section-header">
+                <div class="min-w-0">
+                  <div class="provider-title">
+                    <span class="provider-dot"></span>
+                    <span class="truncate">{{ providerLabel(section.provider) }}</span>
+                  </div>
+                  <div class="provider-meta">
+                    {{ t('admin.modelSquare.providerSummary', { count: section.models.length, rate: formatRate(section.lowestRate) }) }}
                   </div>
                 </div>
+                <span class="provider-count">{{ section.models.length }}</span>
+              </div>
 
-                <div class="model-card-footer">
-                  <span class="model-rate-chip">{{ formatRate(modelEffectiveRate(model)) }}</span>
-                  <button
-                    type="button"
-                    v-if="modelGroups(model).length > 0"
-                    class="primary-group-chip"
-                    :class="primaryGroupBadgeClass(model)"
-                    :title="primaryGroupTitle(model)"
-                    :disabled="!!activeFilterGroup"
-                    @click.stop="openGroupDialog(model)"
-                  >
-                    <span class="truncate">{{ primaryGroup(model)?.name }}</span>
-                    <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
-                  </button>
-                  <!-- 已按分组过滤时：卡片价已是该分组价，详情里也只有这一个分组，重复，隐藏。 -->
-                  <button
-                    type="button"
-                    v-if="!activeFilterGroup"
-                    class="model-detail-button"
-                    title="详情"
-                    @click.stop="openModelDetails(model)"
-                  >
-                    <Icon name="eye" size="xs" />
-                    <span>详情</span>
-                  </button>
-                </div>
-              </article>
-            </div>
-          </section>
-        </div>
+              <div class="model-card-grid">
+                <article
+                  v-for="(model, index) in section.models"
+                  :key="modelKey(model, index)"
+                  data-test="model-card"
+                  class="model-card"
+                  role="button"
+                  tabindex="0"
+                  :title="modelCardTitle(model)"
+                  :style="providerAccent(model.provider)"
+                  @click="copyModelId(model)"
+                  @keydown.enter.prevent="copyModelId(model)"
+                >
+                  <div class="model-card-top">
+                    <span class="model-provider">
+                      <span class="model-provider-dot"></span>
+                      <span class="truncate">{{ providerLabel(model.provider) }}</span>
+                    </span>
+                  </div>
 
-        <div v-else class="overflow-x-auto">
-          <!--
-            ⚠️ 这里的 min-w-* 是失效的：TablePageLayout 的 `.table-scroll-container :deep(table)`
-            设了 `min-width: max-content`（选择器权重更高），表格宽度一律由内容撑开、超出即横向滚动。
-            所以价格列一改宽，整表宽度就跟着涨，只能从列内容本身下手。
-          -->
-          <table class="w-full min-w-[1100px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
-            <thead class="bg-gray-50 dark:bg-dark-800">
-              <tr>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.provider') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.modelId') }}</th>
-                <!--
-                  四个价格位合并成一列：卡片自带标签，列头再写「输入/输出/缓存读取/缓存写入」就是重复信息，
-                  而且四列只有数字、没有单位，横向扫读时分不清哪个是哪个 —— 这正是「看不出层级」的来源。
-                -->
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.price') }}</th>
-                <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.groups') }}</th>
-                <th class="px-4 py-3 text-right font-medium">{{ t('admin.modelSquare.columns.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-              <tr
-                v-for="(model, index) in sortedModels"
-                :key="modelKey(model, index)"
-                data-test="model-row"
-                class="cursor-pointer transition hover:bg-gray-50 dark:hover:bg-dark-700/60"
-                :title="modelCardTitle(model)"
-                @click="copyModelId(model)"
-              >
-                <td class="whitespace-nowrap px-4 py-3">
-                  <span class="model-provider">
-                    <span class="model-provider-dot" :style="providerAccent(model.provider)"></span>
-                    <span class="truncate">{{ providerLabel(model.provider) }}</span>
-                  </span>
-                </td>
-                <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
-                  <span class="break-words">{{ modelDisplayName(model) }}</span>
-                </td>
-                <td class="px-4 py-3">
-                  <!--
-                    与卡片视图共用同一套 price-box 卡片 —— 两个视图之间切换时，价格的语言必须一致，
-                    否则管理员会以为换了个视图就换了套价格。
+                  <div class="model-title-row">
+                    <h3 class="model-title">
+                      {{ modelDisplayName(model) }}
+                    </h3>
+                    <button
+                      type="button"
+                      class="copy-button"
+                      :title="t('admin.modelSquare.copyTitle')"
+                      @click.stop="copyModelId(model)"
+                    >
+                      <Icon :name="copiedModelId === model.id ? 'check' : 'copy'" size="sm" />
+                    </button>
+                  </div>
 
-                    这段 markup 刻意与上方卡片视图的 .price-grid 保持镜像（唯一差异是外层容器类），
-                    因为两个视图在 DOM 里没有共同的祖先可以挂组件：卡片在 <article> 里，这里在 <td> 里。
-                    视觉规则全部在 .price-box* 样式里，改一边就要改另一边。
-                  -->
-                  <div class="list-price-grid">
+                  <div class="price-grid">
                     <div
                       v-for="slot in modelPriceSlots(model, modelEffectiveRate(model))"
                       :key="slot.key"
@@ -279,41 +251,133 @@
                       <small v-if="slot.unit">{{ slot.unit }}</small>
                     </div>
                   </div>
-                </td>
-                <td class="px-4 py-3">
-                  <div class="flex min-w-56 flex-wrap gap-1.5">
+
+                  <div class="model-card-footer">
+                    <span class="model-rate-chip">{{ formatRate(modelEffectiveRate(model)) }}</span>
                     <button
-                      v-for="group in modelGroups(model)"
-                      :key="String(group.id)"
                       type="button"
-                      class="group-chip"
-                      :class="groupPlatformBadgeClass(group)"
-                      :title="groupChipTitle(group)"
+                      v-if="modelGroups(model).length > 0"
+                      class="primary-group-chip"
+                      :class="primaryGroupBadgeClass(model)"
+                      :title="primaryGroupTitle(model)"
                       :disabled="!!activeFilterGroup"
                       @click.stop="openGroupDialog(model)"
                     >
-                      {{ group.name }}
-                      <b>{{ formatRate(group.rate_multiplier) }}</b>
+                      <span class="truncate">{{ primaryGroup(model)?.name }}</span>
+                      <span v-if="modelGroupOverflowCount(model) > 0" class="group-overflow">+{{ modelGroupOverflowCount(model) }}</span>
                     </button>
-                    <span v-if="modelGroups(model).length === 0" class="text-xs text-gray-400 dark:text-gray-500">—</span>
+                    <!-- 已按分组过滤时：卡片价已是该分组价，详情里也只有这一个分组，重复，隐藏。 -->
+                    <button
+                      type="button"
+                      v-if="!activeFilterGroup"
+                      class="model-detail-button"
+                      title="详情"
+                      @click.stop="openModelDetails(model)"
+                    >
+                      <Icon name="eye" size="xs" />
+                      <span>详情</span>
+                    </button>
                   </div>
-                </td>
-                <td class="whitespace-nowrap px-4 py-3 text-right">
-                  <!-- 已按分组过滤时隐藏详情，理由同网格视图。 -->
-                  <button
-                    type="button"
-                    v-if="!activeFilterGroup"
-                    class="model-detail-button"
-                    title="详情"
-                    @click.stop="openModelDetails(model)"
-                  >
-                    <Icon name="eye" size="xs" />
-                    <span>详情</span>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <div v-else class="overflow-x-auto">
+            <!--
+              ⚠️ 这里的 min-w-* 是失效的：TablePageLayout 的 `.table-scroll-container :deep(table)`
+              设了 `min-width: max-content`（选择器权重更高），表格宽度一律由内容撑开、超出即横向滚动。
+              所以价格列一改宽，整表宽度就跟着涨，只能从列内容本身下手。
+            -->
+            <table class="w-full min-w-[1100px] divide-y divide-gray-100 text-sm dark:divide-dark-700">
+              <thead class="bg-gray-50 dark:bg-dark-800">
+                <tr>
+                  <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.provider') }}</th>
+                  <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.modelId') }}</th>
+                  <!--
+                    四个价格位合并成一列：卡片自带标签，列头再写「输入/输出/缓存读取/缓存写入」就是重复信息，
+                    而且四列只有数字、没有单位，横向扫读时分不清哪个是哪个 —— 这正是「看不出层级」的来源。
+                  -->
+                  <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.price') }}</th>
+                  <th class="px-4 py-3 text-left font-medium">{{ t('admin.modelSquare.columns.groups') }}</th>
+                  <th class="px-4 py-3 text-right font-medium">{{ t('admin.modelSquare.columns.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                <tr
+                  v-for="(model, index) in sortedModels"
+                  :key="modelKey(model, index)"
+                  data-test="model-row"
+                  class="cursor-pointer transition hover:bg-gray-50 dark:hover:bg-dark-700/60"
+                  :title="modelCardTitle(model)"
+                  @click="copyModelId(model)"
+                >
+                  <td class="whitespace-nowrap px-4 py-3">
+                    <span class="model-provider">
+                      <span class="model-provider-dot" :style="providerAccent(model.provider)"></span>
+                      <span class="truncate">{{ providerLabel(model.provider) }}</span>
+                    </span>
+                  </td>
+                  <td class="max-w-72 px-4 py-3 font-medium text-gray-950 dark:text-white">
+                    <span class="break-words">{{ modelDisplayName(model) }}</span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <!--
+                      与卡片视图共用同一套 price-box 卡片 —— 两个视图之间切换时，价格的语言必须一致，
+                      否则管理员会以为换了个视图就换了套价格。
+
+                      这段 markup 刻意与上方卡片视图的 .price-grid 保持镜像（唯一差异是外层容器类），
+                      因为两个视图在 DOM 里没有共同的祖先可以挂组件：卡片在 <article> 里，这里在 <td> 里。
+                      视觉规则全部在 .price-box* 样式里，改一边就要改另一边。
+                    -->
+                    <div class="list-price-grid">
+                      <div
+                        v-for="slot in modelPriceSlots(model, modelEffectiveRate(model))"
+                        :key="slot.key"
+                        :class="['price-box', slot.toneClass]"
+                      >
+                        <span>{{ slot.label }}</span>
+                        <strong>{{ formatPriceOrZero(slot.value) }}</strong>
+                        <s v-if="slot.originalValue != null" class="price-original">{{ formatPrice(slot.originalValue) }}</s>
+                        <small v-if="slot.unit">{{ slot.unit }}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="flex min-w-56 flex-wrap gap-1.5">
+                      <button
+                        v-for="group in modelGroups(model)"
+                        :key="String(group.id)"
+                        type="button"
+                        class="group-chip"
+                        :class="groupPlatformBadgeClass(group)"
+                        :title="groupChipTitle(group)"
+                        :disabled="!!activeFilterGroup"
+                        @click.stop="openGroupDialog(model)"
+                      >
+                        {{ group.name }}
+                        <b>{{ formatRate(group.rate_multiplier) }}</b>
+                      </button>
+                      <span v-if="modelGroups(model).length === 0" class="text-xs text-gray-400 dark:text-gray-500">—</span>
+                    </div>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-3 text-right">
+                    <!-- 已按分组过滤时隐藏详情，理由同网格视图。 -->
+                    <button
+                      type="button"
+                      v-if="!activeFilterGroup"
+                      class="model-detail-button"
+                      title="详情"
+                      @click.stop="openModelDetails(model)"
+                    >
+                      <Icon name="eye" size="xs" />
+                      <span>详情</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </template>
     </TablePageLayout>
@@ -570,11 +634,58 @@ const activeFilterGroup = computed<ModelSquareGroup | null>(() =>
   groupFilter.value ? groupById.value.get(groupFilter.value) || null : null
 )
 const providers = computed(() => unique(models.value.map(model => model.provider).filter(Boolean) as string[]))
-// 平台筛选下拉选项（含“全部”占位项）
-const providerFilterOptions = computed<SelectOption[]>(() => [
-  { value: '', label: t('admin.modelSquare.allProviders') },
-  ...providers.value.map(item => ({ value: item, label: providerLabel(item) })),
-])
+/*
+  左侧平台目录的数据。
+
+  catalogTotal 用 models 的长度而不是「各平台数量之和」：平台为空的模型（provider 缺失）
+  不会出现在 providers 里，但它们在「全部」下确实是可见的，总数必须把它们算进去，
+  否则「全部」上的数字会比实际看到的卡片少。
+
+  数量按「模型广场配置里配了什么」算，与卡片区一致，不受其它筛选影响 —— 目录本身
+  就是用来横向比较平台规模的，跟着分组筛选一起变会让人以为平台模型变少了。
+*/
+const catalogTotal = computed(() => models.value.length)
+/*
+  目录卡片副标题的两项：该范围内去重后的分组数、以及最低倍率。
+
+  倍率取 modelBaseRate 而不是 primaryGroupRate —— 后者跟着分组筛选走，
+  而目录刻意不随筛选变化（见上面的注释），用它会让「筛一下目录上的数字就变」。
+*/
+function catalogStatsOf(list: ModelSquareModel[]) {
+  const groupIds = new Set<string>()
+  let lowestRate = Number.POSITIVE_INFINITY
+  for (const model of list) {
+    for (const id of model.group_ids || []) groupIds.add(String(id))
+    lowestRate = Math.min(lowestRate, modelBaseRate(model))
+  }
+  return { groupCount: groupIds.size, lowestRate: Number.isFinite(lowestRate) ? lowestRate : 0 }
+}
+// 「全部提供商」那一条的副信息：全局分组数与全局最低倍率（与顶部统计卡的口径一致）。
+const catalogStats = computed(() => catalogStatsOf(models.value))
+const providerCatalog = computed(() => {
+  const grouped = new Map<string, ModelSquareModel[]>()
+  for (const model of models.value) {
+    const provider = model.provider || ''
+    const list = grouped.get(provider) || []
+    list.push(model)
+    grouped.set(provider, list)
+  }
+  return providers.value.map(provider => {
+    const list = grouped.get(provider) || []
+    return { provider, count: list.length, ...catalogStatsOf(list) }
+  })
+})
+function catalogSubtitle(stats: { groupCount: number; lowestRate: number }) {
+  return t('admin.modelSquare.catalogSummary', {
+    count: stats.groupCount,
+    rate: formatRate(stats.lowestRate),
+  })
+}
+// 再点一次当前项 = 取消筛选：目录里高亮项本身就是「已选」的视觉锚点，
+// 回到全部最自然的手势就是点它，不必回头去找顶上那条「全部」。
+function toggleProviderFilter(provider: string) {
+  providerFilter.value = providerFilter.value === provider ? '' : provider
+}
 /*
   筛了平台之后，该平台下的模型实际绑定过的分组 ID 集合。
   null = 未筛平台（不做限制），与「筛了但一个分组都没绑上」区分开：
@@ -1023,15 +1134,110 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.summary-pill {
-  @apply flex h-11 items-center gap-3 rounded-lg border px-3 text-sm;
+/*
+  顶部 KPI 卡组：三个数各带图标块与语义色顶条。
+
+  图标块刻意用「淡染底 + 混色图标」而不是实色底 + 白图标 —— 深色主题下
+  --ms-green 这类语义色本身是亮色（#34d399），实色底配白图标对比度不到 2:1。
+  混色写法与页面既有的 .chip-tinted 同源，深浅两套主题共用一条规则。
+*/
+.ms-kpi-grid {
+  @apply flex min-w-0 flex-1 flex-wrap items-stretch gap-3;
+}
+
+.ms-kpi {
+  @apply relative flex min-w-[11rem] flex-1 items-start gap-3 overflow-hidden rounded-xl border px-3.5 py-3;
   border-color: var(--ms-line);
+  /* 卡面自带极淡的同色渐变 —— 纯白卡 + 彩色顶条会像「贴上去的」，融不进同一张卡 */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ms-kpi-accent) 11%, var(--ms-panel)) 0%,
+    var(--ms-panel) 64%
+  );
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/*
+  顶条：三张卡各用自己的语义色，扫一眼就能把「总量 / 可用 / 分组」区分开。
+
+  光晕（box-shadow 用同色半透明）是「灵动」的主要来源：亮色细条本身只有 3px，
+  发光之后才会在浅色背景上浮起来，而不是一条压死的色带。
+*/
+.ms-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--ms-kpi-accent), color-mix(in srgb, var(--ms-kpi-accent) 35%, transparent));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ms-kpi-accent) 65%, transparent);
+}
+
+.ms-kpi:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--ms-kpi-accent) 55%, var(--ms-line));
+  box-shadow: 0 12px 26px -12px color-mix(in srgb, var(--ms-kpi-accent) 75%, transparent);
+}
+
+/*
+  实色渐变图标块：淡染底太「平」。
+  图标块是这三张卡上唯一能承载饱和色的地方，色彩活力由它承担。
+*/
+.ms-kpi-icon {
+  @apply grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ms-kpi-accent) 70%, black),
+    var(--ms-kpi-accent)
+  );
+  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--ms-kpi-accent) 90%, transparent);
+}
+
+/* 深色主题下亮色本身就是高亮色（#2dd4bf 这类），白图标会糊在底上 ⇒ 翻成深色图标 */
+.dark .ms-kpi-icon {
+  color: #0f172a;
+  background: linear-gradient(
+    135deg,
+    var(--ms-kpi-accent),
+    color-mix(in srgb, var(--ms-kpi-accent) 72%, white)
+  );
+}
+
+.ms-kpi-body {
+  @apply flex min-w-0 flex-col;
+}
+
+.ms-kpi-label {
+  @apply text-xs font-medium;
   color: var(--ms-muted);
 }
 
-.summary-pill strong {
-  @apply font-mono text-base;
+.ms-kpi-value {
+  @apply font-mono text-xl font-bold leading-tight;
   color: var(--ms-text);
+}
+
+.ms-kpi-foot {
+  @apply mt-0.5 truncate text-[11px];
+  color: var(--ms-dim);
+}
+
+/*
+  三张卡的色相刻意拉开（蓝 205° / 绿 160° / 紫 262°）。
+  原先「模型数」用品牌青绿（174°）与「可用数」的绿（160°）只差 14°，
+  并排看几乎同色，三张卡退化成一整片 —— 色相距离才是这三张卡能被区分开的原因。
+*/
+.ms-kpi-models {
+  --ms-kpi-accent: var(--ms-blue-bright);
+}
+
+.ms-kpi-available {
+  --ms-kpi-accent: var(--ms-green-bright);
+}
+
+.ms-kpi-groups {
+  --ms-kpi-accent: var(--ms-violet-bright);
 }
 
 /* 只在筛选生效时出现，用品牌色与静态统计 pill 区分，提示当前看到的是子集。 */
@@ -1058,6 +1264,194 @@ onMounted(reload)
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ms-brand) 45%, transparent);
 }
 
+/*
+  左侧平台目录 + 右侧内容的两栏骨架。
+
+  目录是 #table 槽里唯一新增的结构，其余状态块（加载 / 报错 / 空态 / 网格 / 列表）
+  原样搬进来当它的兄弟节点 —— 用 :not(.ms-catalog) 统一给它们 min-w-0 + flex-1，
+  省掉再包一层 div。
+
+  min-w-0 是必须的：列表视图的表格写死了 min-w-[1100px]，没有它，flex 项的最小宽度
+  会被内容顶开，整个 shell 被撑宽、外层出现横向滚动条，而不是让表格自己滚。
+*/
+.ms-shell {
+  @apply flex min-h-0 flex-1 gap-3 p-3;
+}
+
+.ms-shell > :not(.ms-catalog) {
+  @apply min-w-0 flex-1;
+}
+
+/*
+  目录容器本身**不画卡片** —— 它只是一列排布容器，真正的卡片是下面每一条。
+  定宽、高度按内容走（不拉满），窄屏时改成整宽横排。
+
+  ⚠️ self-start 不能省：不加就会拉伸到 shell 全高，一列卡片会被拉成一根贴边的柱子。
+  代价是高度不再由容器兜底，所以要自己用 max-height 兜住平台特别多的情形
+  （超出部分交给列表内部滚动）。
+  ⚠️ 配套给 .ms-catalog-list 补 min-h-0：列向 flex 项默认 min-height: auto，
+  不允许收缩到内容以下，只写 overflow-y-auto 是不会滚的。
+*/
+.ms-catalog {
+  @apply flex w-64 shrink-0 self-start flex-col;
+  max-height: 100%;
+}
+
+/*
+  头部不放「总数」徽标：下面的「全部提供商」那一条已经在显示同一个数字，
+  两个相同的数并排只会让人多问一句「这两个 12 是同一件事吗」。
+  也不画分隔线 —— 下面每一条自带边框，再压一条线会读成「标题也有个框」。
+  px-2 与 .ms-catalog-list 的左右内边距对齐，标题才和卡片的边框落在同一条竖线上。
+*/
+.ms-catalog-head {
+  @apply flex items-center px-2 pb-1.5;
+}
+
+.ms-catalog-title {
+  @apply text-sm font-semibold tracking-wide;
+  color: var(--ms-muted);
+}
+
+/*
+  px-2 / py-1.5 不只是留白：这个容器 overflow-y-auto（计算后 overflow-x 也是 auto），
+  会把子元素超出内容盒的部分裁掉。卡片的投影横向半径约 5px，padding 不够就会被切出一条直边。
+*/
+.ms-catalog-list {
+  @apply min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-1.5;
+}
+
+/*
+  每个平台各自一张小卡片：受光面 + 边框 + 三层投影 + 顶沿内高光（--ms-sheen），
+  与模型卡、价格卡同一套语言，只是缩一档。
+
+  阴影用「平台色混 transparent」而不是分主题写 rgba：混色自带明暗适配，
+  浅色下是淡淡的彩影、深色下自动变重，不必再为 .dark 定一组 alpha
+  （价格卡的 --pb-float 用的也是这个办法）。
+  --ms-provider 由 providerAccent 内联注入；「全部」那条没有 → 回落到品牌色。
+*/
+.ms-catalog-item {
+  --cat-accent: var(--ms-provider, var(--ms-brand));
+  --cat-float:
+    0 1px 2px -1px color-mix(in srgb, var(--cat-accent) 45%, transparent),
+    0 3px 7px -2px color-mix(in srgb, var(--cat-accent) 50%, transparent),
+    inset 0 1px 0 var(--ms-sheen);
+  @apply flex w-full items-center gap-2.5 rounded-xl border px-3 py-3 text-left text-[15px] transition;
+  color: var(--ms-text);
+  border-color: color-mix(in srgb, var(--cat-accent) 30%, var(--ms-line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--cat-accent) 8%, var(--ms-panel)) 0%,
+    var(--ms-panel) 100%
+  );
+  box-shadow: var(--cat-float);
+}
+
+/*
+  悬停 = 抬起 1px + 投影拉长 + 底色加深，与模型卡 hover 同一套动作。
+
+  悬停与选中都取条目自己的平台色。选中比悬停再重一档，保证「已选」始终比「鼠标划过」更明确。
+  两条规则特异性相同（都是两个 class / 一个 class + 伪类），靠源码顺序定胜负 ——
+  .active 必须写在 :hover 之后，否则划过选中项时底色会从 20% 退回 14%，看着像「选中掉了」。
+*/
+.ms-catalog-item:hover {
+  @apply -translate-y-px;
+  border-color: color-mix(in srgb, var(--cat-accent) 55%, var(--ms-line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--cat-accent) 14%, var(--ms-panel)) 0%,
+    color-mix(in srgb, var(--cat-accent) 5%, var(--ms-panel)) 100%
+  );
+  box-shadow:
+    0 2px 4px -2px color-mix(in srgb, var(--cat-accent) 50%, transparent),
+    0 9px 18px -7px color-mix(in srgb, var(--cat-accent) 55%, transparent),
+    inset 0 1px 0 var(--ms-sheen);
+}
+
+.ms-catalog-item.active {
+  @apply font-semibold;
+  border-color: color-mix(in srgb, var(--cat-accent) 70%, var(--ms-line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--cat-accent) 20%, var(--ms-panel)) 0%,
+    color-mix(in srgb, var(--cat-accent) 9%, var(--ms-panel)) 100%
+  );
+  box-shadow:
+    var(--cat-float),
+    0 0 0 1px color-mix(in srgb, var(--cat-accent) 40%, transparent);
+}
+
+.ms-catalog-dot {
+  @apply h-2.5 w-2.5 shrink-0 rounded-full;
+  background: var(--ms-provider, var(--ms-brand));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 16%, transparent);
+}
+
+/* 名称与副标题包成一列，右侧的计数徽标才能贴着卡片右边、不被长平台名挤走。 */
+.ms-catalog-main {
+  @apply min-w-0 flex-1;
+}
+
+.ms-catalog-name {
+  @apply block truncate;
+}
+
+/* 副标题：分组数与最低倍率。压到 muted 色，避免和平台名抢视线。 */
+.ms-catalog-sub {
+  @apply mt-0.5 block truncate text-xs;
+  color: var(--ms-muted);
+}
+
+.ms-catalog-count {
+  @apply shrink-0 rounded px-2 py-0.5 font-mono text-xs font-semibold tabular-nums;
+  background: var(--ms-panel-3);
+  color: color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 72%, var(--ms-text));
+}
+
+/*
+  窄屏（与 TablePageLayout 的 mobile-mode 同一条断点）改成上下排、目录横排成一串 chip。
+
+  竖排目录在 400px 宽的手机上会吃掉 256px，内容只剩几十像素 —— 而目录此时又删不掉：
+  顶部那个平台下拉已经拿掉，它是唯一的平台筛选入口，必须保持可用。
+*/
+@media (max-width: 1023px) {
+  .ms-shell {
+    /* 外层此时是 h-auto，flex-1 的 0 基准高度会让整块塌掉，退回 auto */
+    @apply flex-none flex-col;
+  }
+
+  /*
+    self-stretch 抵消基础规则的 self-start：这里已经是列向排列，
+    留着 flex-start 会让卡片按内容缩宽、不再整宽。max-h-none 同理 ——
+    外层高度是 auto，百分比上限没有参照，留着不如去掉。
+  */
+  .ms-catalog {
+    @apply w-full self-stretch max-h-none;
+  }
+
+  .ms-catalog-list {
+    /* space-y-0 抵消基础规则的 space-y-2：横排时行间距会变成上边距，卡片会错位 */
+    @apply flex gap-2 space-y-0 overflow-x-auto px-2 py-1.5;
+  }
+
+  .ms-catalog-item {
+    @apply w-auto shrink-0;
+  }
+
+  /* 横排时名称按内容宽走：基础规则的 flex-1 基准是 0，shrink-to-fit 下会被压没 */
+  .ms-catalog-item .ms-catalog-main {
+    @apply flex-none;
+  }
+
+  .ms-catalog-item .ms-catalog-name {
+    @apply max-w-[8rem];
+  }
+
+  /* chip 里塞第二行会把每片撑得又高又宽，副标题只留在大屏的竖排列表里看 */
+  .ms-catalog-sub {
+    @apply hidden;
+  }
+}
+
 .model-square-board {
   @apply h-full space-y-5 overflow-y-auto p-4;
 }
@@ -1066,16 +1460,28 @@ onMounted(reload)
   @apply relative space-y-3 pl-3;
 }
 
+/*
+  分区左脊：加宽到 4px 并向下渐隐。
+
+  它和 KPI 顶条、卡片顶条是同一个平台色（都取 --ms-provider）——
+  三层同源，扫一眼就知道「这一片属于哪个平台」；先前只有一条 3px 实色细线，
+  在白色背景上几乎读不出平台差异。
+*/
 .provider-section::before {
   content: '';
   position: absolute;
   left: 0;
   top: 0.4rem;
   bottom: 0.4rem;
-  width: 3px;
+  width: 4px;
   border-radius: 999px;
-  background: var(--ms-provider, var(--ms-brand));
-  opacity: 0.9;
+  background: linear-gradient(
+    180deg,
+    var(--ms-provider, var(--ms-brand)),
+    color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 35%, transparent)
+  );
+  /* 光晕替代原先的 opacity: 0.9 —— 柔化交给同色发光，色条本身保持饱和 */
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 55%, transparent);
 }
 
 .provider-section-header {
@@ -1083,8 +1489,9 @@ onMounted(reload)
 }
 
 .provider-title {
-  @apply flex min-w-0 items-center gap-2 text-sm font-semibold;
-  color: var(--ms-provider, var(--ms-brand));
+  @apply flex min-w-0 items-center gap-2 text-base font-bold tracking-tight;
+  /* 与 --ms-text 混色：平台主色在浅色下偏浅、深色下偏暗，直接当文字色两头都不稳 */
+  color: color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 78%, var(--ms-text));
 }
 
 .provider-dot,
@@ -1099,10 +1506,12 @@ onMounted(reload)
   color: var(--ms-muted);
 }
 
+/* 计数徽标改用分区自己的平台色，与左脊、标题同色，不再是一枚灰 chip */
 .provider-count {
   @apply grid h-7 min-w-7 place-items-center rounded-md px-2 font-mono text-xs font-semibold;
-  background: var(--ms-panel-3);
-  color: var(--ms-muted);
+  background: color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 14%, var(--ms-panel));
+  color: color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 70%, var(--ms-text));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 26%, transparent);
 }
 
 .model-card-grid {
@@ -1118,11 +1527,46 @@ onMounted(reload)
   box-shadow: var(--ms-shadow);
 }
 
+/*
+  卡片顶条：与分区左脊、KPI 顶条同一个平台色。
+
+  卡片本体原先只有顶部一个小圆点带平台色，网格一铺开就读不出「哪几张是同一个平台」。
+  顶条把平台归属变成卡片自身的结构特征，不必读文字。
+  圆角单独写是因为卡片没有 overflow: hidden，直角色条会在圆角处露头。
+*/
+.model-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 0.5rem 0.5rem 0 0;
+  background: linear-gradient(
+    90deg,
+    var(--ms-provider, var(--ms-brand)),
+    color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 30%, transparent)
+  );
+  /* 与 KPI 顶条同一套光晕语言：细条靠发光浮起来，而不是压成一条色带 */
+  box-shadow: 0 0 12px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 60%, transparent);
+}
+
+/*
+  hover 光晕改用自己的平台色（原先固定用品牌色 --ms-brand）。
+  网格里同时铺着几个平台，hover 哪张就该是哪张的颜色 —— 固定品牌色会让
+  「平台色骨架」在唯一需要反馈的瞬间断掉。
+
+  阴影换成 --ms-shadow-hover（与静止态同结构、整体加强），而不是另写一串：
+  静止态已经有三层了，hover 只加强其中一层的话，抬起量会被吃掉。
+*/
 .model-card:hover,
 .model-card:focus-visible {
   @apply -translate-y-0.5 outline-none;
-  border-color: var(--ms-brand);
-  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.12), 0 0 0 1px color-mix(in srgb, var(--ms-brand) 55%, transparent), 0 0 28px var(--ms-glow);
+  border-color: color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 70%, var(--ms-line));
+  box-shadow:
+    var(--ms-shadow-hover),
+    0 0 0 1px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 50%, transparent),
+    0 0 28px color-mix(in srgb, var(--ms-provider, var(--ms-brand)) 35%, transparent);
 }
 
 .model-card-top {
@@ -1183,24 +1627,96 @@ onMounted(reload)
   background: var(--ms-panel-2);
 }
 
+/*
+  四个价格位。每个色位两个变量：
+
+    --pb-accent  装饰亮色（边框 / 底色 / 光晕）
+    --pb-ink     同色系的「落墨色」—— 浅色主题下取深饱和档，深色主题下取浅亮档
+
+  这样「往 ink 方向混」在任何主题下都等价于「提高对比度」，标签与数值共用一条公式，
+  不必为深色主题单独写一套文字色。
+
+  先前的边框取「文字档」深色（#0f766e 一类），3px 细线压在白底上几乎不发色；
+  数值更是直接用深色档 —— teal 那档是 #115e59，接近黑，四张卡看起来只有橙的一张有颜色。
+
+  ink 取 800/900 档而不是 700 档：700 档（#0f766e / #ea580c 一类）混出来仍偏亮，
+  橙色尤其明显 —— 只有它一张「跳」出来，四张卡的重量对不齐。深一档后四色重量接近，
+  同时因为数值里掺了 22% 亮色，色相还在，不至于退回「一张有色 + 三张黑」。
+*/
 .price-box-teal {
-  border-color: color-mix(in srgb, var(--ms-brand) 40%, var(--ms-line));
-  background: color-mix(in srgb, var(--ms-brand) 12%, var(--ms-panel));
+  --pb-accent: var(--ms-brand-bright);
+  --pb-ink: #115e59;
 }
 
 .price-box-orange {
-  border-color: color-mix(in srgb, var(--ms-orange) 40%, var(--ms-line));
-  background: color-mix(in srgb, var(--ms-orange) 12%, var(--ms-panel));
+  --pb-accent: var(--ms-orange-bright);
+  --pb-ink: #9a3412;
 }
 
 .price-box-blue {
-  border-color: color-mix(in srgb, var(--ms-blue) 40%, var(--ms-line));
-  background: color-mix(in srgb, var(--ms-blue) 12%, var(--ms-panel));
+  --pb-accent: var(--ms-blue-bright);
+  --pb-ink: #1e40af;
 }
 
 .price-box-violet {
-  border-color: color-mix(in srgb, var(--ms-violet) 40%, var(--ms-line));
-  background: color-mix(in srgb, var(--ms-violet) 12%, var(--ms-panel));
+  --pb-accent: var(--ms-violet-bright);
+  --pb-ink: #5b21b6;
+}
+
+/*
+  深色主题下 ink 反过来要比 accent 更亮，公式不动，「往 ink 混」依然是提高对比度。
+
+  同样要「再深一档」：上一版的 ink（#99f6e4 这类 200 档）在深底上发白，
+  往 accent 靠 60% 后仍比 accent 亮，既压住了亮度，又保住了「数值比标签更抢眼」的层级。
+  不直接取 accent —— 那样标签与数值会完全同色，层级只剩字号和字重。
+*/
+.dark .price-box-teal {
+  --pb-ink: color-mix(in srgb, var(--ms-brand-bright) 60%, #99f6e4);
+}
+
+.dark .price-box-orange {
+  --pb-ink: color-mix(in srgb, var(--ms-orange-bright) 60%, #fdba74);
+}
+
+.dark .price-box-blue {
+  --pb-ink: color-mix(in srgb, var(--ms-blue-bright) 60%, #93c5fd);
+}
+
+.dark .price-box-violet {
+  --pb-ink: color-mix(in srgb, var(--ms-violet-bright) 60%, #c4b5fd);
+}
+
+.price-box-teal,
+.price-box-orange,
+.price-box-blue,
+.price-box-violet {
+  border-color: color-mix(in srgb, var(--pb-accent) 55%, var(--ms-line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pb-accent) 20%, var(--ms-panel)) 0%,
+    color-mix(in srgb, var(--pb-accent) 8%, var(--ms-panel)) 100%
+  );
+  /*
+    悬浮感 = 三层阴影 + 一条顶沿高光，缺一层就塌：
+
+      ① 接触阴影：几乎不模糊的一小条，给出卡片与底面的贴合点。少了它，卡片会像贴纸；
+      ② 近距投影：卡片的实际厚度；
+      ③ 远距环境光遮蔽：大扩散 + 低浓度 —— 悬浮感主要来自这一层；
+      ④ 顶沿内高光（--ms-sheen）：给卡面一条受光的上沿，卡片才有厚度而不是一块色。
+
+    原先只有一条 `0 2px 10px -5px` 的色晕，负 spread 把它压得紧贴边框，
+    既没有贴合点也没有环境遮蔽 —— 看着就是「平铺在底面上的一块色」。
+
+    整串挂在 --pb-float 上：紧凑档（列表 / 详情弹窗）只换这一个变量就能整体缩一档，
+    不必把四条阴影抄第二遍。--pb-accent 未定义时（未配置的 price-box-unset）整串失效，
+    卡片自动保持平面 —— 那是「缺失」状态，本来就不该浮起来。
+  */
+  --pb-float:
+    0 1px 2px -1px color-mix(in srgb, var(--pb-accent) 55%, transparent),
+    0 4px 9px -3px color-mix(in srgb, var(--pb-accent) 60%, transparent),
+    0 12px 22px -10px color-mix(in srgb, var(--pb-accent) 70%, transparent),
+    inset 0 1px 0 var(--ms-sheen);
+  box-shadow: var(--pb-float);
 }
 
 .price-box-unset {
@@ -1214,20 +1730,18 @@ onMounted(reload)
   color: var(--ms-muted);
 }
 
-.price-box-teal span {
-  color: var(--ms-brand);
-}
+/*
+  标签（输入 / 输出 / 缓存读取 / 缓存写入）：亮色档 58% + ink 42%。
 
-.price-box-orange span {
-  color: var(--ms-orange);
-}
-
-.price-box-blue span {
-  color: var(--ms-blue);
-}
-
+  比数值浅一档 —— 白底上越深越抢眼，标签必须退到数值后面；
+  深色主题下 ink 更亮，混色结果也随之变浅，方向自动一致。
+  纯亮色档（#14b8a6）在浅底上只有 2.3:1，12px 小字糊成一片，所以不取满。
+*/
+.price-box-teal span,
+.price-box-orange span,
+.price-box-blue span,
 .price-box-violet span {
-  color: var(--ms-violet);
+  color: color-mix(in srgb, var(--pb-accent) 58%, var(--pb-ink));
 }
 
 .price-box strong {
@@ -1235,20 +1749,18 @@ onMounted(reload)
   color: var(--ms-text);
 }
 
-.price-box-teal strong {
-  color: var(--ms-brand-strong);
-}
+/*
+  数值：亮色档 22% + ink 78%。
 
-.price-box-orange strong {
-  color: var(--ms-orange);
-}
-
-.price-box-blue strong {
-  color: var(--ms-blue);
-}
-
+  用 ink 当主体而不是直接用 ink，是为了让四张卡各自带着自己的色相；
+  22% 是「看得出颜色」与「沉得住」的交点 —— 浅色主题下四色实测 5.8 / 5.8 / 7.1 / 7.6 : 1，
+  比上一版（4.5 / 4.5 / 5.9 / 6.4）更深，也离 AA 门槛更远。
+*/
+.price-box-teal strong,
+.price-box-orange strong,
+.price-box-blue strong,
 .price-box-violet strong {
-  color: var(--ms-violet);
+  color: color-mix(in srgb, var(--pb-accent) 22%, var(--pb-ink));
 }
 
 .price-box-unset strong {
@@ -1300,6 +1812,15 @@ onMounted(reload)
 .list-price-grid .price-box,
 .detail-price-grid .price-box {
   @apply min-h-0 rounded-md px-2 py-1.5;
+  /*
+    紧凑档只有 83px 宽，上面那套（12px 偏移 + 22px 扩散）是按卡片视图 130px 宽的卡片定的 ——
+    照搬进 8px 间距的表格里，阴影会糊到邻格上，反而显脏。按卡片尺寸缩一档，三层结构不变。
+  */
+  --pb-float:
+    0 1px 2px -1px color-mix(in srgb, var(--pb-accent) 50%, transparent),
+    0 3px 6px -2px color-mix(in srgb, var(--pb-accent) 55%, transparent),
+    0 7px 14px -7px color-mix(in srgb, var(--pb-accent) 65%, transparent),
+    inset 0 1px 0 var(--ms-sheen);
 }
 
 /* 紧凑档比卡片视图小一档，字号各降一档，但要保住「标签 < 数字」的层级差。 */
@@ -1510,7 +2031,40 @@ button.group-chip:not(:disabled):hover {
   --ms-blue: #1d4ed8;
   --ms-violet: #6d28d9;
   --ms-red: #b91c1c;
-  --ms-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  /*
+    模型卡静止态的悬浮阴影，与价格卡同一套三层分工（接触 / 厚度 / 环境遮蔽），
+    尺度按卡片尺寸放大 —— 卡片宽 320px 起，用价格卡那组 12px 偏移会像「没浮起来」。
+
+    原先是单条 `0 1px 3px rgba(15,23,42,.06)`，几乎等于没有，整张卡平铺在底面上。
+    hover 必须同结构整体加强（--ms-shadow-hover），否则静止态一厚，hover 就没有「抬起」的余量了。
+  */
+  --ms-shadow:
+    0 1px 2px -1px rgba(15, 23, 42, 0.1),
+    0 8px 14px -6px rgba(15, 23, 42, 0.13),
+    0 18px 32px -16px rgba(15, 23, 42, 0.18);
+  --ms-shadow-hover:
+    0 2px 4px -2px rgba(15, 23, 42, 0.14),
+    0 14px 28px -10px rgba(15, 23, 42, 0.2),
+    0 32px 56px -22px rgba(15, 23, 42, 0.26);
+  /*
+    顶沿高光：卡片上沿一条 1px 的受光边。没有它，卡面就是一块纯色，
+    有阴影也只会像「剪下来贴在底面上」；有它才有厚度。
+    浅色下用高不透明度白（卡面本身接近白，低了看不见），深色下只留一点点。
+  */
+  --ms-sheen: rgba(255, 255, 255, 0.8);
+
+  /*
+    装饰亮色：同一个语义色需要两档 —— 做文字/边框要深（保对比度），
+    做顶条/图标块/光晕要亮（保活力）。
+
+    先前的顶条与图标块直接拿文字档的深色（--ms-brand 是 #0f766e），
+    3px 细条压在白底上几乎不发色，这是整页看着「闷」的主因。
+  */
+  --ms-brand-bright: #14b8a6;
+  --ms-green-bright: #10b981;
+  --ms-blue-bright: #3b82f6;
+  --ms-violet-bright: #8b5cf6;
+  --ms-orange-bright: #f97316;
 }
 
 .dark .model-square-root {
@@ -1531,6 +2085,26 @@ button.group-chip:not(:disabled):hover {
   --ms-blue: #60a5fa;
   --ms-violet: #a78bfa;
   --ms-red: #f87171;
-  --ms-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  /*
+    深底上黑色阴影的可视度天然比白底低（背景本身就是暗的），所以 alpha 要拉到 0.4~0.55
+    才看得出卡片下方压着一片更暗的区域；照搬浅色那组 0.08~0.14 会完全消失。
+  */
+  --ms-shadow:
+    0 1px 2px -1px rgba(0, 0, 0, 0.55),
+    0 8px 14px -6px rgba(0, 0, 0, 0.48),
+    0 18px 32px -16px rgba(0, 0, 0, 0.55);
+  --ms-shadow-hover:
+    0 2px 4px -2px rgba(0, 0, 0, 0.6),
+    0 14px 28px -10px rgba(0, 0, 0, 0.55),
+    0 32px 56px -22px rgba(0, 0, 0, 0.6);
+  /* 深底上卡面本来就是暗的，高光只留一条几乎看不出的亮边，多了会发灰 */
+  --ms-sheen: rgba(255, 255, 255, 0.08);
+
+  /* 深色下再提一档：深色卡面上的装饰色要比浅色主题更亮才「跳」得出来 */
+  --ms-brand-bright: #2dd4bf;
+  --ms-green-bright: #34d399;
+  --ms-blue-bright: #60a5fa;
+  --ms-violet-bright: #a78bfa;
+  --ms-orange-bright: #fb923c;
 }
 </style>

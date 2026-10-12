@@ -1343,6 +1343,8 @@ export default {
           searchPlaceholder: 'Search model, provider, or mode...',
           allGroups: 'All groups',
           allProviders: 'All providers',
+          catalogTitle: 'Platforms',
+          catalogSummary: '{count} groups · rate {rate}',
           allModes: 'All modes',
           gridView: 'Grid view',
           listView: 'List view',
