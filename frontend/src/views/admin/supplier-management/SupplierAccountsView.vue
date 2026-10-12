@@ -7311,11 +7311,16 @@ button.sp-guard-failure-hint:hover {
   回到顶部悬浮按钮
   z-index 取 40：低于 BaseDialog 的 z-50 与 .sp-overlay 的 z-80，
   弹窗 / 抽屉打开时按钮会被盖住，不会浮在遮罩之上抢焦点。
+  纵向居中用 top + 半高偏移，而不是 top: 50% + translateY(-50%)：
+  这个按钮的 transform 已被 hover 位移、过渡入场、reduced-motion 三处占用
+  （见 .sp-scroll-top:hover、.sp-scroll-top-enter-from 与文件末尾的 reduced-motion 块），
+  再叠一个 translateY(-50%) 会被它们覆盖，按钮就会掉到中线下方。
+  按钮尺寸固定（媒体查询只改 right），所以半高 1.375rem 是常数。
 */
 .sp-scroll-top {
   position: fixed;
   right: 1.5rem;
-  bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  top: calc(50% - 1.375rem);
   z-index: 40;
   display: flex;
   width: 2.75rem;
@@ -7403,7 +7408,6 @@ button.sp-guard-failure-hint:hover {
 @media (max-width: 760px) {
   .sp-scroll-top {
     right: 1rem;
-    bottom: max(1rem, env(safe-area-inset-bottom, 0px));
   }
 }
 
