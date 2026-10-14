@@ -666,6 +666,178 @@ export default {
     }
   },
 
+  // Model Audit (user-facing upstream degradation check)
+  modelAudit: {
+    title: 'Upstream Model Degradation Check',
+    description:
+      'Run a fixed set of tasks against your own upstream credentials to see whether it has been downgraded.',
+    subtitle: 'Fixed task set and grading criteria',
+    running: 'Check in progress, usually takes 10–60 seconds…',
+    chips: {
+      model: 'Model'
+    },
+    monitor: {
+      title: 'Monitor',
+      capacity: 'Showing the latest {count} runs',
+      caption: 'Latest {count} runs',
+      empty: 'No records yet',
+      legend: {
+        passed: 'Passed',
+        error: 'Request failed',
+        incorrect: 'Failed'
+      }
+    },
+    stats: {
+      passRate: 'Pass rate',
+      lastDuration: 'Last duration',
+      runCount: 'Runs'
+    },
+    resultPanel: {
+      title: 'My check',
+      waiting: 'Waiting for results',
+      running: 'In progress',
+      seconds: '{count}s',
+      minutes: '{count} min',
+      stop: 'Stop this check',
+      cancelled: 'Stopped',
+      cancelledHint: 'You stopped this run yourself. Questions that already finished are still valid.',
+      accountId: 'Account ID {id}',
+      prev: 'Previous',
+      next: 'Next'
+    },
+    result: {
+      title: 'Check result',
+      questionDetail: 'Questions & answers',
+      expected: 'Expected',
+      answer: 'Model answer',
+      copyArtwork: 'Copy artwork source',
+      openArtwork: 'Open artwork in a new tab',
+      artworkCopied: 'Artwork source copied to clipboard'
+    },
+    form: {
+      title: 'Start a check',
+      baseUrl: 'Upstream Base URL',
+      baseUrlPlaceholder: 'https://api.example.com',
+      baseUrlHint:
+        'Must be a public HTTPS address; enter the host only — /v1 and the terminal path are appended automatically (if that path returns 404/405, the address without /v1 is tried instead).',
+      apiKey: 'Upstream API Key',
+      apiKeyPlaceholder: 'sk-...',
+      apiKeyHint: 'Used for this check only — never stored or echoed back',
+      protocol: 'Protocol',
+      protocolLabel: {
+        chat_completions: 'OpenAI compatible',
+        responses: 'OpenAI Responses',
+        messages: 'Anthropic'
+      },
+      protocolHint: {
+        chat_completions:
+          'Resolves to Base URL + /v1/chat/completions (no extra /v1 when the address already carries a version segment) and authenticates with Authorization: Bearer; the thinking level is sent as reasoning_effort.',
+        responses:
+          'Resolves to Base URL + /v1/responses (no extra /v1 when the address already carries a version segment) and authenticates with Authorization: Bearer; the thinking level is sent as reasoning.effort.',
+        messages:
+          'Resolves to Base URL + /v1/messages (no extra /v1 when the address already carries a version segment) and authenticates with x-api-key; this protocol does not accept reasoning_effort, so the thinking level has no effect here.'
+      },
+      model: 'Model',
+      modelPlaceholder: 'Select a model',
+      modelHint:
+        'Options come from the upstream you entered; you can also type any other model name.',
+      modelSearchPlaceholder: 'Search or type a model name',
+      modelEmpty: 'The upstream returned no models',
+      modelNeedCredentials: 'Enter the Base URL and API Key first',
+      modelFetch: 'Fetch models',
+      modelFetching: 'Fetching…',
+      modelCreatablePrefix: 'Use model',
+      reasoningEffort: 'Thinking level',
+      reasoningEffortPlaceholder: 'Not specified',
+      tasks: 'Checks',
+      taskLogic: 'Logic questions',
+      taskRender: 'Rendering task',
+      // Question picker
+      presetNone: 'None selected',
+      customQuestion: 'Custom question',
+      customPromptPlaceholder:
+        'Write the question you want to ask. For a logic question, ask the model to reply with a single number.',
+      customExpected: 'Expected answer',
+      customExpectedPlaceholder: 'e.g. 4',
+      customExpectedHint:
+        'Logic questions are graded by whether this number appears in the reply, so it must be a number. 4 and 4.0 count as the same.',
+      detailShow: 'Details',
+      detailHide: 'Hide',
+      taskBankLoading: 'Loading questions…',
+      taskBankEmpty: 'Question bank is empty',
+      securityNote:
+        'Credentials are used only for the upstream calls in this check. The server does not store them or write them to logs.',
+      submit: 'Start check',
+      submitting: 'Checking…'
+    },
+    verdict: {
+      normal: 'Normal',
+      degraded: 'Possibly degraded',
+      unknown: 'Inconclusive',
+      generated: 'Generated'
+    },
+    verdictHint: {
+      normal: 'All logic questions were answered correctly and the rendering task looks structurally complete.',
+      degraded: 'At least one check fell short — review the details below.',
+      unknown: 'The upstream returned nothing usable, so no judgement can be made.',
+      renderOnly: 'The rendering task shows the artwork; no intelligence check was performed.'
+    },
+    metrics: {
+      logic: 'Logic questions',
+      render: 'Rendering task',
+      duration: 'Duration',
+      protocol: 'Protocol',
+      reasoningEffort: 'Thinking level',
+      reasoningEffortUnset: 'Not set',
+      renderOk: 'Structurally complete',
+      renderGenerated: 'Generated',
+      renderDegraded: 'Degraded',
+      renderUnknown: 'No response',
+      renderSkipped: 'Not run'
+    },
+    item: {
+      passed: 'Passed',
+      failed: 'Failed',
+      unknown: 'No response',
+      generated: 'Generated',
+      preview: 'Artwork preview'
+    },
+    history: {
+      title: 'Check history',
+      empty: 'No checks yet',
+      open: 'Open this check result',
+      share: 'Copy check summary',
+      detail: 'View details',
+      copy: 'Copy summary',
+      download: 'Download report',
+      copyOk: 'Check summary copied to clipboard',
+      verdictLabel: 'Verdict',
+      upstream: 'Upstream',
+      ribbon: {
+        normal: 'Passed',
+        degraded: 'Degraded',
+        unknown: 'Unknown',
+        failed: 'Failed',
+        cancelled: 'Cancelled',
+        running: 'Running',
+        generated: 'Generated'
+      }
+    },
+    errors: {
+      needBaseUrl: 'Enter the upstream Base URL',
+      needApiKey: 'Enter the upstream API Key',
+      needModel: 'Enter the model name',
+      needTask: 'Select at least one check',
+      needQuestion: 'Select or write at least one question',
+      needCustomExpected: 'A custom logic question needs an expected answer',
+      startFailed: 'Failed to start the check',
+      modelsFailed: 'Failed to fetch the model list',
+      loadTasksFailed: 'Failed to load the question bank',
+      loadFailed: 'Failed to load the check record',
+      cancelFailed: 'Failed to stop the check'
+    }
+  },
+
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
     title: 'Model Plaza',

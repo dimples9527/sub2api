@@ -85,6 +85,7 @@ type Handlers struct {
 	Payment          *PaymentHandler
 	PaymentWebhook   *PaymentWebhookHandler
 	AvailableChannel *AvailableChannelHandler
+	ModelAudit       *ModelAuditHandler
 	ModelPlaza       *ModelPlazaHandler
 	ModelSquare      *ModelSquareHandler
 	AsyncImage       *AsyncImageHandler

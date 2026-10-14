@@ -835,6 +835,7 @@ function buildSelfNavItems(options: {
   items.push(
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/model-square', label: t('nav.modelSquare'), icon: ServerIcon, hideInSimpleMode: true },
+    { path: '/model-audit', label: t('nav.modelAudit'), icon: ShieldIcon, hideInSimpleMode: true },
     // 与顶栏右上角同一个入口：public/model-monitor-local.html 是独立静态页，没有 Vue 路由记录，
     // 必须 external + 新标签打开，否则点进去是 404。不加 hideInSimpleMode，与顶栏口径一致。
     ...(options.includeModelMonitor

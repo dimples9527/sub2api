@@ -22,6 +22,7 @@
         :required="required"
         :placeholder="placeholderText"
         :autocomplete="autocomplete"
+        v-bind="inputAttrs"
         :readonly="readonly"
         :class="[
           'input w-full transition-all duration-200',
@@ -70,6 +71,9 @@ interface Props {
   hint?: string
   id?: string
   autocomplete?: string
+  // 透传到内部 <input> 的额外属性。用于 data-*-ignore 这类没法声明成 prop
+  // 的标记 —— 密码管理类扩展只认挂在输入框本身上的这些属性。
+  inputAttrs?: Record<string, string>
 }
 
 const props = withDefaults(defineProps<Props>(), {

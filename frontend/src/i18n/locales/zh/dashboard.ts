@@ -671,6 +671,173 @@ export default {
     }
   },
 
+  // Model Audit (user-facing upstream degradation check)
+  modelAudit: {
+    title: '上游模型降智检测',
+    description: '用你自己的上游凭据跑一组固定题目，判断这个上游是否被降级。',
+    subtitle: '固定题组与判定依据',
+    running: '检测进行中，通常需要 10–60 秒…',
+    chips: {
+      model: '模型'
+    },
+    monitor: {
+      title: '监控状态',
+      capacity: '展示容量: 最近 {count} 次',
+      caption: '最近 {count} 次',
+      empty: '暂无记录',
+      legend: {
+        passed: '通过',
+        error: '请求失败',
+        incorrect: '不通过'
+      }
+    },
+    stats: {
+      passRate: '通过率',
+      lastDuration: '最近耗时',
+      runCount: '检测次数'
+    },
+    resultPanel: {
+      title: '我的检测',
+      waiting: '等待检测结果',
+      running: '进行中',
+      seconds: '{count} 秒',
+      minutes: '{count} 分钟',
+      stop: '中止检测',
+      cancelled: '已中止',
+      cancelledHint: '这一轮是你手动停掉的，已经跑完的题目结果仍然有效。',
+      accountId: '账号 ID {id}',
+      prev: '上一条',
+      next: '下一条'
+    },
+    result: {
+      title: '检测结果',
+      questionDetail: '题目与回答',
+      expected: '期望答案',
+      answer: '模型回答',
+      copyArtwork: '复制作品源码',
+      openArtwork: '在新标签页打开作品',
+      artworkCopied: '作品源码已复制到剪贴板'
+    },
+    form: {
+      title: '发起检测',
+      baseUrl: '上游 Base URL',
+      baseUrlPlaceholder: 'https://api.example.com',
+      baseUrlHint:
+        '必须是 HTTPS 公网地址；只填域名即可，/v1 与终端路径由「协议」自动拼接（该路径返回 404/405 时会自动改试不带 /v1 的地址）。',
+      apiKey: '上游 API Key',
+      apiKeyPlaceholder: 'sk-...',
+      apiKeyHint: '仅用于本次检测，不会保存或回显',
+      protocol: '协议',
+      protocolLabel: {
+        chat_completions: 'OpenAI 兼容',
+        responses: 'OpenAI Responses',
+        messages: 'Anthropic'
+      },
+      protocolHint: {
+        chat_completions:
+          '在 Base URL 后自动拼上 /v1/chat/completions（地址里已带版本段则不再补 /v1），用 Authorization: Bearer 认证；思考等级按 reasoning_effort 发送。',
+        responses:
+          '在 Base URL 后自动拼上 /v1/responses（地址里已带版本段则不再补 /v1），用 Authorization: Bearer 认证；思考等级按 reasoning.effort 发送。',
+        messages:
+          '在 Base URL 后自动拼上 /v1/messages（地址里已带版本段则不再补 /v1），用 x-api-key 认证；该协议不接受 reasoning_effort，思考等级对它不生效。'
+      },
+      model: '模型名称',
+      modelPlaceholder: '选择模型',
+      modelHint: '列表来自你填写的上游；也可直接输入其他模型名。',
+      modelSearchPlaceholder: '搜索或输入模型名',
+      modelEmpty: '上游未返回模型',
+      modelNeedCredentials: '先填写 Base URL 与 API Key',
+      modelFetch: '获取模型',
+      modelFetching: '获取中…',
+      modelCreatablePrefix: '使用模型',
+      reasoningEffort: '思考等级',
+      reasoningEffortPlaceholder: '不指定',
+      tasks: '检测项',
+      taskLogic: '逻辑题',
+      taskRender: '生成题',
+      // 题目选择区
+      presetNone: '未选择',
+      customQuestion: '自定义题目',
+      customPromptPlaceholder: '写下你想问的题目。逻辑题请要求模型只回答一个数字。',
+      customExpected: '期望答案',
+      customExpectedPlaceholder: '例如 4',
+      customExpectedHint: '逻辑题靠「回答里出现这个数字」判分，所以必须是数字；判分不区分 4 与 4.0。',
+      detailShow: '详情',
+      detailHide: '收起',
+      taskBankLoading: '题库加载中…',
+      taskBankEmpty: '题库为空',
+      securityNote: '凭据只在本次检测的上游调用中使用，服务端不保存、不写入日志。',
+      submit: '开始检测',
+      submitting: '检测中…'
+    },
+    verdict: {
+      normal: '正常',
+      degraded: '疑似降智',
+      unknown: '无法判定',
+      generated: '已生成'
+    },
+    verdictHint: {
+      normal: '逻辑题全部答对，生成题结构完整。',
+      degraded: '至少一项不达标，建议结合明细确认。',
+      unknown: '上游没有返回可用内容，无法判断。',
+      renderOnly: '生成题已展示作品，未做智商判定。'
+    },
+    metrics: {
+      logic: '逻辑题',
+      render: '生成题',
+      duration: '耗时',
+      protocol: '协议',
+      reasoningEffort: '思考等级',
+      reasoningEffortUnset: '未指定',
+      renderOk: '结构完整',
+      renderGenerated: '已生成',
+      renderDegraded: '结构退化',
+      renderUnknown: '未响应',
+      renderSkipped: '未检测'
+    },
+    item: {
+      passed: '通过',
+      failed: '未通过',
+      unknown: '未响应',
+      generated: '已生成',
+      preview: '作品预览'
+    },
+    history: {
+      title: '检测历史',
+      empty: '还没有检测记录',
+      open: '查看这次检测的详情',
+      share: '复制检测结论',
+      detail: '查看详情',
+      copy: '复制结论',
+      download: '下载报告',
+      copyOk: '检测结论已复制到剪贴板',
+      verdictLabel: '判定',
+      upstream: '上游',
+      ribbon: {
+        normal: '通过',
+        degraded: '降智',
+        unknown: '无法判定',
+        failed: '失败',
+        cancelled: '已中止',
+        running: '检测中',
+        generated: '已生成'
+      }
+    },
+    errors: {
+      needBaseUrl: '请填写上游 Base URL',
+      needApiKey: '请填写上游 API Key',
+      needModel: '请填写模型名称',
+      needTask: '请至少选择一个检测项',
+      needQuestion: '请至少选择或填写一道题目',
+      needCustomExpected: '自定义逻辑题必须填写期望答案',
+      startFailed: '发起检测失败',
+      modelsFailed: '获取模型列表失败',
+      loadTasksFailed: '读取题库失败',
+      loadFailed: '读取检测记录失败',
+      cancelFailed: '中止检测失败'
+    }
+  },
+
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
     title: '模型广场',

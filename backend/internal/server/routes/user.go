@@ -148,6 +148,21 @@ func RegisterUserRoutes(
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
 		}
 
+		// 上游模型降智检测（用户自助）。发起会真的用用户填写的凭据调用上游，
+		// 因此单独挂 Heavy 限流，避免被当成免费的上游探测入口。
+		modelAudit := authenticated.Group("/model-audit")
+		{
+			modelAudit.POST("/runs", panelRateLimiter.Heavy(), h.ModelAudit.Start)
+			modelAudit.GET("/runs", h.ModelAudit.List)
+			modelAudit.GET("/runs/:id", h.ModelAudit.Get)
+			// 中止只改一行状态、不碰上游，所以只走 Global 档限流（Heavy 是给发起用的）。
+			modelAudit.POST("/runs/:id/cancel", h.ModelAudit.Cancel)
+			// 题库是编译期常量，不碰上游也不碰库，只走 Global 档限流。
+			modelAudit.GET("/tasks", h.ModelAudit.Tasks)
+			// 轻量调用，只走 Global 档限流；不加 Heavy，避免频繁读取模型列表被误伤。
+			modelAudit.POST("/models", h.ModelAudit.Models)
+		}
+
 		// V2 passive views require feature on + mode=v2.
 		monitorV2 := authenticated.Group("/channel-monitor-v2")
 		monitorV2.Use(panelRateLimiter.Heavy())

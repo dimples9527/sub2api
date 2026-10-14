@@ -210,6 +210,7 @@ export default {
     recharge: 'Recharge',
     subscribe: 'Subscription',
     modelMonitor: 'Model Monitor',
+    modelAudit: 'Model Audit',
     docs: 'Docs',
     myOrders: 'My Orders',
     orderManagement: 'Orders',

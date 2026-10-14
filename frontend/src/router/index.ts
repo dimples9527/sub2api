@@ -295,6 +295,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/model-audit',
+    name: 'ModelAudit',
+    component: () => import('@/views/user/ModelAuditView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Model Audit',
+      titleKey: 'modelAudit.title',
+      descriptionKey: 'modelAudit.description'
+    }
+  },
+  {
     path: '/model-square',
     name: 'ModelSquare',
     component: () => import('@/views/admin/upstream-management/ModelSquareView.vue'),
