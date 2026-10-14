@@ -671,9 +671,9 @@ export default {
     }
   },
 
-  // Model Audit (user-facing upstream degradation check)
-  modelAudit: {
-    title: '上游模型降智检测',
+  // Model degradation check (user-facing)
+  modelDegradation: {
+    title: '模型降智检测',
     description: '用你自己的上游凭据跑一组固定题目，判断这个上游是否被降级。',
     subtitle: '固定题组与判定依据',
     running: '检测进行中，通常需要 10–60 秒…',

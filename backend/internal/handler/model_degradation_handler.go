@@ -13,20 +13,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ModelAuditHandler 用户侧「上游模型降智检测」handler。
+// ModelDegradationHandler 用户侧「上游模型降智检测」handler。
 //
 // 凭据由用户在每次请求里提交，本层只负责转发给服务层：
 // 不回显、不记录、不落库。
-type ModelAuditHandler struct {
-	auditService *service.ModelAuditService
+type ModelDegradationHandler struct {
+	auditService *service.ModelDegradationService
 }
 
-// NewModelAuditHandler 创建降智检测 handler。
-func NewModelAuditHandler(auditService *service.ModelAuditService) *ModelAuditHandler {
-	return &ModelAuditHandler{auditService: auditService}
+// NewModelDegradationHandler 创建降智检测 handler。
+func NewModelDegradationHandler(auditService *service.ModelDegradationService) *ModelDegradationHandler {
+	return &ModelDegradationHandler{auditService: auditService}
 }
 
-type modelAuditStartRequest struct {
+type modelDegradationStartRequest struct {
 	BaseURL string `json:"base_url" binding:"required"`
 	APIKey  string `json:"api_key" binding:"required"`
 	ModelID string `json:"model_id" binding:"required"`
@@ -35,14 +35,14 @@ type modelAuditStartRequest struct {
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Tasks           []string `json:"tasks"`
 	// Questions 本次要跑的具体题目。不传则按 Tasks 跑该类型下的全部预制题。
-	Questions []modelAuditQuestionRequest `json:"questions"`
+	Questions []modelDegradationQuestionRequest `json:"questions"`
 }
 
-// modelAuditQuestionRequest 一道要跑的题。
+// modelDegradationQuestionRequest 一道要跑的题。
 //
 // 带 key 表示选的是预制题（服务端按 key 取题目正文与期望答案）；
 // key 为空则视为自定义题，正文取 prompt。
-type modelAuditQuestionRequest struct {
+type modelDegradationQuestionRequest struct {
 	TaskType string `json:"task_type"`
 	Key      string `json:"key"`
 	Prompt   string `json:"prompt"`
@@ -50,8 +50,8 @@ type modelAuditQuestionRequest struct {
 	Expected string `json:"expected"`
 }
 
-// modelAuditTaskOptionResponse 题库里的一道预制题。
-type modelAuditTaskOptionResponse struct {
+// modelDegradationTaskOptionResponse 题库里的一道预制题。
+type modelDegradationTaskOptionResponse struct {
 	TaskType string `json:"task_type"`
 	Key      string `json:"key"`
 	Title    string `json:"title"`
@@ -59,17 +59,17 @@ type modelAuditTaskOptionResponse struct {
 	Expected string `json:"expected"`
 }
 
-// modelAuditModelsRequest 只带凭据与协议：模型列表来自上游，不需要模型名与检测项。
+// modelDegradationModelsRequest 只带凭据与协议：模型列表来自上游，不需要模型名与检测项。
 //
 // 用 POST 而不是 GET：API Key 放进查询串会被各级访问日志记下来。
-type modelAuditModelsRequest struct {
+type modelDegradationModelsRequest struct {
 	BaseURL string `json:"base_url" binding:"required"`
 	APIKey  string `json:"api_key" binding:"required"`
 	// Protocol 决定 /models 用哪套认证头；不传按 chat_completions 处理。
 	Protocol string `json:"protocol"`
 }
 
-type modelAuditItemResponse struct {
+type modelDegradationItemResponse struct {
 	TaskType   string `json:"task_type"`
 	TaskKey    string `json:"task_key"`
 	Prompt     string `json:"prompt"`
@@ -82,7 +82,7 @@ type modelAuditItemResponse struct {
 	DurationMs int    `json:"duration_ms"`
 }
 
-type modelAuditRunResponse struct {
+type modelDegradationRunResponse struct {
 	ID      int64  `json:"id"`
 	BaseURL string `json:"base_url"`
 	ModelID string `json:"model_id"`
@@ -98,36 +98,36 @@ type modelAuditRunResponse struct {
 	DurationMs      int                      `json:"duration_ms"`
 	CreatedAt       time.Time                `json:"created_at"`
 	CompletedAt     *time.Time               `json:"completed_at,omitempty"`
-	Items           []modelAuditItemResponse `json:"items,omitempty"`
+	Items           []modelDegradationItemResponse `json:"items,omitempty"`
 }
 
 // Start 发起一次降智检测。
-// POST /api/v1/model-audit/runs
-func (h *ModelAuditHandler) Start(c *gin.Context) {
+// POST /api/v1/model-degradation/runs
+func (h *ModelDegradationHandler) Start(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "请先登录")
 		return
 	}
 
-	var req modelAuditStartRequest
+	var req modelDegradationStartRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "请求参数无效："+err.Error())
 		return
 	}
 
-	run, err := h.auditService.Start(c.Request.Context(), subject.UserID, service.ModelAuditInput{
+	run, err := h.auditService.Start(c.Request.Context(), subject.UserID, service.ModelDegradationInput{
 		BaseURL:         req.BaseURL,
 		APIKey:          req.APIKey,
 		ModelID:         req.ModelID,
 		Protocol:        req.Protocol,
 		ReasoningEffort: req.ReasoningEffort,
 		Tasks:           req.Tasks,
-		Questions:       modelAuditQuestionsFromRequest(req.Questions),
+		Questions:       modelDegradationQuestionsFromRequest(req.Questions),
 	})
 	if err != nil {
 		// 同一用户已有检测在执行：这是并发冲突，不是参数错误，用 409 区分开。
-		if errors.Is(err, service.ErrModelAuditRunInProgress) {
+		if errors.Is(err, service.ErrModelDegradationRunInProgress) {
 			response.Error(c, http.StatusConflict, err.Error())
 			return
 		}
@@ -135,12 +135,12 @@ func (h *ModelAuditHandler) Start(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, modelAuditRunToResponse(run, false))
+	response.Success(c, modelDegradationRunToResponse(run, false))
 }
 
 // Tasks 返回内置题库，供前端铺下拉与「查看题目」。
-// GET /api/v1/model-audit/tasks
-func (h *ModelAuditHandler) Tasks(c *gin.Context) {
+// GET /api/v1/model-degradation/tasks
+func (h *ModelDegradationHandler) Tasks(c *gin.Context) {
 	if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
 		response.Unauthorized(c, "请先登录")
 		return
@@ -148,26 +148,26 @@ func (h *ModelAuditHandler) Tasks(c *gin.Context) {
 
 	logic, render := h.auditService.ListTasks()
 	response.Success(c, gin.H{
-		"logic":  modelAuditTaskOptionsToResponse(logic),
-		"render": modelAuditTaskOptionsToResponse(render),
+		"logic":  modelDegradationTaskOptionsToResponse(logic),
+		"render": modelDegradationTaskOptionsToResponse(render),
 	})
 }
 
 // Models 用用户提交的凭据读取上游模型列表，供前端下拉候选。
-// POST /api/v1/model-audit/models
-func (h *ModelAuditHandler) Models(c *gin.Context) {
+// POST /api/v1/model-degradation/models
+func (h *ModelDegradationHandler) Models(c *gin.Context) {
 	if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
 		response.Unauthorized(c, "请先登录")
 		return
 	}
 
-	var req modelAuditModelsRequest
+	var req modelDegradationModelsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "请求参数无效："+err.Error())
 		return
 	}
 
-	models, err := h.auditService.ListUpstreamModels(c.Request.Context(), service.ModelAuditInput{
+	models, err := h.auditService.ListUpstreamModels(c.Request.Context(), service.ModelDegradationInput{
 		BaseURL:  req.BaseURL,
 		APIKey:   req.APIKey,
 		Protocol: req.Protocol,
@@ -181,8 +181,8 @@ func (h *ModelAuditHandler) Models(c *gin.Context) {
 }
 
 // Get 读取单次检测详情。
-// GET /api/v1/model-audit/runs/:id
-func (h *ModelAuditHandler) Get(c *gin.Context) {
+// GET /api/v1/model-degradation/runs/:id
+func (h *ModelDegradationHandler) Get(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "请先登录")
@@ -205,14 +205,14 @@ func (h *ModelAuditHandler) Get(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, modelAuditRunToResponse(run, true))
+	response.Success(c, modelDegradationRunToResponse(run, true))
 }
 
 // Cancel 中止用户自己的、仍在运行中的检测。
 //
 // 用 409 而不是 400：参数没问题，是「这一轮已经结束了」这个状态冲突。
 // 前端据此把运行面板切回结果态，不需要额外提示。
-func (h *ModelAuditHandler) Cancel(c *gin.Context) {
+func (h *ModelDegradationHandler) Cancel(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "请先登录")
@@ -226,7 +226,7 @@ func (h *ModelAuditHandler) Cancel(c *gin.Context) {
 	}
 
 	if err := h.auditService.CancelRun(c.Request.Context(), subject.UserID, runID); err != nil {
-		if errors.Is(err, service.ErrModelAuditRunNotCancellable) {
+		if errors.Is(err, service.ErrModelDegradationRunNotCancellable) {
 			response.Error(c, http.StatusConflict, err.Error())
 			return
 		}
@@ -238,8 +238,8 @@ func (h *ModelAuditHandler) Cancel(c *gin.Context) {
 }
 
 // List 读取当前用户的检测历史。
-// GET /api/v1/model-audit/runs
-func (h *ModelAuditHandler) List(c *gin.Context) {
+// GET /api/v1/model-degradation/runs
+func (h *ModelDegradationHandler) List(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "请先登录")
@@ -259,15 +259,15 @@ func (h *ModelAuditHandler) List(c *gin.Context) {
 		return
 	}
 
-	items := make([]modelAuditRunResponse, 0, len(runs))
+	items := make([]modelDegradationRunResponse, 0, len(runs))
 	for i := range runs {
-		items = append(items, modelAuditRunToResponse(&runs[i], false))
+		items = append(items, modelDegradationRunToResponse(&runs[i], false))
 	}
 	response.Success(c, gin.H{"items": items})
 }
 
-func modelAuditRunToResponse(run *service.ModelAuditRun, withItems bool) modelAuditRunResponse {
-	resp := modelAuditRunResponse{
+func modelDegradationRunToResponse(run *service.ModelDegradationRun, withItems bool) modelDegradationRunResponse {
+	resp := modelDegradationRunResponse{
 		ID:              run.ID,
 		BaseURL:         run.BaseURL,
 		ModelID:         run.ModelID,
@@ -286,10 +286,10 @@ func modelAuditRunToResponse(run *service.ModelAuditRun, withItems bool) modelAu
 	if !withItems || len(run.Items) == 0 {
 		return resp
 	}
-	resp.Items = make([]modelAuditItemResponse, 0, len(run.Items))
+	resp.Items = make([]modelDegradationItemResponse, 0, len(run.Items))
 	for i := range run.Items {
 		item := run.Items[i]
-		resp.Items = append(resp.Items, modelAuditItemResponse{
+		resp.Items = append(resp.Items, modelDegradationItemResponse{
 			TaskType:   item.TaskType,
 			TaskKey:    item.TaskKey,
 			Prompt:     item.Prompt,
@@ -305,16 +305,16 @@ func modelAuditRunToResponse(run *service.ModelAuditRun, withItems bool) modelAu
 	return resp
 }
 
-// modelAuditQuestionsFromRequest 把请求里的题目列表转成服务层结构。
+// modelDegradationQuestionsFromRequest 把请求里的题目列表转成服务层结构。
 // 返回 nil 表示调用方没指定题目，服务层会退回「按检测项跑全部预制题」。
-func modelAuditQuestionsFromRequest(questions []modelAuditQuestionRequest) []service.ModelAuditQuestion {
+func modelDegradationQuestionsFromRequest(questions []modelDegradationQuestionRequest) []service.ModelDegradationQuestion {
 	if len(questions) == 0 {
 		return nil
 	}
 
-	items := make([]service.ModelAuditQuestion, 0, len(questions))
+	items := make([]service.ModelDegradationQuestion, 0, len(questions))
 	for _, question := range questions {
-		items = append(items, service.ModelAuditQuestion{
+		items = append(items, service.ModelDegradationQuestion{
 			TaskType: question.TaskType,
 			Key:      question.Key,
 			Prompt:   question.Prompt,
@@ -324,11 +324,11 @@ func modelAuditQuestionsFromRequest(questions []modelAuditQuestionRequest) []ser
 	return items
 }
 
-// modelAuditTaskOptionsToResponse 把题库条目转成响应结构。
-func modelAuditTaskOptionsToResponse(options []service.ModelAuditTaskOption) []modelAuditTaskOptionResponse {
-	items := make([]modelAuditTaskOptionResponse, 0, len(options))
+// modelDegradationTaskOptionsToResponse 把题库条目转成响应结构。
+func modelDegradationTaskOptionsToResponse(options []service.ModelDegradationTaskOption) []modelDegradationTaskOptionResponse {
+	items := make([]modelDegradationTaskOptionResponse, 0, len(options))
 	for _, option := range options {
-		items = append(items, modelAuditTaskOptionResponse{
+		items = append(items, modelDegradationTaskOptionResponse{
 			TaskType: option.TaskType,
 			Key:      option.Key,
 			Title:    option.Title,

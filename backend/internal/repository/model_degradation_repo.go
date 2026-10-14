@@ -9,24 +9,24 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-// modelAuditRepository 上游模型降智检测的持久化实现。
-type modelAuditRepository struct {
+// modelDegradationRepository 上游模型降智检测的持久化实现。
+type modelDegradationRepository struct {
 	db *sql.DB
 }
 
-// NewModelAuditRepository 创建降智检测仓储。
-func NewModelAuditRepository(db *sql.DB) service.ModelAuditRepository {
-	return &modelAuditRepository{db: db}
+// NewModelDegradationRepository 创建降智检测仓储。
+func NewModelDegradationRepository(db *sql.DB) service.ModelDegradationRepository {
+	return &modelDegradationRepository{db: db}
 }
 
-const modelAuditRunColumns = `id, user_id, base_url, model_id, protocol, reasoning_effort, status, verdict,
+const modelDegradationRunColumns = `id, user_id, base_url, model_id, protocol, reasoning_effort, status, verdict,
        logic_passed, logic_total, render_verdict, error_message, duration_ms,
        created_at, completed_at`
 
-const modelAuditItemColumns = `id, run_id, task_type, task_key, prompt, expected, response,
+const modelDegradationItemColumns = `id, run_id, task_type, task_key, prompt, expected, response,
        passed, verdict, detail, source_hash, duration_ms, created_at`
 
-func (r *modelAuditRepository) CreateRun(ctx context.Context, run *service.ModelAuditRun) error {
+func (r *modelDegradationRepository) CreateRun(ctx context.Context, run *service.ModelDegradationRun) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -54,7 +54,7 @@ RETURNING id, created_at`
 	).Scan(&run.ID, &run.CreatedAt)
 }
 
-func (r *modelAuditRepository) CreateItems(ctx context.Context, items []service.ModelAuditItem) error {
+func (r *modelDegradationRepository) CreateItems(ctx context.Context, items []service.ModelDegradationItem) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -103,7 +103,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`)
 	return nil
 }
 
-func (r *modelAuditRepository) FinishRun(ctx context.Context, run *service.ModelAuditRun) error {
+func (r *modelDegradationRepository) FinishRun(ctx context.Context, run *service.ModelDegradationRun) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -135,15 +135,15 @@ WHERE id = $8`,
 }
 
 // GetRun 读取单次检测及其明细。user_id 参与过滤，避免越权读取他人记录。
-func (r *modelAuditRepository) GetRun(ctx context.Context, userID, runID int64) (*service.ModelAuditRun, error) {
+func (r *modelDegradationRepository) GetRun(ctx context.Context, userID, runID int64) (*service.ModelDegradationRun, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("model audit repository database is not initialized")
 	}
 
-	run := &service.ModelAuditRun{}
+	run := &service.ModelDegradationRun{}
 	var completedAt sql.NullTime
 	err := r.db.QueryRowContext(ctx,
-		`SELECT `+modelAuditRunColumns+` FROM model_audit_runs WHERE id = $1 AND user_id = $2`,
+		`SELECT `+modelDegradationRunColumns+` FROM model_audit_runs WHERE id = $1 AND user_id = $2`,
 		runID, userID,
 	).Scan(
 		&run.ID,
@@ -181,7 +181,7 @@ func (r *modelAuditRepository) GetRun(ctx context.Context, userID, runID int64) 
 }
 
 // ListRuns 读取用户的检测历史，按时间倒序。列表不返回明细，详情按需再查。
-func (r *modelAuditRepository) ListRuns(ctx context.Context, userID int64, limit int) ([]service.ModelAuditRun, error) {
+func (r *modelDegradationRepository) ListRuns(ctx context.Context, userID int64, limit int) ([]service.ModelDegradationRun, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -190,7 +190,7 @@ func (r *modelAuditRepository) ListRuns(ctx context.Context, userID int64, limit
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+modelAuditRunColumns+` FROM model_audit_runs
+		`SELECT `+modelDegradationRunColumns+` FROM model_audit_runs
 WHERE user_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2`,
@@ -201,9 +201,9 @@ LIMIT $2`,
 	}
 	defer func() { _ = rows.Close() }()
 
-	runs := make([]service.ModelAuditRun, 0, limit)
+	runs := make([]service.ModelDegradationRun, 0, limit)
 	for rows.Next() {
-		var run service.ModelAuditRun
+		var run service.ModelDegradationRun
 		var completedAt sql.NullTime
 		if err := rows.Scan(
 			&run.ID,
@@ -235,9 +235,9 @@ LIMIT $2`,
 	return runs, nil
 }
 
-func (r *modelAuditRepository) listItems(ctx context.Context, runID int64) ([]service.ModelAuditItem, error) {
+func (r *modelDegradationRepository) listItems(ctx context.Context, runID int64) ([]service.ModelDegradationItem, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+modelAuditItemColumns+` FROM model_audit_items WHERE run_id = $1 ORDER BY id`,
+		`SELECT `+modelDegradationItemColumns+` FROM model_audit_items WHERE run_id = $1 ORDER BY id`,
 		runID,
 	)
 	if err != nil {
@@ -245,9 +245,9 @@ func (r *modelAuditRepository) listItems(ctx context.Context, runID int64) ([]se
 	}
 	defer func() { _ = rows.Close() }()
 
-	items := make([]service.ModelAuditItem, 0, 8)
+	items := make([]service.ModelDegradationItem, 0, 8)
 	for rows.Next() {
-		var item service.ModelAuditItem
+		var item service.ModelDegradationItem
 		if err := rows.Scan(
 			&item.ID,
 			&item.RunID,
@@ -273,7 +273,7 @@ func (r *modelAuditRepository) listItems(ctx context.Context, runID int64) ([]se
 	return items, nil
 }
 
-func (r *modelAuditRepository) CountSourceHash(ctx context.Context, hash string) (int, error) {
+func (r *modelDegradationRepository) CountSourceHash(ctx context.Context, hash string) (int, error) {
 	if r == nil || r.db == nil {
 		return 0, fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -290,7 +290,7 @@ func (r *modelAuditRepository) CountSourceHash(ctx context.Context, hash string)
 	return count, nil
 }
 
-func (r *modelAuditRepository) MarkStaleRunsFailed(ctx context.Context, startedBefore time.Time) error {
+func (r *modelDegradationRepository) MarkStaleRunsFailed(ctx context.Context, startedBefore time.Time) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -301,9 +301,9 @@ SET status = $1,
     error_message = $2,
     completed_at = NOW()
 WHERE status = $3 AND created_at < $4`,
-		service.ModelAuditStatusFailed,
+		service.ModelDegradationStatusFailed,
 		"检测超时或服务重启导致中断",
-		service.ModelAuditStatusRunning,
+		service.ModelDegradationStatusRunning,
 		startedBefore,
 	)
 	if err != nil {
@@ -312,7 +312,7 @@ WHERE status = $3 AND created_at < $4`,
 	return nil
 }
 
-func (r *modelAuditRepository) HasActiveRun(ctx context.Context, userID int64, createdAfter time.Time) (bool, error) {
+func (r *modelDegradationRepository) HasActiveRun(ctx context.Context, userID int64, createdAfter time.Time) (bool, error) {
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -326,7 +326,7 @@ SELECT EXISTS (
     WHERE user_id = $1 AND status = $2 AND created_at > $3
 )`,
 		userID,
-		service.ModelAuditStatusRunning,
+		service.ModelDegradationStatusRunning,
 		createdAfter,
 	).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check active model audit run: %w", err)
@@ -339,7 +339,7 @@ SELECT EXISTS (
 // WHERE 里同时带 user_id 和 status = running：前者防止越权中止别人的记录，
 // 后者让「已完结 / 已中止过」的行返回 (false, nil) 而不是被二次覆盖。
 // 放进同一条 UPDATE 里判断，就不需要先 SELECT 再 UPDATE 的事务。
-func (r *modelAuditRepository) MarkRunCancelled(ctx context.Context, userID, runID int64) (bool, error) {
+func (r *modelDegradationRepository) MarkRunCancelled(ctx context.Context, userID, runID int64) (bool, error) {
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -351,12 +351,12 @@ SET status = $1,
     error_message = $3,
     completed_at = NOW()
 WHERE id = $4 AND user_id = $5 AND status = $6`,
-		service.ModelAuditStatusCancelled,
-		service.ModelAuditVerdictUnknown,
-		service.ModelAuditCancelledMessage,
+		service.ModelDegradationStatusCancelled,
+		service.ModelDegradationVerdictUnknown,
+		service.ModelDegradationCancelledMessage,
 		runID,
 		userID,
-		service.ModelAuditStatusRunning,
+		service.ModelDegradationStatusRunning,
 	)
 	if err != nil {
 		return false, fmt.Errorf("cancel model audit run %d: %w", runID, err)

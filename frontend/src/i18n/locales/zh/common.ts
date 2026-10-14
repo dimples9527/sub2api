@@ -227,7 +227,7 @@ export default {
     upstreamAccounts: '上游账号',
     modelSquare: '模型广场',
     modelMonitor: '模型监控',
-    modelAudit: '降智检测',
+    modelDegradation: '模型降智检测',
   },
 
   // Auth

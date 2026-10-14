@@ -6,35 +6,35 @@
         <div class="ma-top-head">
           <div class="ma-top-copy">
             <div class="ma-top-title-line">
-              <h1 class="ma-top-title">{{ t('modelAudit.title') }}</h1>
-              <span class="ma-top-sub">{{ t('modelAudit.subtitle') }}</span>
+              <h1 class="ma-top-title">{{ t('modelDegradation.title') }}</h1>
+              <span class="ma-top-sub">{{ t('modelDegradation.subtitle') }}</span>
             </div>
             <div class="ma-top-chips">
               <span class="ma-chip">
-                {{ t('modelAudit.chips.model') }}
+                {{ t('modelDegradation.chips.model') }}
                 <b>{{ form.modelId || '—' }}</b>
               </span>
               <span class="ma-chip">
-                {{ t('modelAudit.form.reasoningEffort') }}
+                {{ t('modelDegradation.form.reasoningEffort') }}
                 <b>{{ currentEffortLabel }}</b>
               </span>
             </div>
           </div>
           <dl class="ma-stats">
             <div class="ma-stat">
-              <dt>{{ t('modelAudit.stats.passRate') }}</dt>
+              <dt>{{ t('modelDegradation.stats.passRate') }}</dt>
               <dd>
                 <strong>{{ passRate }}</strong>
               </dd>
             </div>
             <div class="ma-stat">
-              <dt>{{ t('modelAudit.stats.lastDuration') }}</dt>
+              <dt>{{ t('modelDegradation.stats.lastDuration') }}</dt>
               <dd>
                 <strong>{{ lastDurationLabel }}</strong>
               </dd>
             </div>
             <div class="ma-stat">
-              <dt>{{ t('modelAudit.stats.runCount') }}</dt>
+              <dt>{{ t('modelDegradation.stats.runCount') }}</dt>
               <dd>
                 <strong>{{ history.length }}</strong>
               </dd>
@@ -45,16 +45,16 @@
         <!-- 监控状态：最近若干次检测的色条 -->
         <div class="ma-monitor-head">
           <div class="ma-monitor-title">
-            <span>{{ t('modelAudit.monitor.title') }}</span>
+            <span>{{ t('modelDegradation.monitor.title') }}</span>
             <span class="ma-monitor-cap">
-              {{ t('modelAudit.monitor.capacity', { count: BAR_COUNT }) }}
+              {{ t('modelDegradation.monitor.capacity', { count: BAR_COUNT }) }}
             </span>
           </div>
           <button
             type="button"
             class="ma-icon-btn"
             :disabled="loadingHistory"
-            :aria-label="t('modelAudit.history.title')"
+            :aria-label="t('modelDegradation.history.title')"
             @click="loadHistory"
           >
             <Icon name="refresh" size="sm" :class="loadingHistory ? 'animate-spin' : ''" />
@@ -64,13 +64,13 @@
           <span v-for="(bar, index) in bars" :key="index" class="ma-bar" :class="bar"></span>
         </div>
         <div class="ma-caption">
-          <span>{{ t('modelAudit.monitor.caption', { count: BAR_COUNT }) }}</span>
+          <span>{{ t('modelDegradation.monitor.caption', { count: BAR_COUNT }) }}</span>
           <div class="ma-legend">
-            <span><i class="passed"></i>{{ t('modelAudit.monitor.legend.passed') }}</span>
-            <span><i class="error"></i>{{ t('modelAudit.monitor.legend.error') }}</span>
-            <span><i class="incorrect"></i>{{ t('modelAudit.monitor.legend.incorrect') }}</span>
+            <span><i class="passed"></i>{{ t('modelDegradation.monitor.legend.passed') }}</span>
+            <span><i class="error"></i>{{ t('modelDegradation.monitor.legend.error') }}</span>
+            <span><i class="incorrect"></i>{{ t('modelDegradation.monitor.legend.incorrect') }}</span>
           </div>
-          <span>{{ history.length ? '' : t('modelAudit.monitor.empty') }}</span>
+          <span>{{ history.length ? '' : t('modelDegradation.monitor.empty') }}</span>
         </div>
       </section>
 
@@ -79,7 +79,7 @@
         <div class="ma-panel">
           <div class="ma-form-col">
             <div class="ma-form-head">
-              <h2 class="ma-h2">{{ t('modelAudit.form.title') }}</h2>
+              <h2 class="ma-h2">{{ t('modelDegradation.form.title') }}</h2>
               <div class="ma-seg">
                 <button
                   v-for="task in taskOptions"
@@ -110,15 +110,15 @@
                       :disabled="busy"
                       @change="toggleCustom(type, $event)"
                     />
-                    <span>{{ t('modelAudit.form.customQuestion') }}</span>
+                    <span>{{ t('modelDegradation.form.customQuestion') }}</span>
                   </label>
                 </div>
 
                 <div v-if="loadingTasks" class="ma-qempty">
-                  {{ t('modelAudit.form.taskBankLoading') }}
+                  {{ t('modelDegradation.form.taskBankLoading') }}
                 </div>
                 <div v-else-if="!taskBank[type].length" class="ma-qempty">
-                  {{ t('modelAudit.form.taskBankEmpty') }}
+                  {{ t('modelDegradation.form.taskBankEmpty') }}
                 </div>
                 <div v-else class="ma-qcards" role="radiogroup" :aria-label="taskTypeLabel(type)">
                   <div
@@ -151,8 +151,8 @@
                       <Icon name="eye" size="sm" />
                       <span>{{
                         isDetailOpen(type, option.key)
-                          ? t('modelAudit.form.detailHide')
-                          : t('modelAudit.form.detailShow')
+                          ? t('modelDegradation.form.detailHide')
+                          : t('modelDegradation.form.detailShow')
                       }}</span>
                     </button>
                     <p v-if="isDetailOpen(type, option.key)" class="ma-qcard-prompt">
@@ -167,14 +167,14 @@
                     class="ma-qtextarea"
                     rows="3"
                     :disabled="busy"
-                    :placeholder="t('modelAudit.form.customPromptPlaceholder')"
+                    :placeholder="t('modelDegradation.form.customPromptPlaceholder')"
                   ></textarea>
                   <Input
                     v-if="type === 'logic'"
                     v-model="customExpected"
-                    :label="t('modelAudit.form.customExpected')"
-                    :placeholder="t('modelAudit.form.customExpectedPlaceholder')"
-                    :hint="t('modelAudit.form.customExpectedHint')"
+                    :label="t('modelDegradation.form.customExpected')"
+                    :placeholder="t('modelDegradation.form.customExpectedPlaceholder')"
+                    :hint="t('modelDegradation.form.customExpectedHint')"
                     :disabled="busy"
                   />
                 </div>
@@ -184,9 +184,9 @@
             <div class="ma-fields">
               <Input
                 v-model="form.baseUrl"
-                :label="t('modelAudit.form.baseUrl')"
-                :placeholder="t('modelAudit.form.baseUrlPlaceholder')"
-                :hint="t('modelAudit.form.baseUrlHint')"
+                :label="t('modelDegradation.form.baseUrl')"
+                :placeholder="t('modelDegradation.form.baseUrlPlaceholder')"
+                :hint="t('modelDegradation.form.baseUrlHint')"
                 autocomplete="off"
                 :input-attrs="credentialInputAttrs"
                 :disabled="busy"
@@ -194,9 +194,9 @@
               <Input
                 v-model="form.apiKey"
                 type="password"
-                :label="t('modelAudit.form.apiKey')"
-                :placeholder="t('modelAudit.form.apiKeyPlaceholder')"
-                :hint="t('modelAudit.form.apiKeyHint')"
+                :label="t('modelDegradation.form.apiKey')"
+                :placeholder="t('modelDegradation.form.apiKeyPlaceholder')"
+                :hint="t('modelDegradation.form.apiKeyHint')"
                 autocomplete="new-password"
                 :input-attrs="credentialInputAttrs"
                 :disabled="busy"
@@ -206,37 +206,37 @@
             <div class="ma-toolbar">
               <div class="ma-selects">
                 <div class="ma-field">
-                  <span class="ma-label">{{ t('modelAudit.form.protocol') }}</span>
+                  <span class="ma-label">{{ t('modelDegradation.form.protocol') }}</span>
                   <Select
                     v-model="form.protocol"
                     :options="protocolOptions"
-                    :aria-label="t('modelAudit.form.protocol')"
+                    :aria-label="t('modelDegradation.form.protocol')"
                     :disabled="busy"
                     :searchable="false"
                   />
                 </div>
                 <div class="ma-field">
-                  <span class="ma-label">{{ t('modelAudit.form.model') }}</span>
+                  <span class="ma-label">{{ t('modelDegradation.form.model') }}</span>
                   <Select
                     v-model="form.modelId"
                     :options="modelOptions"
                     :placeholder="modelPlaceholder"
-                    :aria-label="t('modelAudit.form.model')"
+                    :aria-label="t('modelDegradation.form.model')"
                     :disabled="busy"
                     searchable
                     creatable
-                    :creatable-prefix="t('modelAudit.form.modelCreatablePrefix')"
-                    :search-placeholder="t('modelAudit.form.modelSearchPlaceholder')"
-                    :empty-text="t('modelAudit.form.modelEmpty')"
+                    :creatable-prefix="t('modelDegradation.form.modelCreatablePrefix')"
+                    :search-placeholder="t('modelDegradation.form.modelSearchPlaceholder')"
+                    :empty-text="t('modelDegradation.form.modelEmpty')"
                   />
                 </div>
                 <div class="ma-field">
-                  <span class="ma-label">{{ t('modelAudit.form.reasoningEffort') }}</span>
+                  <span class="ma-label">{{ t('modelDegradation.form.reasoningEffort') }}</span>
                   <Select
                     v-model="form.reasoningEffort"
                     :options="effortOptions"
-                    :placeholder="t('modelAudit.form.reasoningEffortPlaceholder')"
-                    :aria-label="t('modelAudit.form.reasoningEffort')"
+                    :placeholder="t('modelDegradation.form.reasoningEffortPlaceholder')"
+                    :aria-label="t('modelDegradation.form.reasoningEffort')"
                     :disabled="reasoningEffortDisabled"
                     :searchable="false"
                   />
@@ -252,8 +252,8 @@
                   <Icon name="refresh" size="sm" :class="loadingModels ? 'animate-spin' : ''" />
                   {{
                     loadingModels
-                      ? t('modelAudit.form.modelFetching')
-                      : t('modelAudit.form.modelFetch')
+                      ? t('modelDegradation.form.modelFetching')
+                      : t('modelDegradation.form.modelFetch')
                   }}
                 </button>
                 <button type="button" class="ma-btn" :disabled="!canSubmit" @click="handleStart">
@@ -262,13 +262,13 @@
                     size="sm"
                     :class="busy ? 'animate-spin' : ''"
                   />
-                  {{ busy ? t('modelAudit.form.submitting') : t('modelAudit.form.submit') }}
+                  {{ busy ? t('modelDegradation.form.submitting') : t('modelDegradation.form.submit') }}
                 </button>
               </div>
             </div>
 
             <p class="ma-hint">{{ protocolHint }}</p>
-            <p class="ma-note">{{ t('modelAudit.form.securityNote') }}</p>
+            <p class="ma-note">{{ t('modelDegradation.form.securityNote') }}</p>
           </div>
 
           <!-- 我的检测：当前/最近一次结果 -->
@@ -277,7 +277,7 @@
                  源站第二行是「访客 ID」，我们这边是登录用户，换成账号 ID。 -->
             <div class="ma-mine-head">
               <div class="ma-mine-id">
-                <h3 class="ma-h3">{{ t('modelAudit.resultPanel.title') }}</h3>
+                <h3 class="ma-h3">{{ t('modelDegradation.resultPanel.title') }}</h3>
                 <span v-if="accountName" class="ma-mine-user">{{ accountName }}</span>
               </div>
               <div v-if="mineRuns.length > 1" class="ma-mine-pager">
@@ -285,7 +285,7 @@
                   type="button"
                   class="ma-mine-step"
                   :disabled="running || mineIndex <= 0"
-                  :aria-label="t('modelAudit.resultPanel.prev')"
+                  :aria-label="t('modelDegradation.resultPanel.prev')"
                   @click="stepMine(-1)"
                 >
                   <Icon name="chevronLeft" size="sm" />
@@ -295,7 +295,7 @@
                   type="button"
                   class="ma-mine-step"
                   :disabled="running || mineIndex >= mineRuns.length - 1"
-                  :aria-label="t('modelAudit.resultPanel.next')"
+                  :aria-label="t('modelDegradation.resultPanel.next')"
                   @click="stepMine(1)"
                 >
                   <Icon name="chevronRight" size="sm" />
@@ -303,7 +303,7 @@
               </div>
             </div>
             <p v-if="accountId !== null" class="ma-mine-sub">
-              {{ t('modelAudit.resultPanel.accountId', { id: accountId }) }}
+              {{ t('modelDegradation.resultPanel.accountId', { id: accountId }) }}
             </p>
             <div class="ma-result-body">
               <!-- 运行中：一行「进行中 + 秒表 + 停止」，下面一行模型与思考等级。
@@ -313,7 +313,7 @@
                 <div class="ma-running">
                   <div class="ma-running-row">
                     <span class="ma-running-spin"><Icon name="sync" size="sm" /></span>
-                    <span class="ma-running-label">{{ t('modelAudit.resultPanel.running') }}</span>
+                    <span class="ma-running-label">{{ t('modelDegradation.resultPanel.running') }}</span>
                     <span class="ma-running-count">{{ arrivedCount }}/{{ progressTotal }}</span>
                     <span class="ma-running-right">
                       <span class="ma-running-time">
@@ -323,7 +323,7 @@
                         type="button"
                         class="ma-running-stop"
                         :disabled="cancelling"
-                        :title="t('modelAudit.resultPanel.stop')"
+                        :title="t('modelDegradation.resultPanel.stop')"
                         @click="handleCancel"
                       >
                         <span class="ma-running-stop-box"></span>
@@ -348,7 +348,7 @@
                       :srcdoc="artworkPreviewHtml"
                       sandbox=""
                       class="ma-frame"
-                      :title="t('modelAudit.item.preview')"
+                      :title="t('modelDegradation.item.preview')"
                     ></iframe>
                     <template v-else>
                       <Icon :name="tileIcon(currentRun)" size="lg" class="ma-card-glyph" />
@@ -362,10 +362,10 @@
                 <p class="ma-verdict-hint">
                   {{
                     currentRun.status === 'cancelled'
-                      ? t('modelAudit.resultPanel.cancelledHint')
+                      ? t('modelDegradation.resultPanel.cancelledHint')
                       : (currentRun.render_verdict === 'generated' && currentRun.logic_total === 0)
-                        ? t('modelAudit.verdictHint.renderOnly')
-                        : t('modelAudit.verdictHint.' + currentRun.verdict)
+                        ? t('modelDegradation.verdictHint.renderOnly')
+                        : t('modelDegradation.verdictHint.' + currentRun.verdict)
                   }}
                 </p>
                 <p v-if="currentRun.error_message" class="ma-error">
@@ -373,28 +373,28 @@
                 </p>
                 <dl class="ma-mini">
                   <div>
-                    <dt>{{ t('modelAudit.metrics.logic') }}</dt>
+                    <dt>{{ t('modelDegradation.metrics.logic') }}</dt>
                     <dd>{{ currentRun.logic_passed }}/{{ currentRun.logic_total }}</dd>
                   </div>
                   <div>
-                    <dt>{{ t('modelAudit.metrics.render') }}</dt>
+                    <dt>{{ t('modelDegradation.metrics.render') }}</dt>
                     <dd>{{ renderLabel }}</dd>
                   </div>
                   <div>
-                    <dt>{{ t('modelAudit.metrics.reasoningEffort') }}</dt>
+                    <dt>{{ t('modelDegradation.metrics.reasoningEffort') }}</dt>
                     <dd>{{ effortLabel(currentRun.reasoning_effort) }}</dd>
                   </div>
                   <div>
-                    <dt>{{ t('modelAudit.metrics.protocol') }}</dt>
-                    <dd>{{ t('modelAudit.form.protocolLabel.' + currentRun.protocol) }}</dd>
+                    <dt>{{ t('modelDegradation.metrics.protocol') }}</dt>
+                    <dd>{{ t('modelDegradation.form.protocolLabel.' + currentRun.protocol) }}</dd>
                   </div>
                   <div>
-                    <dt>{{ t('modelAudit.metrics.duration') }}</dt>
+                    <dt>{{ t('modelDegradation.metrics.duration') }}</dt>
                     <dd>{{ formatDuration(currentRun.duration_ms) }}</dd>
                   </div>
                 </dl>
               </template>
-              <p v-else class="ma-pending">{{ t('modelAudit.resultPanel.waiting') }}</p>
+              <p v-else class="ma-pending">{{ t('modelDegradation.resultPanel.waiting') }}</p>
             </div>
           </aside>
         </div>
@@ -409,7 +409,7 @@
         class="ma-section"
       >
         <div class="ma-section-head">
-          <h2 class="ma-h2">{{ t('modelAudit.result.title') }}</h2>
+          <h2 class="ma-h2">{{ t('modelDegradation.result.title') }}</h2>
           <span class="ma-section-sub">{{ currentRun.base_url }}</span>
         </div>
         <article class="ma-detail">
@@ -421,8 +421,8 @@
             <div class="ma-detail-actions">
               <button
                 type="button"
-                :title="t('modelAudit.history.share')"
-                :aria-label="t('modelAudit.history.share')"
+                :title="t('modelDegradation.history.share')"
+                :aria-label="t('modelDegradation.history.share')"
                 @click="copyRunSummary(currentRun)"
               >
                 <Icon name="upload" size="sm" />
@@ -430,16 +430,16 @@
               <button
                 type="button"
                 :disabled="!artworkPreviewHtml"
-                :title="t('modelAudit.result.copyArtwork')"
-                :aria-label="t('modelAudit.result.copyArtwork')"
+                :title="t('modelDegradation.result.copyArtwork')"
+                :aria-label="t('modelDegradation.result.copyArtwork')"
                 @click="copyArtwork(currentRun)"
               >
                 <Icon name="copy" size="sm" />
               </button>
               <button
                 type="button"
-                :title="t('modelAudit.history.download')"
-                :aria-label="t('modelAudit.history.download')"
+                :title="t('modelDegradation.history.download')"
+                :aria-label="t('modelDegradation.history.download')"
                 @click="downloadRunReport(currentRun)"
               >
                 <Icon name="download" size="sm" />
@@ -447,8 +447,8 @@
               <button
                 type="button"
                 :disabled="!artworkPreviewHtml"
-                :title="t('modelAudit.result.openArtwork')"
-                :aria-label="t('modelAudit.result.openArtwork')"
+                :title="t('modelDegradation.result.openArtwork')"
+                :aria-label="t('modelDegradation.result.openArtwork')"
                 @click="openArtwork(currentRun)"
               >
                 <Icon name="externalLink" size="sm" />
@@ -465,7 +465,7 @@
               :srcdoc="artworkPreviewHtml"
               sandbox=""
               class="ma-frame"
-              :title="t('modelAudit.item.preview')"
+              :title="t('modelDegradation.item.preview')"
             ></iframe>
             <template v-else>
               <Icon :name="tileIcon(currentRun)" size="lg" class="ma-card-glyph" />
@@ -484,16 +484,16 @@
             </div>
             <dl class="ma-detail-stats">
               <div>
-                <dt>{{ t('modelAudit.metrics.logic') }}</dt>
+                <dt>{{ t('modelDegradation.metrics.logic') }}</dt>
                 <dd>{{ currentRun.logic_passed }}/{{ currentRun.logic_total }}</dd>
               </div>
               <div>
-                <dt>{{ t('modelAudit.metrics.render') }}</dt>
+                <dt>{{ t('modelDegradation.metrics.render') }}</dt>
                 <dd>{{ renderLabel }}</dd>
               </div>
               <div>
-                <dt>{{ t('modelAudit.metrics.protocol') }}</dt>
-                <dd>{{ t('modelAudit.form.protocolLabel.' + currentRun.protocol) }}</dd>
+                <dt>{{ t('modelDegradation.metrics.protocol') }}</dt>
+                <dd>{{ t('modelDegradation.form.protocolLabel.' + currentRun.protocol) }}</dd>
               </div>
             </dl>
             <p v-if="currentRun.error_message" class="ma-error">
@@ -502,26 +502,26 @@
           </footer>
 
           <details v-if="(currentRun.items || []).length" class="ma-detail-more">
-            <summary>{{ t('modelAudit.result.questionDetail') }}</summary>
+            <summary>{{ t('modelDegradation.result.questionDetail') }}</summary>
             <ul class="ma-qlist">
               <li v-for="item in currentRun.items || []" :key="item.task_key">
                 <div class="ma-item-meta">
                   <span class="ma-badge" :class="itemBadgeClass(item)">{{ itemBadgeLabel(item) }}</span>
                   <span class="ma-item-kind">
                     {{
-                      t('modelAudit.form.' + (item.task_type === 'logic' ? 'taskLogic' : 'taskRender'))
+                      t('modelDegradation.form.' + (item.task_type === 'logic' ? 'taskLogic' : 'taskRender'))
                     }}
                   </span>
                   <span class="ma-item-dur">{{ formatDuration(item.duration_ms) }}</span>
                 </div>
                 <p class="ma-item-prompt">{{ item.prompt }}</p>
                 <p v-if="item.expected" class="ma-item-row">
-                  <b>{{ t('modelAudit.result.expected') }}</b>{{ item.expected }}
+                  <b>{{ t('modelDegradation.result.expected') }}</b>{{ item.expected }}
                 </p>
                 <!-- 生成题这里只出源码之外的那段话：源码本体在预览里看，
                      整份贴进来会把折叠区撑成一面代码墙。 -->
                 <p v-if="itemAnswerText(item)" class="ma-item-row">
-                  <b>{{ t('modelAudit.result.answer') }}</b>{{ itemAnswerText(item) }}
+                  <b>{{ t('modelDegradation.result.answer') }}</b>{{ itemAnswerText(item) }}
                 </p>
                 <p class="ma-item-detail">{{ item.detail }}</p>
               </li>
@@ -533,13 +533,13 @@
       <!-- 检测历史 -->
       <section class="ma-section">
         <div class="ma-section-head">
-          <h2 class="ma-h2">{{ t('modelAudit.history.title') }}</h2>
+          <h2 class="ma-h2">{{ t('modelDegradation.history.title') }}</h2>
           <span class="ma-section-sub">
-            {{ t('modelAudit.monitor.caption', { count: BAR_COUNT }) }}
+            {{ t('modelDegradation.monitor.caption', { count: BAR_COUNT }) }}
           </span>
         </div>
         <p v-if="historyCards.length === 0" class="ma-empty">
-          {{ t('modelAudit.history.empty') }}
+          {{ t('modelDegradation.history.empty') }}
         </p>
         <div v-else class="ma-grid">
           <!-- 每张卡片是一个 .ma-tile：预览居中铺在卡面里，右上斜角勋章。
@@ -562,7 +562,7 @@
               class="ma-card"
               role="button"
               tabindex="0"
-              :aria-label="t('modelAudit.history.open')"
+              :aria-label="t('modelDegradation.history.open')"
               @click="openRun(run.id)"
               @keydown.enter.prevent="openRun(run.id)"
               @keydown.space.prevent="openRun(run.id)"
@@ -583,7 +583,7 @@
                     :srcdoc="renderHtmlOf(run)"
                     sandbox=""
                     class="ma-card-frame"
-                    :title="t('modelAudit.item.preview')"
+                    :title="t('modelDegradation.item.preview')"
                   ></iframe>
                 </span>
                 <!-- 纯逻辑题没有可预览的产物，用判定概览顶一张同形制的封面 -->
@@ -614,24 +614,24 @@
                 <div class="ma-more-actions">
                   <button
                     type="button"
-                    :title="t('modelAudit.history.detail')"
-                    :aria-label="t('modelAudit.history.detail')"
+                    :title="t('modelDegradation.history.detail')"
+                    :aria-label="t('modelDegradation.history.detail')"
                     @click.stop="openRun(run.id)"
                   >
                     <Icon name="eye" size="sm" />
                   </button>
                   <button
                     type="button"
-                    :title="t('modelAudit.history.copy')"
-                    :aria-label="t('modelAudit.history.copy')"
+                    :title="t('modelDegradation.history.copy')"
+                    :aria-label="t('modelDegradation.history.copy')"
                     @click.stop="copyRunSummary(run)"
                   >
                     <Icon name="copy" size="sm" />
                   </button>
                   <button
                     type="button"
-                    :title="t('modelAudit.history.download')"
-                    :aria-label="t('modelAudit.history.download')"
+                    :title="t('modelDegradation.history.download')"
+                    :aria-label="t('modelDegradation.history.download')"
                     @click.stop="downloadRunReport(run)"
                   >
                     <Icon name="download" size="sm" />
@@ -649,7 +649,7 @@
                     :srcdoc="renderHtmlOf(run)"
                     sandbox=""
                     class="ma-hover-frame"
-                    :title="t('modelAudit.item.preview')"
+                    :title="t('modelDegradation.item.preview')"
                   ></iframe>
                 </span>
                 <template v-else>
@@ -668,11 +668,11 @@
                 </div>
                 <dl class="ma-more-stats">
                   <div>
-                    <dt>{{ t('modelAudit.metrics.logic') }}</dt>
+                    <dt>{{ t('modelDegradation.metrics.logic') }}</dt>
                     <dd>{{ run.logic_passed }}/{{ run.logic_total }}</dd>
                   </div>
                   <div>
-                    <dt>{{ t('modelAudit.metrics.render') }}</dt>
+                    <dt>{{ t('modelDegradation.metrics.render') }}</dt>
                     <dd>{{ renderVerdictLabel(run.render_verdict) }}</dd>
                   </div>
                 </dl>
@@ -692,18 +692,18 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
-import modelAuditAPI, {
+import modelDegradationAPI, {
   MODEL_AUDIT_PROTOCOLS,
   MODEL_AUDIT_REASONING_EFFORTS,
-  type ModelAuditItem,
-  type ModelAuditItemVerdict,
-  type ModelAuditProtocol,
-  type ModelAuditQuestionPayload,
-  type ModelAuditReasoningEffort,
-  type ModelAuditRun,
-  type ModelAuditTaskBank,
-  type ModelAuditTaskType
-} from '@/api/modelAudit'
+  type ModelDegradationItem,
+  type ModelDegradationItemVerdict,
+  type ModelDegradationProtocol,
+  type ModelDegradationQuestionPayload,
+  type ModelDegradationReasoningEffort,
+  type ModelDegradationRun,
+  type ModelDegradationTaskBank,
+  type ModelDegradationTaskType
+} from '@/api/modelDegradation'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
@@ -742,10 +742,10 @@ const credentialInputAttrs: Record<string, string> = {
  * 本功能的前提就是「只在本次调用里用一次、服务端不保存」。而模型与思考等级
  * 是用户的偏好，每次重进页面都要重选一遍很烦。
  */
-const LAST_SELECTION_KEY = 'model_audit_last_selection'
+const LAST_SELECTION_KEY = 'model_degradation_last_selection'
 
-const readLastSelection = (): { modelId: string; reasoningEffort: ModelAuditReasoningEffort } => {
-  const empty = { modelId: '', reasoningEffort: '' as ModelAuditReasoningEffort }
+const readLastSelection = (): { modelId: string; reasoningEffort: ModelDegradationReasoningEffort } => {
+  const empty = { modelId: '', reasoningEffort: '' as ModelDegradationReasoningEffort }
   try {
     const raw = globalThis.localStorage?.getItem(LAST_SELECTION_KEY)
     if (!raw) return empty
@@ -757,7 +757,7 @@ const readLastSelection = (): { modelId: string; reasoningEffort: ModelAuditReas
     const effort =
       typeof reasoningEffort === 'string' &&
       (MODEL_AUDIT_REASONING_EFFORTS as readonly string[]).includes(reasoningEffort)
-        ? (reasoningEffort as ModelAuditReasoningEffort)
+        ? (reasoningEffort as ModelDegradationReasoningEffort)
         : ''
     return { modelId: typeof modelId === 'string' ? modelId : '', reasoningEffort: effort }
   } catch {
@@ -772,12 +772,12 @@ const form = reactive({
   baseUrl: '',
   apiKey: '',
   // 默认 chat_completions：这是本功能在支持多协议之前的唯一行为。
-  protocol: 'chat_completions' as ModelAuditProtocol,
+  protocol: 'chat_completions' as ModelDegradationProtocol,
   modelId: lastSelection.modelId,
   // 空串 = 不指定，请求里不带 reasoning_effort。
   reasoningEffort: lastSelection.reasoningEffort,
   // 页签单选，一轮只跑一类。默认逻辑题：它最快、结果最直观，需要时切到生成题。
-  tasks: ['logic'] as ModelAuditTaskType[]
+  tasks: ['logic'] as ModelDegradationTaskType[]
 })
 
 const persistLastSelection = () => {
@@ -792,15 +792,15 @@ const persistLastSelection = () => {
 }
 
 const taskOptions = [
-  { value: 'logic' as ModelAuditTaskType, label: 'modelAudit.form.taskLogic' },
-  { value: 'render' as ModelAuditTaskType, label: 'modelAudit.form.taskRender' }
+  { value: 'logic' as ModelDegradationTaskType, label: 'modelDegradation.form.taskLogic' },
+  { value: 'render' as ModelDegradationTaskType, label: 'modelDegradation.form.taskRender' }
 ]
 
 // 协议决定端点、认证头与响应体解析方式，选项文案按协议名取。
 const protocolOptions = computed<SelectOption[]>(() =>
   MODEL_AUDIT_PROTOCOLS.map((protocol) => ({
     value: protocol,
-    label: t(`modelAudit.form.protocolLabel.${protocol}`)
+    label: t(`modelDegradation.form.protocolLabel.${protocol}`)
   }))
 )
 
@@ -817,11 +817,11 @@ watch(
 watch(() => [form.modelId, form.reasoningEffort], persistLastSelection)
 
 // 协议提示随协议变：追加的路径、认证头、以及哪些参数不生效都在这里说清楚。
-const protocolHint = computed(() => t(`modelAudit.form.protocolHint.${form.protocol}`))
+const protocolHint = computed(() => t(`modelDegradation.form.protocolHint.${form.protocol}`))
 
 // 思考等级固定枚举，档位名沿用后端与源站一致的英文原值，不翻译。
 const effortOptions = computed<SelectOption[]>(() => [
-  { value: '', label: t('modelAudit.form.reasoningEffortPlaceholder') },
+  { value: '', label: t('modelDegradation.form.reasoningEffortPlaceholder') },
   ...MODEL_AUDIT_REASONING_EFFORTS.map((level) => ({
     value: level,
     label: formatReasoningEffort(level)
@@ -829,25 +829,25 @@ const effortOptions = computed<SelectOption[]>(() => [
 ])
 
 const running = ref(false)
-const currentRun = ref<ModelAuditRun | null>(null)
-const history = ref<ModelAuditRun[]>([])
+const currentRun = ref<ModelDegradationRun | null>(null)
+const history = ref<ModelDegradationRun[]>([])
 const loadingHistory = ref(false)
 
 // 本次提交了哪些题。只用来在运行中渲染「等待卡片」——
 // run 记录里不存这个字段（轮询拿到的是库里的行），所以只能自己记。
-const pendingQuestions = ref<{ key: string; taskType: ModelAuditTaskType; label: string }[]>([])
+const pendingQuestions = ref<{ key: string; taskType: ModelDegradationTaskType; label: string }[]>([])
 
 // 内置题库。取自服务端，避免题目正文与判分用的期望答案在前端再抄一份。
-const taskBank = ref<ModelAuditTaskBank>({ logic: [], render: [] })
+const taskBank = ref<ModelDegradationTaskBank>({ logic: [], render: [] })
 const loadingTasks = ref(false)
 
 // 每个检测项下选了哪道预制题（存 key，空串 = 没选）。单选 —— 与后端
-// modelAuditMaxLogicQuestions / modelAuditMaxRenderQuestions（都是 1）一致，
+// modelDegradationMaxLogicQuestions / modelDegradationMaxRenderQuestions（都是 1）一致，
 // 多选会被后端直接 400 掉。
-const presetKeys = reactive<Record<ModelAuditTaskType, string>>({ logic: '', render: '' })
+const presetKeys = reactive<Record<ModelDegradationTaskType, string>>({ logic: '', render: '' })
 // 是否改用自定义题。与预制题互斥 —— 同时开会让题目数量超出后端上限。
-const customEnabled = reactive<Record<ModelAuditTaskType, boolean>>({ logic: false, render: false })
-const customPrompt = reactive<Record<ModelAuditTaskType, string>>({ logic: '', render: '' })
+const customEnabled = reactive<Record<ModelDegradationTaskType, boolean>>({ logic: false, render: false })
+const customPrompt = reactive<Record<ModelDegradationTaskType, string>>({ logic: '', render: '' })
 // 自定义逻辑题的期望答案。逻辑题靠「回答里出现期望数字」判分，所以后端强制必填。
 const customExpected = ref('')
 
@@ -855,16 +855,16 @@ const customExpected = ref('')
 // 这样能横向对比几道题的全文；题目正文很长，全铺出来会把表单撑爆。
 const openDetails = ref<string[]>([])
 
-// 各类型单轮只跑一道题（与后端 modelAuditMaxLogicQuestions /
-// modelAuditMaxRenderQuestions 都是 1 一致），多选会被后端直接 400。
+// 各类型单轮只跑一道题（与后端 modelDegradationMaxLogicQuestions /
+// modelDegradationMaxRenderQuestions 都是 1 一致），多选会被后端直接 400。
 
-const taskTypeLabel = (type: ModelAuditTaskType) =>
-  t(type === 'logic' ? 'modelAudit.form.taskLogic' : 'modelAudit.form.taskRender')
+const taskTypeLabel = (type: ModelDegradationTaskType) =>
+  t(type === 'logic' ? 'modelDegradation.form.taskLogic' : 'modelDegradation.form.taskRender')
 
 // 本次将要提交的题目。自定义题与预制题互斥，所以每个检测项只会贡献其中一种；
 // 页签单选，form.tasks 里恒为当前这一类，循环就是取这一类。
-const selectedQuestions = computed<ModelAuditQuestionPayload[]>(() => {
-  const questions: ModelAuditQuestionPayload[] = []
+const selectedQuestions = computed<ModelDegradationQuestionPayload[]>(() => {
+  const questions: ModelDegradationQuestionPayload[] = []
   for (const type of form.tasks) {
     if (customEnabled[type]) {
       const prompt = customPrompt[type].trim()
@@ -885,31 +885,31 @@ const selectedQuestions = computed<ModelAuditQuestionPayload[]>(() => {
 })
 
 // 等待卡片上显示的名字：预制题用短标题，自定义题用通用名。
-const pendingLabelFor = (question: ModelAuditQuestionPayload) => {
-  if (!question.key) return t('modelAudit.form.customQuestion')
+const pendingLabelFor = (question: ModelDegradationQuestionPayload) => {
+  if (!question.key) return t('modelDegradation.form.customQuestion')
   const option = taskBank.value[question.task_type].find((item) => item.key === question.key)
   return option?.title ?? question.key
 }
 
 // 题目区右上那行字：走自定义题时报「自定义题目」，否则报选中那道预制题的
 // 短标题（单选，标题比「已选 1 道」更能说明选的是哪道），没选就报未选择。
-const presetSummary = (type: ModelAuditTaskType) => {
-  if (customEnabled[type]) return t('modelAudit.form.customQuestion')
+const presetSummary = (type: ModelDegradationTaskType) => {
+  if (customEnabled[type]) return t('modelDegradation.form.customQuestion')
   const key = presetKeys[type]
-  if (!key) return t('modelAudit.form.presetNone')
-  return taskBank.value[type].find((option) => option.key === key)?.title ?? t('modelAudit.form.presetNone')
+  if (!key) return t('modelDegradation.form.presetNone')
+  return taskBank.value[type].find((option) => option.key === key)?.title ?? t('modelDegradation.form.presetNone')
 }
 
 // 卡片是否不可选：检测进行中，或这一项走自定义题。
 // 单选下不存在「数量到上限」这种锁 —— 点另一张卡就是换选，不是加选。
 // 与模板里的 aria-disabled 用的是同一个判据 —— 两处若写歪了会出现「能点但无效」。
-const cardLocked = (type: ModelAuditTaskType, _key: string) => busy.value || customEnabled[type]
+const cardLocked = (type: ModelDegradationTaskType, _key: string) => busy.value || customEnabled[type]
 
-const isDetailOpen = (type: ModelAuditTaskType, key: string) =>
+const isDetailOpen = (type: ModelDegradationTaskType, key: string) =>
   openDetails.value.includes(`${type}:${key}`)
 
 // 「详情」只切正文显隐；点它不该顺带把卡片选中/取消，所以模板里用了 @click.stop。
-const toggleDetail = (type: ModelAuditTaskType, key: string) => {
+const toggleDetail = (type: ModelDegradationTaskType, key: string) => {
   const id = `${type}:${key}`
   const index = openDetails.value.indexOf(id)
   if (index >= 0) {
@@ -919,12 +919,12 @@ const toggleDetail = (type: ModelAuditTaskType, key: string) => {
   openDetails.value.push(id)
 }
 
-const togglePreset = (type: ModelAuditTaskType, key: string) => {
+const togglePreset = (type: ModelDegradationTaskType, key: string) => {
   // 单选：点已选中的那张 = 取消选择，点别的 = 换选。
   presetKeys[type] = presetKeys[type] === key ? '' : key
 }
 
-const toggleCustom = (type: ModelAuditTaskType, event: Event) => {
+const toggleCustom = (type: ModelDegradationTaskType, event: Event) => {
   customEnabled[type] = (event.target as HTMLInputElement).checked
   // 走自定义题时预制题的勾选状态没有意义了，正文也不需要再展开。
   if (customEnabled[type]) openDetails.value = []
@@ -933,13 +933,13 @@ const toggleCustom = (type: ModelAuditTaskType, event: Event) => {
 const loadTaskBank = async () => {
   loadingTasks.value = true
   try {
-    taskBank.value = await modelAuditAPI.listModelAuditTasks()
+    taskBank.value = await modelDegradationAPI.listModelDegradationTasks()
     // 两类各自默认选第一道题：页签可以切来切去，切过去就得是「有题可跑」的状态，
     // 否则用户切到生成题会看到一个没选中的空卡组。
     presetKeys.logic = taskBank.value.logic[0]?.key ?? ''
     presetKeys.render = taskBank.value.render[0]?.key ?? ''
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('modelAudit.errors.loadTasksFailed')))
+    appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.loadTasksFailed')))
   } finally {
     loadingTasks.value = false
   }
@@ -989,26 +989,26 @@ const reasoningEffortDisabled = computed(() => busy.value || form.protocol === '
 
 const modelPlaceholder = computed(() => {
   if (loadingModels.value) return `${t('common.loading')}...`
-  if (!hasUpstreamCredentials.value) return t('modelAudit.form.modelNeedCredentials')
-  return t('modelAudit.form.modelPlaceholder')
+  if (!hasUpstreamCredentials.value) return t('modelDegradation.form.modelNeedCredentials')
+  return t('modelDegradation.form.modelPlaceholder')
 })
 
 const currentEffortLabel = computed(() => effortLabel(form.reasoningEffort))
 
 // 生成题判定文案。历史卡片、悬停面板与结果面板共用一份口径，
 // 所以抽成函数而不是各写一个 switch。
-const renderVerdictLabel = (verdict: ModelAuditItemVerdict | '') => {
+const renderVerdictLabel = (verdict: ModelDegradationItemVerdict | '') => {
   switch (verdict) {
     case 'ok':
-      return t('modelAudit.metrics.renderOk')
+      return t('modelDegradation.metrics.renderOk')
     case 'degraded':
-      return t('modelAudit.metrics.renderDegraded')
+      return t('modelDegradation.metrics.renderDegraded')
     case 'unknown':
-      return t('modelAudit.metrics.renderUnknown')
+      return t('modelDegradation.metrics.renderUnknown')
     case 'generated':
-      return t('modelAudit.metrics.renderGenerated')
+      return t('modelDegradation.metrics.renderGenerated')
     default:
-      return t('modelAudit.metrics.renderSkipped')
+      return t('modelDegradation.metrics.renderSkipped')
   }
 }
 
@@ -1028,7 +1028,7 @@ const lastDurationLabel = computed(() => {
 })
 
 /** 检测结果 → 监控条配色；历史倒序，因此这里也倒着取。 */
-const barClassOf = (run: ModelAuditRun) => {
+const barClassOf = (run: ModelDegradationRun) => {
   if (run.status === 'running') return 'empty'
   switch (run.verdict) {
     case 'normal':
@@ -1057,18 +1057,18 @@ const historyCards = computed(() => history.value.slice(0, HISTORY_CARD_COUNT))
 // 列表接口不返回题目明细（Response 里可能是整份 HTML，塞进列表会把接口拖垮），
 // 封面与悬停面板要用就现拉。reactive 的 Map 让模板里的 get 也被追踪：
 // 明细一到手，卡片自己就从「判定概览」换成「生成题封面」。
-const detailCache = reactive(new Map<number, ModelAuditRun>())
+const detailCache = reactive(new Map<number, ModelDegradationRun>())
 // 同一个 id 并发只拉一次：鼠标划过卡片的速度远快于接口，
 // 不合并的话每张卡都会被连打好几次。
-const detailPending = new Map<number, Promise<ModelAuditRun | null>>()
+const detailPending = new Map<number, Promise<ModelDegradationRun | null>>()
 
-const loadRunDetail = (id: number): Promise<ModelAuditRun | null> => {
+const loadRunDetail = (id: number): Promise<ModelDegradationRun | null> => {
   const cached = detailCache.get(id)
   if (cached) return Promise.resolve(cached)
   const pending = detailPending.get(id)
   if (pending) return pending
-  const request = modelAuditAPI
-    .getModelAuditRun(id)
+  const request = modelDegradationAPI
+    .getModelDegradationRun(id)
     .then((detail) => {
       // 还在跑的那一轮不进缓存：它这会儿没有 items，缓存下来会让「我的检测」
       // 与结果卡在这一轮跑完之后仍停在「检测中」的旧状态上。
@@ -1145,7 +1145,7 @@ const extractArtworkText = (raw: string) => {
 //
 // 预览**不冻动画**，直接放模型原样的作品：这道题要判的就是「骑车动作动没动」，
 // 冻成一帧静态图等于把唯一要看的东西藏起来了。复制 / 新标签页打开的也是这份。
-const renderHtmlOf = (run: ModelAuditRun | null) => {
+const renderHtmlOf = (run: ModelDegradationRun | null) => {
   if (!run) return ''
   const items = run.items ?? detailCache.get(run.id)?.items ?? []
   const item = items.find((entry) => entry.task_type === 'render')
@@ -1154,7 +1154,7 @@ const renderHtmlOf = (run: ModelAuditRun | null) => {
 
 // 详情里那一行「模型回答」：逻辑题给原样回答，生成题只给源码之外的话
 // （源码本体在预览、复制源码、展开预览里，整份贴进详情就是一面代码墙）。
-const itemAnswerText = (item: ModelAuditItem) =>
+const itemAnswerText = (item: ModelDegradationItem) =>
   item.task_type === 'logic' ? item.response : extractArtworkText(item.response)
 
 // 当前选中那一轮的产物预览。结果卡与「我的检测」都用它，抽出来免得两处各算一遍。
@@ -1169,7 +1169,7 @@ const prefetchTileDetails = async () => {
   }
 }
 
-const thumbTone = (run: ModelAuditRun) => {
+const thumbTone = (run: ModelDegradationRun) => {
   if (run.status === 'running') return 'is-running'
   if (run.status === 'cancelled') return 'is-cancelled'
   if (run.verdict === 'normal') return 'is-normal'
@@ -1177,7 +1177,7 @@ const thumbTone = (run: ModelAuditRun) => {
   return 'is-unknown'
 }
 
-const tileIcon = (run: ModelAuditRun) => {
+const tileIcon = (run: ModelDegradationRun) => {
   if (run.status === 'running') return 'sync'
   if (run.status === 'cancelled') return 'ban'
   if (run.verdict === 'normal') return 'checkCircle'
@@ -1186,17 +1186,17 @@ const tileIcon = (run: ModelAuditRun) => {
 }
 
 // 封面中间那行字：逻辑题的得分，没跑逻辑题就报生成题判定。
-const tileSummary = (run: ModelAuditRun) => {
-  if (run.status === 'running') return t('modelAudit.resultPanel.running')
+const tileSummary = (run: ModelDegradationRun) => {
+  if (run.status === 'running') return t('modelDegradation.resultPanel.running')
   if (run.logic_total > 0) {
-    return `${t('modelAudit.metrics.logic')} ${run.logic_passed}/${run.logic_total}`
+    return `${t('modelDegradation.metrics.logic')} ${run.logic_passed}/${run.logic_total}`
   }
   if (run.render_verdict) return renderVerdictLabel(run.render_verdict)
   return '—'
 }
 
 // 斜皮带勋章：中止与进行中不是判定结果，配色也跟着中性化。
-const ribbonClass = (run: ModelAuditRun) => {
+const ribbonClass = (run: ModelDegradationRun) => {
   if (run.status === 'running') return 'is-running'
   if (run.status === 'cancelled') return 'is-cancelled'
   if (run.status === 'failed') return 'is-failed'
@@ -1207,15 +1207,15 @@ const ribbonClass = (run: ModelAuditRun) => {
   return 'is-unknown'
 }
 
-const ribbonLabel = (run: ModelAuditRun) => {
-  if (run.status === 'running') return t('modelAudit.history.ribbon.running')
-  if (run.status === 'cancelled') return t('modelAudit.history.ribbon.cancelled')
-  if (run.status === 'failed') return t('modelAudit.history.ribbon.failed')
+const ribbonLabel = (run: ModelDegradationRun) => {
+  if (run.status === 'running') return t('modelDegradation.history.ribbon.running')
+  if (run.status === 'cancelled') return t('modelDegradation.history.ribbon.cancelled')
+  if (run.status === 'failed') return t('modelDegradation.history.ribbon.failed')
   // 只跑了生成题：封面就是作品本身，角标标「已生成」而不是「无法判定」。
   if (run.render_verdict === 'generated' && run.logic_total === 0) {
-    return t('modelAudit.history.ribbon.generated')
+    return t('modelDegradation.history.ribbon.generated')
   }
-  return t('modelAudit.history.ribbon.' + run.verdict)
+  return t('modelDegradation.history.ribbon.' + run.verdict)
 }
 
 // 鼠标移入（或键盘聚焦）时展开的那张卡，只记 id。
@@ -1223,7 +1223,7 @@ const ribbonLabel = (run: ModelAuditRun) => {
 // 所以既不用 fixed 浮层去算坐标 / 翻转 / 贴视口钳位，也不会让网格重排。
 const zoomId = ref<number | null>(null)
 
-const showZoom = (run: ModelAuditRun) => {
+const showZoom = (run: ModelDegradationRun) => {
   zoomId.value = run.id
   // 展开层的作品框要从明细里取源码；命中缓存时同步返回，不用等这个 promise。
   void loadRunDetail(run.id)
@@ -1235,7 +1235,7 @@ const hideZoom = () => {
 
 // 焦点在卡片内部挪动（点到展开层里的操作钮）不算离开：
 // button 获得焦点时卡片自己也会 blur，直接收掉的话钮就点不着了。
-const handleCardFocusOut = (run: ModelAuditRun, event: FocusEvent) => {
+const handleCardFocusOut = (run: ModelDegradationRun, event: FocusEvent) => {
   const card = event.currentTarget
   const next = event.relatedTarget
   if (next instanceof Node && card instanceof Node && card.contains(next)) return
@@ -1244,51 +1244,51 @@ const handleCardFocusOut = (run: ModelAuditRun, event: FocusEvent) => {
 
 // 分享 = 把这一轮结论复制成一段纯文本。库里的记录本来就不含 API Key，
 // 这段文本也只带判定与用量，可以直接贴到别处。
-const copyRunSummary = (run: ModelAuditRun) => {
+const copyRunSummary = (run: ModelDegradationRun) => {
   const verdict =
     run.status === 'cancelled'
-      ? t('modelAudit.resultPanel.cancelled')
+      ? t('modelDegradation.resultPanel.cancelled')
       : (run.render_verdict === 'generated' && run.logic_total === 0)
-        ? t('modelAudit.verdict.generated')
-        : t('modelAudit.verdict.' + run.verdict)
+        ? t('modelDegradation.verdict.generated')
+        : t('modelDegradation.verdict.' + run.verdict)
   const text = [
-    `${t('modelAudit.history.title')} #${run.id}`,
-    `${t('modelAudit.history.verdictLabel')}: ${verdict}`,
-    `${t('modelAudit.chips.model')}: ${run.model_id}`,
-    `${t('modelAudit.metrics.protocol')}: ${t('modelAudit.form.protocolLabel.' + run.protocol)}`,
-    `${t('modelAudit.metrics.reasoningEffort')}: ${effortLabel(run.reasoning_effort)}`,
-    `${t('modelAudit.metrics.logic')}: ${run.logic_passed}/${run.logic_total}`,
-    `${t('modelAudit.metrics.render')}: ${renderVerdictLabel(run.render_verdict)}`,
-    `${t('modelAudit.metrics.duration')}: ${formatDuration(run.duration_ms)}`,
+    `${t('modelDegradation.history.title')} #${run.id}`,
+    `${t('modelDegradation.history.verdictLabel')}: ${verdict}`,
+    `${t('modelDegradation.chips.model')}: ${run.model_id}`,
+    `${t('modelDegradation.metrics.protocol')}: ${t('modelDegradation.form.protocolLabel.' + run.protocol)}`,
+    `${t('modelDegradation.metrics.reasoningEffort')}: ${effortLabel(run.reasoning_effort)}`,
+    `${t('modelDegradation.metrics.logic')}: ${run.logic_passed}/${run.logic_total}`,
+    `${t('modelDegradation.metrics.render')}: ${renderVerdictLabel(run.render_verdict)}`,
+    `${t('modelDegradation.metrics.duration')}: ${formatDuration(run.duration_ms)}`,
     formatDateTime(run.created_at),
-    `${t('modelAudit.history.upstream')}: ${run.base_url}`
+    `${t('modelDegradation.history.upstream')}: ${run.base_url}`
   ].join('\n')
-  void copyToClipboard(text, t('modelAudit.history.copyOk'))
+  void copyToClipboard(text, t('modelDegradation.history.copyOk'))
 }
 
 // 下载 = 把这一轮（含各题明细）存成 JSON。明细可能还没拉过
 // （列表接口不带 items），先补齐再落盘。
-const downloadRunReport = async (run: ModelAuditRun) => {
+const downloadRunReport = async (run: ModelDegradationRun) => {
   const detail = (await loadRunDetail(run.id)) ?? run
   const blob = new Blob([JSON.stringify(detail, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `model-audit-${run.id}.json`
+  link.download = `model-degradation-${run.id}.json`
   link.click()
   URL.revokeObjectURL(url)
 }
 
 // 复制 = 把生成题的源码整份带走。没有产物（纯逻辑题）时按钮是禁用的。
-const copyArtwork = (run: ModelAuditRun) => {
+const copyArtwork = (run: ModelDegradationRun) => {
   const html = renderHtmlOf(run)
   if (!html) return
-  void copyToClipboard(html, t('modelAudit.result.artworkCopied'))
+  void copyToClipboard(html, t('modelDegradation.result.artworkCopied'))
 }
 
 // 展开 = 把作品单独开一页看。用 Blob URL 而不是把源码写进新窗口：
 // 新标签页拿不到我们的 srcdoc，Blob 是它唯一读得到的东西。
-const openArtwork = (run: ModelAuditRun) => {
+const openArtwork = (run: ModelDegradationRun) => {
   const html = renderHtmlOf(run)
   if (!html) return
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
@@ -1322,8 +1322,8 @@ const stepMine = (delta: number) => {
   if (next) void openRun(next.id, { scroll: false })
 }
 
-const effortLabel = (effort: ModelAuditReasoningEffort) =>
-  effort ? formatReasoningEffort(effort) : t('modelAudit.metrics.reasoningEffortUnset')
+const effortLabel = (effort: ModelDegradationReasoningEffort) =>
+  effort ? formatReasoningEffort(effort) : t('modelDegradation.metrics.reasoningEffortUnset')
 
 const formatDuration = (ms: number) => {
   if (!ms) return '—'
@@ -1331,18 +1331,18 @@ const formatDuration = (ms: number) => {
   return `${(ms / 1000).toFixed(1)} s`
 }
 
-const itemBadgeClass = (item: ModelAuditItem) => {
+const itemBadgeClass = (item: ModelDegradationItem) => {
   if (item.verdict === 'ok') return 'is-ok'
   if (item.verdict === 'degraded') return 'is-degraded'
   if (item.verdict === 'generated') return 'is-generated'
   return 'is-unknown'
 }
 
-const itemBadgeLabel = (item: ModelAuditItem) => {
-  if (item.verdict === 'ok') return t('modelAudit.item.passed')
-  if (item.verdict === 'degraded') return t('modelAudit.item.failed')
-  if (item.verdict === 'generated') return t('modelAudit.item.generated')
-  return t('modelAudit.item.unknown')
+const itemBadgeLabel = (item: ModelDegradationItem) => {
+  if (item.verdict === 'ok') return t('modelDegradation.item.passed')
+  if (item.verdict === 'degraded') return t('modelDegradation.item.failed')
+  if (item.verdict === 'generated') return t('modelDegradation.item.generated')
+  return t('modelDegradation.item.unknown')
 }
 
 // 运行中的进度：已到题目数 / 本次提交的总题数。
@@ -1368,8 +1368,8 @@ const elapsedSeconds = computed(() => {
 })
 const elapsedLabel = computed(() =>
   elapsedSeconds.value < 60
-    ? t('modelAudit.resultPanel.seconds', { count: elapsedSeconds.value })
-    : t('modelAudit.resultPanel.minutes', { count: Math.floor(elapsedSeconds.value / 60) })
+    ? t('modelDegradation.resultPanel.seconds', { count: elapsedSeconds.value })
+    : t('modelDegradation.resultPanel.minutes', { count: Math.floor(elapsedSeconds.value / 60) })
 )
 
 // 第二行的「模型 · 思考等级」。运行刚开始时 currentRun 还是 null，
@@ -1411,12 +1411,12 @@ const handleCancel = async () => {
 
   cancelling.value = true
   try {
-    await modelAuditAPI.cancelModelAuditRun(run.id)
+    await modelDegradationAPI.cancelModelDegradationRun(run.id)
   } catch (error) {
     // 409 说明这一轮刚好在两次请求之间跑完了：按结果态展示即可，
     // 不用把「已经结束了」当成错误弹给用户。
     if (!isHttpStatus(error, 409)) {
-      appStore.showError(extractApiErrorMessage(error, t('modelAudit.errors.cancelFailed')))
+      appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.cancelFailed')))
     }
   } finally {
     cancelling.value = false
@@ -1425,7 +1425,7 @@ const handleCancel = async () => {
   clearPoll()
   stopTick()
   try {
-    const latest = await modelAuditAPI.getModelAuditRun(run.id)
+    const latest = await modelDegradationAPI.getModelDegradationRun(run.id)
     currentRun.value = latest
   } catch {
     // 拉不到就保留 409 时服务端已经写下的中止状态，由下一轮历史刷新兜底。
@@ -1435,7 +1435,7 @@ const handleCancel = async () => {
 }
 
 // 检测项页签是单选：一轮只跑一类（逻辑题或生成题），点哪个就切到哪个。
-const selectTask = (value: ModelAuditTaskType) => {
+const selectTask = (value: ModelDegradationTaskType) => {
   if (busy.value) return
   form.tasks = [value]
 }
@@ -1450,7 +1450,7 @@ const clearPoll = () => {
 const pollRun = async (runId: number) => {
   pollAttempts += 1
   try {
-    const run = await modelAuditAPI.getModelAuditRun(runId)
+    const run = await modelDegradationAPI.getModelDegradationRun(runId)
     currentRun.value = run
 
     if (run.status === 'running' && pollAttempts < POLL_MAX_ATTEMPTS) {
@@ -1464,34 +1464,34 @@ const pollRun = async (runId: number) => {
   } catch (error) {
     stopTick()
     running.value = false
-    appStore.showError(extractApiErrorMessage(error, t('modelAudit.errors.loadFailed')))
+    appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.loadFailed')))
   }
 }
 
 const handleStart = async () => {
   if (!form.baseUrl.trim()) {
-    appStore.showError(t('modelAudit.errors.needBaseUrl'))
+    appStore.showError(t('modelDegradation.errors.needBaseUrl'))
     return
   }
   if (!form.apiKey.trim()) {
-    appStore.showError(t('modelAudit.errors.needApiKey'))
+    appStore.showError(t('modelDegradation.errors.needApiKey'))
     return
   }
   if (!(form.modelId ?? '').trim()) {
-    appStore.showError(t('modelAudit.errors.needModel'))
+    appStore.showError(t('modelDegradation.errors.needModel'))
     return
   }
   if (form.tasks.length === 0) {
-    appStore.showError(t('modelAudit.errors.needTask'))
+    appStore.showError(t('modelDegradation.errors.needTask'))
     return
   }
   if (selectedQuestions.value.length === 0) {
-    appStore.showError(t('modelAudit.errors.needQuestion'))
+    appStore.showError(t('modelDegradation.errors.needQuestion'))
     return
   }
   // 逻辑题靠「回答里出现期望数字」判分，自定义题漏填期望答案就没法判，先拦在本地。
   if (customEnabled.logic && customPrompt.logic.trim() && !customExpected.value.trim()) {
-    appStore.showError(t('modelAudit.errors.needCustomExpected'))
+    appStore.showError(t('modelDegradation.errors.needCustomExpected'))
     return
   }
 
@@ -1508,7 +1508,7 @@ const handleStart = async () => {
   clearPoll()
 
   try {
-    const run = await modelAuditAPI.startModelAudit({
+    const run = await modelDegradationAPI.startModelDegradation({
       base_url: form.baseUrl.trim(),
       api_key: form.apiKey.trim(),
       model_id: (form.modelId ?? '').trim(),
@@ -1526,7 +1526,7 @@ const handleStart = async () => {
     stopTick()
     running.value = false
     pendingQuestions.value = []
-    appStore.showError(extractApiErrorMessage(error, t('modelAudit.errors.startFailed')))
+    appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.startFailed')))
   }
 }
 
@@ -1548,7 +1548,7 @@ const loadUpstreamModels = async (options: { silent?: boolean } = {}) => {
   const seq = ++modelLoadSeq
   loadingModels.value = true
   try {
-    const models = await modelAuditAPI.listUpstreamModels({
+    const models = await modelDegradationAPI.listUpstreamModels({
       base_url: baseUrl,
       api_key: apiKey,
       protocol: form.protocol
@@ -1562,7 +1562,7 @@ const loadUpstreamModels = async (options: { silent?: boolean } = {}) => {
     if (silent) {
       console.error('Failed to load upstream models:', error)
     } else {
-      appStore.showError(extractApiErrorMessage(error, t('modelAudit.errors.modelsFailed')))
+      appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.modelsFailed')))
     }
   } finally {
     if (seq === modelLoadSeq) loadingModels.value = false
@@ -1593,7 +1593,7 @@ watch(() => [form.baseUrl, form.apiKey, form.protocol], scheduleUpstreamModelsLo
 const loadHistory = async () => {
   loadingHistory.value = true
   try {
-    history.value = await modelAuditAPI.listModelAuditRuns(BAR_COUNT)
+    history.value = await modelDegradationAPI.listModelDegradationRuns(BAR_COUNT)
     // 生成题的封面要明细才有得画，这里顺手补上；失败只是封面退回概览态。
     void prefetchTileDetails()
     // 「我的检测」得有内容可看：还没选中任何一轮时默认落在最近一次上，
@@ -1620,7 +1620,7 @@ const openRun = async (id: number, options: { scroll?: boolean } = {}) => {
     currentRun.value = detail
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('modelAudit.errors.loadFailed')))
+    appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.loadFailed')))
   }
 }
 

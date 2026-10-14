@@ -295,15 +295,15 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/model-audit',
-    name: 'ModelAudit',
-    component: () => import('@/views/user/ModelAuditView.vue'),
+    path: '/model-degradation',
+    name: 'ModelDegradation',
+    component: () => import('@/views/user/ModelDegradationView.vue'),
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Model Audit',
-      titleKey: 'modelAudit.title',
-      descriptionKey: 'modelAudit.description'
+      title: 'Model Degradation Check',
+      titleKey: 'modelDegradation.title',
+      descriptionKey: 'modelDegradation.description'
     }
   },
   {

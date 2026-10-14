@@ -666,9 +666,9 @@ export default {
     }
   },
 
-  // Model Audit (user-facing upstream degradation check)
-  modelAudit: {
-    title: 'Upstream Model Degradation Check',
+  // Model degradation check (user-facing)
+  modelDegradation: {
+    title: 'Model Degradation Check',
     description:
       'Run a fixed set of tasks against your own upstream credentials to see whether it has been downgraded.',
     subtitle: 'Fixed task set and grading criteria',

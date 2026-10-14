@@ -1097,7 +1097,7 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorV2Aggregator,
 	LLMMonitorHistoryWiringSet,
 	ModelMonitorGroupHealthWiringSet,
-	ModelAuditWiringSet,
+	ModelDegradationWiringSet,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
 )

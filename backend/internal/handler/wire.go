@@ -256,7 +256,7 @@ func ProvideHandlers(
 	modelSquareHandler *ModelSquareHandler,
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
-	modelAuditHandler *ModelAuditHandler,
+	modelDegradationHandler *ModelDegradationHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
@@ -284,7 +284,7 @@ func ProvideHandlers(
 		ModelSquare:      modelSquareHandler,
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
-		ModelAudit:       modelAuditHandler,
+		ModelDegradation:       modelDegradationHandler,
 	}
 }
 
@@ -300,7 +300,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementHandler,
 	NewChannelMonitorUserHandler,
 	NewChannelMonitorV2Handler,
-	ModelAuditWiringSet,
+	ModelDegradationWiringSet,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
 	NewTotpHandler,
