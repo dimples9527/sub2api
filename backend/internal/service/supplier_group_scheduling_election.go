@@ -1071,14 +1071,18 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 		// 必需模型补选三处都复用它，保证「谁更优」的口径一致。
 		electionScores := supplierGroupSchedulingElectionScores(candidateMembers, config.CountWeight, config.LatencyWeight, config.PriorityWeight, config.LatencyMinSamples, config.SwitchMargin, config.CountScoreCap, priorityEnabledForGroup(groupID))
 
-		// 在任者健康锁定：仅对被 opt-in 的分组生效。只要该组「当前开着的账号」里没有
-		// 已经连续失败到阈值的（单次抖动不算），就保留这些在任账号、跳过择优与换人。
-		// 破锁口径必须与失败闸门（supplierGroupSchedulingElectionDecide 的闸门二）一致——
-		// 都以「连续失败累计到 FailureThreshold」为界：一次/几次没到阈值的失败仍算「在任」、保住席位，
-		// 本轮被失败闸门原地留着等翻盘，锁定继续、绝不换人；只有它连续失败真到阈值、失败闸门也要关它时，
-		// 锁才破、才走正常择优补位。否则一次网络抖动就会破锁开出替补，等抖动账号翻盘、锁再合上，
-		// 就把两个账号永久焊在一起（多活累积）——单在任者分组尤其致命：在任者一失败 scheduledHealthy 就空了，
-		// 若只看「有没有健康在任者」，锁根本合不上，故这里以「有没有未到阈值的在任者」为准。
+		// 在任者健康锁定：仅对被 opt-in 的分组生效。只要该组「当前开着的账号」里还有未到关闭阈值的在任者，
+		// 就保留这些在任账号、跳过整组重排。
+		//
+		// 保留的是「健康的在任者」：连续失败到阈值的在任者本轮不再保留（它会被失败闸门关闭），
+		// 但**不会因此把健康的在任者也一起换掉** —— 换人只发生在「失败到阈值的那个」账号上，
+		// 由下面的补齐从健康候选里按综合分顶上来。（此前实现是「有账号失败到阈值 ⇒ 整组走正常择优重排」，
+		// 会把健康的在任者也换掉，锁定累积的防抖意图在破锁瞬间全部失效；现改为逐账号局部替换。）
+		//
+		// 未到阈值的失败在任者仍算「在任」、保住席位等翻盘（与失败闸门的闸门二同口径）：
+		// 一次网络抖动不该换人，否则抖动账号翻盘、锁再合上，两个账号就被永久焊在一起（多活累积）。
+		// 单在任者分组尤其致命：在任者一失败 scheduledHealthy 就空了，若只看「有没有健康在任者」，
+		// 锁根本合不上，故这里以「有没有未到阈值的在任者」为准。
 		locked := false
 		// convergedDropped 记录本组因「在任账号数超过上限」被收敛掉的账号，供明细标注关闭原因。
 		convergedDropped := make(map[int64]struct{})
@@ -1137,7 +1141,6 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			// 只统计已测出状态的成员：未测过的账号走「保持原状」分支、本任务关不掉它们，
 			// 把它们算进容量只会白白放弃锁定、丢掉防抖动能力，却换不来收敛。
 			scheduledIncumbentCount := 0
-			scheduledFailedPastThreshold := false
 			for _, member := range groupMembers {
 				if !member.Schedulable {
 					continue
@@ -1156,19 +1159,22 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 				if strings.TrimSpace(member.LastTestStatus) != SupplierGroupSchedulingElectionTestStatusFailed {
 					continue
 				}
+				// 已失败到阈值：本轮不保留（失败闸门会关它），也不计入在任数 ——
+				// 腾出的名额交给下面的补齐从健康候选里换上来，健康的在任者不受影响。
 				if member.FailedCount+1 >= config.FailureThreshold {
-					scheduledFailedPastThreshold = true
 					continue
 				}
 				// 失败但没到阈值：算作仍在任、保住席位等翻盘，本轮不换人。不记为赢家——
 				// 它「失败待观察」的原因要如实进明细，保留调度靠失败闸门（闸门二）而不是这里。
 				scheduledIncumbentCount++
 			}
-			// 只要还有「没到关闭阈值的在任者」，本组就走锁定：保留在任者、跳过择优与换人。
+			// 只要还有「没到关闭阈值的在任者」，本组就走锁定：保留在任者、跳过整组重排。
 			//
-			// 但「每组开启账号数」是硬上限，而锁定的动作只是「记赢家、从不关人」，所以这里必须自己收敛：
-			// 保留的在任者最多 TopN 个，超出的不记赢家 —— 不被其它分组共用的会被关闭（存量自愈），
-			// 被共用的仍由那些分组保住（重合导致的多活是被允许的）。
+			// 「每组开启账号数」是硬上限，而锁定的动作只是「记赢家、从不关人」，所以这里必须自己两向对齐：
+			//   · 超出 TopN：只保留前 TopN 个，多出来的不记赢家 —— 不被其它分组共用的会被关闭（存量自愈），
+			//     被共用的仍由那些分组保住（重合导致的多活是被允许的）。
+			//   · 不足 TopN：从健康候选里按综合分补足到 TopN（见下方「补齐」）。锁定只收敛不补齐，
+			//     在任者一旦掉到 TopN 之下就永远回不来（除非破锁或人工开），与「每组开 N 个」的配置直觉不符。
 			//
 			// 为什么不能像以前那样「超容量就退回正常择优」：正常择优取的是「本组综合分前 N 名」，
 			// 而 winner 是账号级、跨组取并集的，本组前 N 名往往不是当前开着的那几个 ——
@@ -1178,7 +1184,7 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 			//
 			// 排序：先「已被其它分组选为赢家」的成员（关掉它会连累那些分组），再按综合分降序。
 			// 这样多组共用的账号优先留下，只服务本组的那个先让位 —— 收敛的目标正是后者。
-			if scheduledIncumbentCount > 0 && !scheduledFailedPastThreshold {
+			if scheduledIncumbentCount > 0 {
 				sort.SliceStable(scheduledHealthy, func(i, j int) bool {
 					sharedI := accounts[scheduledHealthy[i].AccountID] != nil && accounts[scheduledHealthy[i].AccountID].winner
 					sharedJ := accounts[scheduledHealthy[j].AccountID] != nil && accounts[scheduledHealthy[j].AccountID].winner
@@ -1219,6 +1225,33 @@ func (s *SupplierGroupSchedulingElectionService) Run(ctx context.Context, config
 							!supplierGroupElectionMemberSupportsAnyModel(member, groupRequiredModels) {
 							account.convergedRequiredModel = true
 						}
+					}
+				}
+				// 补齐：实际开启的账号数不足 TopN 时，从健康候选里按综合分补足到 TopN。
+				// 只增不减、且目标就是 TopN，绝不会超过上限（因此不会重蹈「退回正常择优导致多活累积」的覆辙）。
+				// 走到这里 limit 必然等于 len(scheduledHealthy)（在任数不足 TopN ⇒ 健康在任者更少），
+				// 即所有健康在任者都已在 kept 里，候选池里剩下的就是「关着的健康账号」。
+				if scheduledIncumbentCount < groupTopN {
+					supplement := make([]SupplierGroupSchedulingElectionMember, 0, len(candidateMembers))
+					for _, member := range candidateMembers {
+						if _, keep := kept[member.AccountID]; keep {
+							continue
+						}
+						if _, dropped := convergedDropped[member.AccountID]; dropped {
+							continue
+						}
+						supplement = append(supplement, member)
+					}
+					sort.SliceStable(supplement, func(i, j int) bool {
+						return supplierGroupSchedulingElectionMemberLess(supplement[i], supplement[j], electionScores)
+					})
+					for _, member := range supplement {
+						if scheduledIncumbentCount >= groupTopN {
+							break
+						}
+						kept[member.AccountID] = struct{}{}
+						scheduledIncumbentCount++
+						recordWinner(member.AccountID, "")
 					}
 				}
 				locked = true
