@@ -1309,7 +1309,7 @@ func TestSupplierNewAPIClientAddsDefaultPaginationToAccountsURL(t *testing.T) {
 			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
 		case "/api/token/":
 			require.Equal(t, "1", r.URL.Query().Get("p"))
-			require.Equal(t, "10", r.URL.Query().Get("size"))
+			require.Equal(t, "100", r.URL.Query().Get("size"))
 			require.Equal(t, "42", r.Header.Get("New-Api-User"))
 			require.Contains(t, r.Header.Get("Cookie"), "session=abc")
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"name":"key-1","group":"VIP","status":1}]}}`))
@@ -1403,7 +1403,7 @@ func TestSupplierNewAPIClientTestEndpointCountsAccountsWithoutGroupsPayload(t *t
 			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
 		case "/api/token/":
 			require.Equal(t, "1", r.URL.Query().Get("p"))
-			require.Equal(t, "10", r.URL.Query().Get("size"))
+			require.Equal(t, "100", r.URL.Query().Get("size"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[
 				{"name":"key-1","group":"VIP"},
 				{"name":"key-2","group":"Trial"}

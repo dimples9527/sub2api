@@ -1936,9 +1936,14 @@ func supplierNewAPIAccountsPath(provider *SupplierProvider) string {
 	if provider != nil {
 		path = firstSupplierSub2APIString(provider.APIKeysURL, defaultSupplierNewAPIKeysPath)
 	}
+	// 默认分页：上游 /api/token/ 是分页接口，缺省 size 时各实现的默认值不一 —— 实测北鲲按 10 截断，
+	// 第 11 个之后的密钥永远同步不到，而 FetchAccounts 只 GET 一次、不会翻页；
+	// 更糟的是被挤出窗口的老密钥会被 ReplaceAccounts 当成「上游已删除」标成 inactive。
+	// 取 100 与项目内 /api/v1/keys?page=1&page_size=100 的既有口径对齐。
+	// ⚠️ 这只是单次请求的上限：上游密钥超过 100 个时仍需把 FetchAccounts 改成分页循环。
 	return supplierNewAPIPathWithDefaultQuery(path,
 		supplierNewAPIQueryDefault{key: "p", value: "1"},
-		supplierNewAPIQueryDefault{key: "size", value: "10"},
+		supplierNewAPIQueryDefault{key: "size", value: "100"},
 	)
 }
 
