@@ -803,6 +803,7 @@ export default {
       renderOnly: 'The rendering task shows the artwork; no intelligence check was performed.'
     },
     metrics: {
+      model: 'Model',
       logic: 'Logic questions',
       render: 'Rendering task',
       duration: 'Duration',
@@ -849,7 +850,19 @@ export default {
         cancelled: 'Cancelled',
         running: 'Running',
         generated: 'Generated'
-      }
+      },
+      filterLabel: 'Filter',
+      filter: {
+        all: 'All records',
+        passed: 'Passed',
+        degraded: 'Degraded',
+        unknown: 'Unknown',
+        failed: 'Request failed'
+      },
+      filterEmpty: 'No detection records match this filter.',
+      prevPage: 'Previous',
+      nextPage: 'Next',
+      pageStatus: 'Page {page} / {pages} · {total} total'
     },
     errors: {
       needBaseUrl: 'Enter the upstream Base URL',
@@ -863,6 +876,20 @@ export default {
       loadTasksFailed: 'Failed to load the question bank',
       loadFailed: 'Failed to load the check record',
       cancelFailed: 'Failed to stop the check'
+    },
+    upstream: {
+      authFailed: 'Upstream rejected the credentials — check the API Key',
+      forbidden: 'Upstream refused access — check the key permissions or gateway limits',
+      notFound: 'Endpoint or model not found — check the address and protocol',
+      timeout: 'Upstream timed out — retry later or check the service status',
+      rateLimited: 'Upstream rate limit or quota reached — retry later',
+      quotaExceeded: 'Upstream quota exhausted — check the account balance or limits',
+      serverError: 'Upstream service temporarily unavailable — retry later',
+      gatewayTimeout: 'Upstream gateway timed out waiting for the model',
+      streamBroken: 'Upstream connection dropped (HTTP/2 stream reset) — retry later',
+      responseIncomplete: 'Upstream response was cut off — no complete result received',
+      emptyResponse: 'Upstream returned no content — check the service status',
+      generic: 'Upstream request failed — retry later or contact the API provider'
     }
   },
 

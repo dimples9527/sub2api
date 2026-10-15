@@ -1,6 +1,16 @@
 <template>
   <AppLayout>
     <div class="ma-page">
+      <!-- 作品高度探针：隐藏的同源 iframe，只为读一次 scrollHeight（见 artworkViewHeight）。
+           展示用的预览一律 sandbox=""，不给模型吐的 HTML 任何本站上下文；
+           这里多给 allow-same-origin 才读得到 DOM，但脚本仍然禁跑（没有 allow-scripts）。 -->
+      <iframe
+        ref="artworkMeasureFrame"
+        class="ma-art-measure"
+        sandbox="allow-same-origin"
+        aria-hidden="true"
+        tabindex="-1"
+      ></iframe>
       <!-- 页头：标题 + 当前配置 + 三项统计 -->
       <section class="ma-top">
         <div class="ma-top-head">
@@ -352,13 +362,27 @@
                       v-if="!artworkPreviewHtml"
                       :running="currentRun.status === 'running'"
                     />
-                    <iframe
+                    <svg
                       v-if="artworkPreviewHtml"
-                      :srcdoc="artworkPreviewHtml"
-                      sandbox=""
-                      class="ma-frame"
-                      :title="t('modelDegradation.item.preview')"
-                    ></iframe>
+                      class="ma-artview"
+                      :viewBox="artworkViewBox(artworkPreviewHtml)"
+                      preserveAspectRatio="xMidYMid meet"
+                      aria-hidden="true"
+                    >
+                      <foreignObject
+                        x="0"
+                        y="0"
+                        width="1280"
+                        :height="artworkViewHeight(artworkPreviewHtml)"
+                      >
+                        <iframe
+                          :srcdoc="artworkSrcdoc(artworkPreviewHtml)"
+                          sandbox=""
+                          class="ma-frame"
+                          :title="t('modelDegradation.item.preview')"
+                        ></iframe>
+                      </foreignObject>
+                    </svg>
                     <template v-else>
                       <span class="ma-mascot">
                         <ModelDegradationMascot
@@ -393,6 +417,10 @@
                   {{ currentRun.error_message }}
                 </p>
                 <dl class="ma-mini">
+                  <div>
+                    <dt>{{ t('modelDegradation.metrics.model') }}</dt>
+                    <dd>{{ currentRun.model_id }}</dd>
+                  </div>
                   <div>
                     <dt>{{ t('modelDegradation.metrics.logic') }}</dt>
                     <dd>{{ currentRun.logic_passed }}/{{ currentRun.logic_total }}</dd>
@@ -498,13 +526,27 @@
           >
             <!-- 结果卡只在跑完之后出现，波形没必要进 is-running -->
             <ModelDegradationWave v-if="!artworkPreviewHtml" />
-            <iframe
+            <svg
               v-if="artworkPreviewHtml"
-              :srcdoc="artworkPreviewHtml"
-              sandbox=""
-              class="ma-frame"
-              :title="t('modelDegradation.item.preview')"
-            ></iframe>
+              class="ma-artview"
+              :viewBox="artworkViewBox(artworkPreviewHtml)"
+              preserveAspectRatio="xMidYMid meet"
+              aria-hidden="true"
+            >
+              <foreignObject
+                x="0"
+                y="0"
+                width="1280"
+                :height="artworkViewHeight(artworkPreviewHtml)"
+              >
+                <iframe
+                  :srcdoc="artworkSrcdoc(artworkPreviewHtml)"
+                  sandbox=""
+                  class="ma-frame"
+                  :title="t('modelDegradation.item.preview')"
+                ></iframe>
+              </foreignObject>
+            </svg>
             <template v-else>
               <span class="ma-mascot">
                 <ModelDegradationMascot
@@ -584,14 +626,28 @@
 
       <!-- 检测历史 -->
       <section class="ma-section">
-        <div class="ma-section-head">
+        <div class="ma-section-head ma-history-head">
           <h2 class="ma-h2">{{ t('modelDegradation.history.title') }}</h2>
           <span class="ma-section-sub">
             {{ t('modelDegradation.monitor.caption', { count: BAR_COUNT }) }}
           </span>
+          <div class="ma-gallery-filter">
+            <span class="ma-label">{{ t('modelDegradation.history.filterLabel') }}</span>
+            <Select
+              v-model="historyFilter"
+              :options="historyFilterOptions"
+              :aria-label="t('modelDegradation.history.filterLabel')"
+              :searchable="false"
+            />
+          </div>
         </div>
-        <p v-if="historyCards.length === 0" class="ma-empty">
+        <!-- 「一条记录都没有」和「筛掉了所有记录」是两件事，文案要分开：
+             前者是还没跑过，后者点了筛选才出现，说「还没有记录」会让人以为没跑成功。 -->
+        <p v-if="!history.length" class="ma-empty">
           {{ t('modelDegradation.history.empty') }}
+        </p>
+        <p v-else-if="!filteredHistory.length" class="ma-empty">
+          {{ t('modelDegradation.history.filterEmpty') }}
         </p>
         <div v-else class="ma-grid">
           <!-- 每张卡片是一个 .ma-tile：预览居中铺在卡面里，右上斜角勋章。
@@ -626,18 +682,30 @@
                 class="ma-card-thumb"
                 :class="[thumbTone(run), { 'is-render': !!renderHtmlOf(run) }]"
               >
-                <!-- 跑过生成题就有产物：把模型吐的 HTML 等比缩半当封面（禁脚本）。
-                     缩放加在包裹 div 上而不是 iframe 自己身上 —— 直接给 iframe
-                     transform 时 Chrome 会把内部视口按缩放后的尺寸再算一遍，
-                     实测缩略图只买到左上四分之一块。 -->
+                <!-- 跑过生成题就有产物：整页按 1280px 逻辑视口渲染，
+                     外层 SVG 把作品等比缩进封面框（见 .ma-artview 注释）。 -->
                 <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
                 <span v-if="renderHtmlOf(run)" class="ma-card-cover">
-                  <iframe
-                    :srcdoc="renderHtmlOf(run)"
-                    sandbox=""
-                    class="ma-card-frame"
-                    :title="t('modelDegradation.item.preview')"
-                  ></iframe>
+                  <svg
+                    class="ma-artview"
+                    :viewBox="artworkViewBox(renderHtmlOf(run))"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-hidden="true"
+                  >
+                    <foreignObject
+                      x="0"
+                      y="0"
+                      width="1280"
+                      :height="artworkViewHeight(renderHtmlOf(run))"
+                    >
+                      <iframe
+                        :srcdoc="artworkSrcdoc(renderHtmlOf(run))"
+                        sandbox=""
+                        class="ma-card-frame"
+                        :title="t('modelDegradation.item.preview')"
+                      ></iframe>
+                    </foreignObject>
+                  </svg>
                 </span>
                 <!-- 纯逻辑题没有可预览的产物，用判定概览顶一张同形制的封面 -->
                 <template v-else>
@@ -715,12 +783,26 @@
                 <!-- 只在悬停这一张上建 iframe：铺满墙的话每张卡都要多一份文档 -->
                 <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
                 <span v-if="renderHtmlOf(run) && zoomId === run.id" class="ma-hover-cover">
-                  <iframe
-                    :srcdoc="renderHtmlOf(run)"
-                    sandbox=""
-                    class="ma-hover-frame"
-                    :title="t('modelDegradation.item.preview')"
-                  ></iframe>
+                  <svg
+                    class="ma-artview"
+                    :viewBox="artworkViewBox(renderHtmlOf(run))"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-hidden="true"
+                  >
+                    <foreignObject
+                      x="0"
+                      y="0"
+                      width="1280"
+                      :height="artworkViewHeight(renderHtmlOf(run))"
+                    >
+                      <iframe
+                        :srcdoc="artworkSrcdoc(renderHtmlOf(run))"
+                        sandbox=""
+                        class="ma-hover-frame"
+                        :title="t('modelDegradation.item.preview')"
+                      ></iframe>
+                    </foreignObject>
+                  </svg>
                 </span>
                 <template v-else>
                   <Icon :name="tileIcon(run)" size="lg" class="ma-card-glyph" />
@@ -751,6 +833,36 @@
             </div>
           </div>
         </div>
+        <!-- 翻页器：历史一次最多 BAR_COUNT 条，分页是纯客户端的（列表接口只给
+             limit，没有 offset / status 参数），不为此动后端。页码用夹紧后的
+             historyPageSafe，筛掉大半记录时按钮的禁用态不会闪一下越界值。 -->
+        <nav v-if="filteredHistory.length" class="ma-pager" :aria-label="t('modelDegradation.history.title')">
+          <button
+            type="button"
+            class="ma-pager-btn"
+            :disabled="historyPageSafe <= 1"
+            @click="historyPage = historyPageSafe - 1"
+          >
+            {{ t('modelDegradation.history.prevPage') }}
+          </button>
+          <span class="ma-pager-status" role="status">
+            {{
+              t('modelDegradation.history.pageStatus', {
+                page: historyPageSafe,
+                pages: historyPageCount,
+                total: filteredHistory.length
+              })
+            }}
+          </span>
+          <button
+            type="button"
+            class="ma-pager-btn"
+            :disabled="historyPageSafe >= historyPageCount"
+            @click="historyPage = historyPageSafe + 1"
+          >
+            {{ t('modelDegradation.history.nextPage') }}
+          </button>
+        </nav>
       </section>
     </div>
   </AppLayout>
@@ -795,7 +907,7 @@ const accountId = computed(() => authStore.user?.id ?? null)
 
 // 监控状态条展示的检测次数（与源站的展示容量一致）。
 const BAR_COUNT = 60
-// 历史区只铺最近这些条，避免卡片太多把页面拉长。
+// 历史区每页铺这些条（翻页的页大小），避免一屏太多把页面拉长。
 const HISTORY_CARD_COUNT = 20
 
 // 不让浏览器把「别处存的账号密码」填进这两个输入框。
@@ -1122,8 +1234,83 @@ const bars = computed(() => {
   return out
 })
 
-// 历史卡片只铺最近若干条。
-const historyCards = computed(() => history.value.slice(0, HISTORY_CARD_COUNT))
+/* ---- 检测历史：判定筛选 + 翻页 ---- */
+// 两者都在客户端做：列表接口只给了 limit，没有 offset / status 参数，
+// 而历史一次最多 BAR_COUNT 条，本地过滤足够，不为此去动后端。
+
+const HISTORY_FILTERS = ['all', 'passed', 'degraded', 'unknown', 'failed'] as const
+type HistoryFilter = (typeof HISTORY_FILTERS)[number]
+
+const historyFilter = ref<HistoryFilter>('all')
+
+const historyFilterOptions = computed<SelectOption[]>(() =>
+  HISTORY_FILTERS.map((value) => ({
+    value,
+    label: t(`modelDegradation.history.filter.${value}`)
+  }))
+)
+
+// 「请求失败」在历史里不是一个独立的 status：整轮请求都打不通时，后端仍把这一轮
+// 记成 completed，只是整体 verdict 落成 unknown、逐题明细带上游失败前缀。
+// 所以按「completed + unknown + 生成题没有产出」认请求失败 —— 只跑生成题且跑通时
+// render_verdict 是 generated（那种记录是「已生成、不做降智判定」，不算失败）。
+// status=failed 只留给服务重启兜底与执行 panic，也一并收进这一档。
+const isRequestFailed = (run: ModelDegradationRun) => {
+  if (run.status === 'failed') return true
+  if (run.status !== 'completed') return false
+  return run.verdict === 'unknown' && run.render_verdict !== 'generated'
+}
+
+const matchHistoryFilter = (run: ModelDegradationRun, filter: HistoryFilter) => {
+  switch (filter) {
+    case 'passed':
+      return run.verdict === 'normal'
+    case 'degraded':
+      return run.verdict === 'degraded'
+    case 'failed':
+      return isRequestFailed(run)
+    case 'unknown':
+      // 「无法判定」用排除法认：既不是通过/降智，也不是请求失败。这样它只装
+      // 「只跑了生成题（已生成）」「用户中止」两类，不会和请求失败混为一谈，
+      // 也就不会误报成「全是网络问题」。仍在进行的记录不进任何具体档。
+      return (
+        run.status !== 'running' &&
+        !isRequestFailed(run) &&
+        run.verdict !== 'normal' &&
+        run.verdict !== 'degraded'
+      )
+    default:
+      return true
+  }
+}
+
+const filteredHistory = computed(() =>
+  history.value.filter((run) => matchHistoryFilter(run, historyFilter.value))
+)
+
+const historyPage = ref(1)
+const historyPageCount = computed(() =>
+  Math.max(1, Math.ceil(filteredHistory.value.length / HISTORY_CARD_COUNT))
+)
+
+// 页码夹在有效区间内：切到条数更少的筛选后，原来停在第 3 页就越界了。
+// 用计算值而不是在 watch 里回写 ref —— 后者要多一轮渲染才收敛，
+// 且翻页按钮的 disabled 会先按越界的旧值算一次。
+const historyPageSafe = computed(() =>
+  Math.min(Math.max(1, historyPage.value), historyPageCount.value)
+)
+
+// 当前这一页的卡片。
+const historyCards = computed(() => {
+  const start = (historyPageSafe.value - 1) * HISTORY_CARD_COUNT
+  return filteredHistory.value.slice(start, start + HISTORY_CARD_COUNT)
+})
+
+// 换筛选回到第 1 页：否则从「全部」第 3 页切到只有 1 页的筛选、再切回来，
+// 会莫名停在原来的第 3 页。
+watch(historyFilter, () => {
+  historyPage.value = 1
+})
 
 /* ============ 检测历史：卡片封面与悬停详情 ============ */
 
@@ -1225,6 +1412,92 @@ const renderHtmlOf = (run: ModelDegradationRun | null) => {
   return item ? extractArtworkHtml(item.response) : ''
 }
 
+// 预览 iframe 的 srcdoc 补一段「藏滚动条」的样式：预览视口高度按实测作品高度设置，
+// 正常情况下整页正好放下、不该出现滚动条；但测量回来之前会先按 16:10 画一版，
+// 那一下页面可能比视口高，带沙箱的 iframe 会把系统滚动条亮出来 —— 缩略图上尤其脏。
+// 只藏视觉滚动条、不锁滚动：万一测量失败（回退 800），大预览里仍能用滚轮看到下半页。
+//
+// 追加在文档尾部而不是插进 <head>：srcdoc 的 doctype / head 形状由模型决定，
+// 往最前面插内容会把缺 doctype 的文档推进 quirks 模式；而且源码里若在脚本
+// 字符串中出现字面量 </head>，插进去还可能割裂脚本。追加则无此风险。
+const SCROLLBAR_HIDE_STYLE =
+  '<style>html,body{scrollbar-width:none!important;-ms-overflow-style:none!important}' +
+  'html::-webkit-scrollbar,body::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}</style>'
+
+const artworkSrcdoc = (html: string) => (html ? `${html}${SCROLLBAR_HIDE_STYLE}` : '')
+
+// —— 作品预览的等比缩放 ——
+// 生成页几乎都是「桌面上一屏」的版式（min-height:100vh + 居中场景，实测两个真实
+// 样例都是）。直接把 iframe 塞进小缩略图时，它的内部视口就是框的大小（可能只有
+// 240px 宽），页面按小视口重排、内容比视口高，结果只能看到一角。所以预览里的
+// iframe 统一按 1280px 宽的逻辑视口排版，外层 SVG（viewBox + foreignObject）
+// 把整页等比缩进预览框 —— 卡片封面、悬停大卡、详情预览三处一个形制。
+//
+// 高度多数就是 800（1280x800 正好 16:10，满框不留白）；个别作品比 800 高
+// （实测鹈鹕页 830px，硬按 800 裁会切掉页脚）。所以量出真实高度后把 viewBox
+// 跟着调高，超出 16:10 的部分由 preserveAspectRatio=meet 换成两侧留白。
+// 测量放在隐藏的同源 iframe（sandbox 只多给 allow-same-origin，脚本照旧禁跑），
+// 串行一个个量，避免一次铺开十几份文档渲染。
+const ARTWORK_VIEW_WIDTH = 1280
+const ARTWORK_VIEW_HEIGHT = 800
+
+const artworkViewHeights = ref<Record<string, number>>({})
+const artworkMeasureFrame = ref<HTMLIFrameElement | null>(null)
+const artworkMeasureQueue: string[] = []
+let artworkMeasuring = false
+
+const drainArtworkMeasureQueue = async () => {
+  if (artworkMeasuring) return
+  artworkMeasuring = true
+  try {
+    while (artworkMeasureQueue.length) {
+      const frame = artworkMeasureFrame.value
+      if (!frame) break
+      const html = artworkMeasureQueue.shift() as string
+      if (html in artworkViewHeights.value) continue
+      const height = await new Promise<number>((resolve) => {
+        const onLoad = () => {
+          frame.removeEventListener('load', onLoad)
+          try {
+            const doc = frame.contentDocument
+            resolve(
+              Math.max(
+                ARTWORK_VIEW_HEIGHT,
+                doc?.documentElement?.scrollHeight ?? 0,
+                doc?.body?.scrollHeight ?? 0,
+              ),
+            )
+          } catch {
+            resolve(ARTWORK_VIEW_HEIGHT)
+          }
+        }
+        frame.addEventListener('load', onLoad)
+        frame.srcdoc = artworkSrcdoc(html)
+      })
+      artworkViewHeights.value[html] = height
+    }
+  } finally {
+    artworkMeasuring = false
+  }
+}
+
+const queueArtworkViewMeasure = (html: string) => {
+  if (html in artworkViewHeights.value || artworkMeasureQueue.includes(html)) return
+  artworkMeasureQueue.push(html)
+  void drainArtworkMeasureQueue()
+}
+
+// viewBox 高度跟着实测走；测量回来之前先按 16:10 画，回来后自动校正。
+const artworkViewHeight = (html: string) => {
+  const height = artworkViewHeights.value[html]
+  if (height !== undefined) return height
+  if (html) queueArtworkViewMeasure(html)
+  return ARTWORK_VIEW_HEIGHT
+}
+
+const artworkViewBox = (html: string) =>
+  `0 0 ${ARTWORK_VIEW_WIDTH} ${artworkViewHeight(html)}`
+
 // 详情里那一行「模型回答」：逻辑题给原样回答，生成题只给源码之外的话
 // （源码本体在预览、复制源码、展开预览里，整份贴进详情就是一面代码墙）。
 const itemAnswerText = (item: ModelDegradationItem) =>
@@ -1241,6 +1514,13 @@ const prefetchTileDetails = async () => {
     await loadRunDetail(run.id)
   }
 }
+
+// 翻页 / 换筛选后要为这一页新露面的卡片补明细：封面（作品源码、判定概览的
+// 补充说明）都要 items 才画得出来，而列表接口不带 items。
+// 首屏那一次由 loadHistory 直接调，这里的 watch 只管后续翻页。
+watch([historyPageSafe, historyFilter], () => {
+  void prefetchTileDetails()
+})
 
 const thumbTone = (run: ModelDegradationRun) => {
   if (run.status === 'running') return 'is-running'
@@ -1282,10 +1562,65 @@ const tileSummary = (run: ModelDegradationRun) => {
   return '—'
 }
 
+// 后端写死的上游失败前缀（model_degradation_service.go 的 runLogicTask /
+// runRenderTask）。它是后端常量，不随前端语言变化，所以这里按字面量匹配。
+const UPSTREAM_FAILURE_PREFIX = '上游请求失败：'
+
+// 把上游报错收敛成一句固定诊断，卡面上不回显上游响应原文。
+//
+// 为什么不原文照登：一是响应体里可能夹带网关回显的请求凭据 —— 后端 logredact
+// 只抹 api_key / authorization / x-api-key 三个键，网关把整段请求塞回 body 时抹不干净；
+// 二是「Upstream HTTP/2 stream failed」这类原文对看历史的人毫无意义，它说不清该找谁，
+// 而检测历史是共享的，所有人都会看到。因此只按错误性质给一句固定说法。
+//
+// 只收敛带上游失败前缀的文本：item.detail 同时承载判定说明（「命中答案 21」、
+// 「未出现期望答案 …」），那些不是错误，必须原样展示，否则会把判分理由吞掉。
+const upstreamDiagnosis = (detail: string): string => {
+  const raw = detail.trim()
+  if (!raw.startsWith(UPSTREAM_FAILURE_PREFIX)) return raw
+
+  // 非 2xx：后端拼成「上游返回 HTTP <code>：<body 片段>」，只取状态码，body 一律丢弃。
+  const status = raw.match(/上游返回 HTTP (\d{3})/)
+  if (status) {
+    const code = Number(status[1])
+    if (code === 401) return t('modelDegradation.upstream.authFailed')
+    if (code === 403) return t('modelDegradation.upstream.forbidden')
+    if (code === 404) return t('modelDegradation.upstream.notFound')
+    if (code === 408) return t('modelDegradation.upstream.timeout')
+    if (code === 429) return t('modelDegradation.upstream.rateLimited')
+    if (code === 504 || code === 524) return t('modelDegradation.upstream.gatewayTimeout')
+    if (code >= 500) return t('modelDegradation.upstream.serverError')
+    return t('modelDegradation.upstream.generic')
+  }
+
+  // 网络层失败。HTTP/2 stream closed、连接重置、EOF 的根因都在上游或中间网关，
+  // 使用者唯一有效的动作就是重跑一次，所以统一说成「连接中断」。
+  if (/http2|stream closed|stream error|connection reset|broken pipe|reset by peer|\bEOF\b/i.test(raw)) {
+    return t('modelDegradation.upstream.streamBroken')
+  }
+  if (/读取上游响应失败|IncompleteRead/i.test(raw)) {
+    return t('modelDegradation.upstream.responseIncomplete')
+  }
+  if (/超时|timeout|timed out/i.test(raw)) {
+    return t('modelDegradation.upstream.timeout')
+  }
+  if (/额度不足|insufficient_quota/i.test(raw)) {
+    return t('modelDegradation.upstream.quotaExceeded')
+  }
+  if (/限流|rate_limit/i.test(raw)) {
+    return t('modelDegradation.upstream.rateLimited')
+  }
+  if (/上游返回空响应|\bempty\b/i.test(raw)) {
+    return t('modelDegradation.upstream.emptyResponse')
+  }
+  return t('modelDegradation.upstream.generic')
+}
+
 // 没有产物可预览时（纯逻辑题、或上游直接报错），光靠一个图标加「逻辑题 0/1」
 // 看不出这一轮到底发生了什么：上游 400、超时、模型答了什么，全都不在卡面上。
 // 这里补一段「请求到底回了什么」—— 优先模型的回答，答不出来就给单题的失败原因
-// （item.detail 里是上游报错原文），再没有就退回 run 级的错误信息。
+// （上游报错走 upstreamDiagnosis 收敛成固定诊断，判定说明原样展示），
+// 再没有就退回 run 级的错误信息。
 // 列表接口不返回 items，历史小卡回退到按 id 拉的明细缓存；还没拉到就先不显示。
 const tileReason = (run: ModelDegradationRun | null) => {
   if (!run || run.status === 'running') return ''
@@ -1296,7 +1631,7 @@ const tileReason = (run: ModelDegradationRun | null) => {
     ).trim()
     if (answer) return answer
     const reason = item.detail.trim()
-    if (reason) return reason
+    if (reason) return upstreamDiagnosis(reason)
   }
   return run.error_message.trim()
 }
@@ -1351,10 +1686,15 @@ const ribbonClass = (run: ModelDegradationRun) => {
 }
 
 // 右上角缎带改显示「分组」：本次检测填的 Key 命中的平台分组名；没命中（填的是第三方
-// 上游 Key，或该 Key 未绑分组）时给占位。判定不再占用这个位置 —— 它由 ribbonClass
-// 的颜色和卡片下方的判定提示表达。
-const ribbonLabel = (run: ModelDegradationRun) =>
-  run.group_name || t('modelDegradation.history.groupUnknown')
+// 上游 Key，或该 Key 未绑分组）时改显示 Base URL，便于直接看出这次测的是哪个上游。
+// 缎带只有 ~136px，完整 URL 放不下：去掉协议头再显示，把空间让给域名
+// （共享历史里别人的地址后端已脱敏成 https://主机/***，去头后就是 主机/***）。
+// 判定不再占用这个位置 —— 它由 ribbonClass 的颜色和卡片下方的判定提示表达。
+const ribbonLabel = (run: ModelDegradationRun) => {
+  if (run.group_name) return run.group_name
+  if (run.base_url) return run.base_url.replace(/^https?:\/\//i, '')
+  return t('modelDegradation.history.groupUnknown')
+}
 
 // 共享历史：标出是谁跑的。邮箱后端已脱敏（只留首字符与域名），前端不再加工。
 // 用户被软删后 LEFT JOIN 不到邮箱，此时给个占位而不是显示空。
@@ -2949,6 +3289,28 @@ onUnmounted(() => {
   background: #ffffff;
 }
 
+/* 作品预览的等比缩放器：iframe 永远按 1280px 宽的逻辑视口排版（页面按桌面版式
+   画好），外层 SVG 用 viewBox + preserveAspectRatio=meet 把整页缩进预览框。
+   比 16:10 高一截的作品会被整体缩小、两侧留白，而不是切掉一角 ——
+   viewBox 高度取实测作品高度，见 artworkViewHeight。 */
+.ma-artview {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 量作品高度用的隐藏探针 iframe：固定 1280x800 逻辑视口、整体挪出屏幕。
+   不能用 display:none 藏 —— 不参与布局的文档量不到 scrollHeight。 */
+.ma-art-measure {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 1280px;
+  height: 800px;
+  border: 0;
+  pointer-events: none;
+}
+
 .ma-detail-foot {
   display: flex;
   flex-direction: column;
@@ -3139,6 +3501,79 @@ onUnmounted(() => {
 /* 卡片对齐参考图的作品墙：一张预览铺满卡面，右上皮带勋章，左上一枚分享。
    预览分两种 —— 跑过生成题的把模型产出的 HTML 缩进来当封面；纯逻辑题
    没有可预览的产物，用判定概览顶一张同形制的封面，两种卡片高度才一致。 */
+/* 筛选挂在标题行右端：margin-left:auto 把它顶到行尾，与标题共用一行。
+   Select 的下拉 Teleport 到 body，不受这行 overflow 影响。 */
+.ma-gallery-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.ma-gallery-filter .ma-label {
+  white-space: nowrap;
+}
+
+/* 筛选框本身窄一点就够：只有五个固定选项，不跟着 .ma-selects 的宽度走。 */
+.ma-gallery-filter :deep(.select-trigger) {
+  width: 148px;
+}
+
+/* 翻页器：居中一行，形制照源站的画廊分页。历史一次最多 BAR_COUNT 条，
+   分页是纯客户端的（列表接口只给 limit），所以这里只管画状态与两个按钮。 */
+.ma-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 16px;
+}
+
+/* 次级控件：与 .ma-ghost 同色系（描边 + 透明底），但比它矮半头，
+   免得在列表末尾抢眼。 */
+.ma-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--ma-border-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ma-control-fg);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.ma-pager-btn:hover:not(:disabled) {
+  border-color: var(--ma-input-border);
+  background: var(--ma-seg-bg);
+}
+
+.ma-pager-btn:focus-visible {
+  outline: 2px solid var(--ma-primary);
+  outline-offset: 2px;
+}
+
+.ma-pager-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* 页码状态：数字用等宽字形，翻页时宽度不跳。 */
+.ma-pager-status {
+  color: var(--ma-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .ma-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
@@ -3208,22 +3643,13 @@ onUnmounted(() => {
   background: #ffffff;
 }
 
-/* 封面 iframe：按 200% 尺寸渲染再缩半，等于把整页缩小成缩略图。
-   两层都不能省：
-   - 缩放加在包裹层上，而不是直接 transform iframe ——
-     Chrome 会按缩放后的尺寸重算 iframe 内部视口，缩略图只剩一块（实测）；
-   - 包裹层用 absolute 钉在左上角 —— 作品框是居中裁品的 flex 容器，
-     留在流里会被 align/justify 居中，比框大的封面会往两边探，
-     缩半之后看到的是页面的另一角。 */
+/* 封面层：铺满作品框，内层 SVG（.ma-artview）负责把 1280px 逻辑视口缩进框里。
+   不用 transform scale —— 直接缩放 iframe 时 Chrome 会按缩放后的尺寸重算内部
+   视口，缩略图只剩一块（实测）；viewBox 缩放不动 iframe 的视口。 */
 .ma-card-cover,
 .ma-hover-cover {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 200%;
-  height: 200%;
-  transform: scale(0.5);
-  transform-origin: top left;
+  inset: 0;
   pointer-events: none;
 }
 
@@ -3243,19 +3669,51 @@ onUnmounted(() => {
 
 /* 没有产物可预览时补的那段说明（模型答了什么 / 上游为什么失败）。
    卡面尺寸差得多 —— 历史小卡只有 240px 宽 —— 超过三行就截断，
-   别把上面的图标和得分挤没了。上游报错原文可能是一长串不带空格的 JSON。 */
+   别把上面的图标和得分挤没了。上游报错原文可能是一长串不带空格的 JSON。
+   它是纯逻辑卡上唯一的正文：分数只说对了几道，答的是什么全在这行，
+   所以不能沿用灰色小字 —— 垫一张纸片底、加深加粗，让答案一眼可读。 */
 .ma-card-glyph-note {
   display: -webkit-box;
   max-width: 88%;
   margin: 0;
+  padding: 4px 10px;
   overflow: hidden;
-  color: var(--ma-faint);
-  font-size: 11px;
+  border: 1px solid var(--ma-border-soft);
+  border-radius: 8px;
+  background: var(--ma-panel);
+  color: var(--ma-text);
+  font-size: 12.5px;
+  font-weight: 600;
   line-height: 1.5;
   text-align: center;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+
+/* 答案按判定着色：通过 → 绿，降智 → 红，请求失败 / 无法判定 → 琥珀警告色。
+   色相跟着判定走（与上面的 .ma-card-glyph 同一套变量）；文字用变量与正文色
+   调和，保证浅底上的对比度比纯色更稳；纸片底、描边也各带一点同色，
+   让「答对了 / 答错了」在卡片墙上一眼可辨。 */
+.ma-card-thumb.is-normal .ma-card-glyph-note,
+.ma-hover-stage.is-normal .ma-card-glyph-note {
+  border-color: color-mix(in srgb, var(--ma-pass) 36%, var(--ma-border-soft));
+  background: color-mix(in srgb, var(--ma-pass) 9%, var(--ma-panel));
+  color: color-mix(in srgb, var(--ma-pass) 68%, var(--ma-text));
+}
+
+.ma-card-thumb.is-degraded .ma-card-glyph-note,
+.ma-hover-stage.is-degraded .ma-card-glyph-note {
+  border-color: color-mix(in srgb, var(--ma-fail) 36%, var(--ma-border-soft));
+  background: color-mix(in srgb, var(--ma-fail) 9%, var(--ma-panel));
+  color: color-mix(in srgb, var(--ma-fail) 68%, var(--ma-text));
+}
+
+.ma-card-thumb.is-unknown .ma-card-glyph-note,
+.ma-hover-stage.is-unknown .ma-card-glyph-note {
+  border-color: color-mix(in srgb, var(--ma-warn) 40%, var(--ma-border-soft));
+  background: color-mix(in srgb, var(--ma-warn) 10%, var(--ma-panel));
+  color: color-mix(in srgb, var(--ma-warn) 58%, var(--ma-text));
 }
 
 /* 逻辑题没有作品可预览，两张大卡（我的检测 / 结果卡）改铺「判定概览」：
@@ -3861,6 +4319,16 @@ onUnmounted(() => {
 
   .ma-caption {
     flex-wrap: wrap;
+  }
+
+  /* 窄屏把筛选整条换到标题下面：标题 + 计数 + 筛选挤在一行会溢出。 */
+  .ma-history-head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .ma-gallery-filter {
+    margin-left: 0;
   }
 }
 </style>

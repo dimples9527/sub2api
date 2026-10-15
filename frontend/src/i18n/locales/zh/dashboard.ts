@@ -803,6 +803,7 @@ export default {
       renderOnly: '生成题已展示作品，未做智商判定。'
     },
     metrics: {
+      model: '模型',
       logic: '逻辑题',
       render: '生成题',
       duration: '耗时',
@@ -849,7 +850,20 @@ export default {
         cancelled: '已中止',
         running: '检测中',
         generated: '已生成'
-      }
+      },
+      // 判定筛选：历史是共享池子，一屏铺不下全部记录，故按判定筛 + 分页翻。
+      filterLabel: '筛选',
+      filter: {
+        all: '全部记录',
+        passed: '通过',
+        degraded: '降智',
+        unknown: '无法判定',
+        failed: '请求失败'
+      },
+      filterEmpty: '没有符合该条件的检测记录。',
+      prevPage: '上一页',
+      nextPage: '下一页',
+      pageStatus: '第 {page} / {pages} 页 · 共 {total} 条'
     },
     errors: {
       needBaseUrl: '请填写上游 Base URL',
@@ -863,6 +877,20 @@ export default {
       loadTasksFailed: '读取题库失败',
       loadFailed: '读取检测记录失败',
       cancelFailed: '中止检测失败'
+    },
+    upstream: {
+      authFailed: '上游鉴权失败，请检查 API Key',
+      forbidden: '上游拒绝访问，请检查 Key 权限或网关限制',
+      notFound: '接口或模型不存在，请检查地址和协议',
+      timeout: '上游响应超时，请稍后重试或检查接口服务状态',
+      rateLimited: '上游请求限流或额度不足，请稍后重试',
+      quotaExceeded: '上游额度不足，请检查接口账户余额或限额',
+      serverError: '上游服务暂时不可用，请稍后重试',
+      gatewayTimeout: '上游网关等待模型响应超时',
+      streamBroken: '上游连接中断，HTTP/2 流被重置，请稍后重试',
+      responseIncomplete: '上游响应中断，未收到完整结果',
+      emptyResponse: '上游未返回内容，请检查接口服务',
+      generic: '上游请求失败，请稍后重试或联系接口服务商'
     }
   },
 

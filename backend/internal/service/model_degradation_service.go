@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"go.uber.org/zap"
 )
@@ -449,12 +449,14 @@ func (s *ModelDegradationService) runLogicTask(ctx context.Context, input ModelD
 	}
 
 	started := time.Now()
-	response, err := s.callUpstream(ctx, input, question.Prompt, modelDegradationPerTaskTimeout)
+	// 走带重试的调用：上游瞬时失败（连接被掐断、网关 502/524）不该被算成这一轮的检测结果。
+	// 重试共用单题预算，不会把总耗时撑到 modelDegradationTotalTimeout 之外。
+	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, modelDegradationPerTaskTimeout)
 	item.DurationMs = int(time.Since(started).Milliseconds())
 
 	if err != nil {
 		item.Verdict = ModelDegradationItemUnknown
-		item.Detail = "上游请求失败：" + err.Error()
+		item.Detail = modelDegradationFailureDetail(err)
 		return item
 	}
 
@@ -479,12 +481,14 @@ func (s *ModelDegradationService) runRenderTask(ctx context.Context, input Model
 	}
 
 	started := time.Now()
-	response, err := s.callUpstream(ctx, input, question.Prompt, modelDegradationRenderTaskTimeout)
+	// 生成题最容易撞上「连接被 idle timeout 掐断」：单题预算 6 分钟且输出很长。
+	// responses 协议已改走流式（边生成边吐帧），这里再叠一层重试兜住偶发中断。
+	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, modelDegradationRenderTaskTimeout)
 	item.DurationMs = int(time.Since(started).Milliseconds())
 
 	if err != nil {
 		item.Verdict = ModelDegradationItemUnknown
-		item.Detail = "上游请求失败：" + err.Error()
+		item.Detail = modelDegradationFailureDetail(err)
 		return item
 	}
 
@@ -501,6 +505,9 @@ type modelDegradationUpstreamRequest struct {
 	Paths   []string
 	Headers map[string]string
 	Body    []byte
+	// Stream 本次是否走流式（SSE）。影响响应体的读取上限：流式事件带有信封开销，
+	// 按非流式的 256KB 截断会把正常的长输出判成「响应不完整」。
+	Stream bool
 	// Extract 从 2xx 响应体里取出回答正文。
 	//
 	// 它同时充当「这个端点确实在按本协议服务」的判据：部分网关（实测有）对未知
@@ -547,15 +554,20 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 	case ModelDegradationProtocolResponses:
 		terminalPath = modelDegradationResponsesPath
 		headers["Authorization"] = "Bearer " + input.APIKey
+		// responses 走流式，而不是等上游一次性吐完：
+		// 生成题最多要等 modelDegradationRenderTaskTimeout（6 分钟），非流式期间连接
+		// 没有任何数据流动，中间任何反代 / CDN / 网关的 idle timeout 都会把它掐断，
+		// 表现为 HTTP/2 stream 被重置。流式边生成边吐帧，连接始终有流量。
+		headers["Accept"] = "text/event-stream"
 		payload = map[string]any{
 			"model":  input.ModelID,
 			"input":  prompt,
-			"stream": false,
+			"stream": true,
 		}
 		if input.ReasoningEffort != "" {
 			payload["reasoning"] = map[string]string{"effort": input.ReasoningEffort}
 		}
-		extract = extractModelDegradationResponsesContent
+		extract = extractModelDegradationResponsesStream
 
 	default: // ModelDegradationProtocolChatCompletions
 		terminalPath = modelDegradationChatCompletionsPath
@@ -584,6 +596,7 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 		Paths:   modelDegradationEndpointPaths(input.BaseURL, terminalPath),
 		Headers: headers,
 		Body:    encoded,
+		Stream:  input.Protocol == ModelDegradationProtocolResponses,
 		Extract: extract,
 	}, nil
 }
@@ -606,7 +619,11 @@ func (s *ModelDegradationService) requestModelDegradationUpstream(
 	body []byte,
 	accept func(raw []byte) error,
 	timeout time.Duration,
+	limit int64,
 ) ([]byte, error) {
+	if limit <= 0 {
+		limit = modelDegradationMaxResponseBytes
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -639,13 +656,15 @@ func (s *ModelDegradationService) requestModelDegradationUpstream(
 		resp, err := client.Do(req)
 		if err != nil {
 			// 网络层失败换路径没意义，直接返回。
-			return nil, fmt.Errorf("请求上游失败：%s", err.Error())
+			// 分类而不是回显：err.Error() 里可能有完整 URL（带路径与查询串）。
+			return nil, diagnoseModelDegradationTransport(err)
 		}
 
-		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, modelDegradationMaxResponseBytes))
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, limit))
 		_ = resp.Body.Close()
 		if readErr != nil {
-			return nil, fmt.Errorf("读取上游响应失败")
+			// 读到一半断开：HTTP/2 流被重置、连接被掐断都落在这里。
+			return nil, diagnoseModelDegradationTransport(readErr)
 		}
 
 		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
@@ -659,10 +678,19 @@ func (s *ModelDegradationService) requestModelDegradationUpstream(
 			if firstErr == nil {
 				firstErr = acceptErr
 			}
+			// 已经分类过的上游失败说明端点是对的、只是这一轮没跑成
+			// （2xx 里带着 error 对象、SSE 里的 response.failed）；
+			// 此时换候选端点只会掩盖真因，直接返回。
+			var classified *modelDegradationUpstreamError
+			if errors.As(acceptErr, &classified) {
+				return nil, acceptErr
+			}
+			// 取不出正文才有可能是「这个候选根本不按本协议服务」，换下一个。
 			continue
 		}
 
-		callErr := modelDegradationUpstreamStatusError(resp.StatusCode, raw)
+		// 非 2xx：按状态码与上游错误码分类，绝不回显响应体。
+		callErr := diagnoseModelDegradationStatus(resp.StatusCode, raw)
 		if firstErr == nil {
 			firstErr = callErr
 		}
@@ -678,15 +706,6 @@ func (s *ModelDegradationService) requestModelDegradationUpstream(
 		return nil, fmt.Errorf("%w（已尝试 %s）", firstErr, strings.Join(paths, "、"))
 	}
 	return nil, firstErr
-}
-
-// modelDegradationUpstreamStatusError 把非 2xx 响应翻译成给用户看的错误。
-func modelDegradationUpstreamStatusError(status int, raw []byte) error {
-	snippet := logredact.RedactText(
-		truncateString(string(raw), modelDegradationErrorSnippetLimit),
-		"api_key", "authorization", "x-api-key",
-	)
-	return fmt.Errorf("上游返回 HTTP %d：%s", status, snippet)
 }
 
 // callUpstream 按所选协议向用户提交的上游发起一次调用。
@@ -709,11 +728,21 @@ func (s *ModelDegradationService) callUpstream(ctx context.Context, input ModelD
 			return extractErr
 		},
 		timeout,
+		modelDegradationResponseLimit(call.Stream),
 	)
 	if err != nil {
 		return "", err
 	}
 	return call.Extract(raw)
+}
+
+// modelDegradationResponseLimit 本次调用的响应体读取上限。
+// 流式放宽到 16MB：SSE 每个事件都带信封开销，且生成题要吐一整个 HTML 文档。
+func modelDegradationResponseLimit(stream bool) int64 {
+	if stream {
+		return modelDegradationMaxStreamResponseBytes
+	}
+	return modelDegradationMaxResponseBytes
 }
 
 // ListUpstreamModels 用用户提交的凭据读取上游的模型列表，供前端下拉候选。
@@ -763,6 +792,7 @@ func (s *ModelDegradationService) ListUpstreamModels(ctx context.Context, input 
 			return nil
 		},
 		modelDegradationModelsTimeout,
+		modelDegradationMaxResponseBytes,
 	)
 	if err != nil {
 		return nil, err
@@ -858,8 +888,9 @@ func extractModelDegradationChatContent(raw []byte) (string, error) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return "", fmt.Errorf("上游响应不是合法 JSON")
 	}
+	// 2xx 里带着 error 对象：按上游声明的错误码分类，不回显它的 message。
 	if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
-		return "", fmt.Errorf("上游返回错误：%s", truncateString(parsed.Error.Message, modelDegradationErrorSnippetLimit))
+		return "", diagnoseModelDegradationBodyError(raw)
 	}
 	if len(parsed.Choices) == 0 {
 		return "", fmt.Errorf("上游响应中没有 choices")
@@ -886,8 +917,9 @@ func extractModelDegradationResponsesContent(raw []byte) (string, error) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return "", fmt.Errorf("上游响应不是合法 JSON")
 	}
+	// 2xx 里带着 error 对象：按上游声明的错误码分类，不回显它的 message。
 	if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
-		return "", fmt.Errorf("上游返回错误：%s", truncateString(parsed.Error.Message, modelDegradationErrorSnippetLimit))
+		return "", diagnoseModelDegradationBodyError(raw)
 	}
 
 	parts := make([]string, 0, len(parsed.Output))
@@ -921,8 +953,9 @@ func extractModelDegradationMessagesContent(raw []byte) (string, error) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return "", fmt.Errorf("上游响应不是合法 JSON")
 	}
+	// 2xx 里带着 error 对象：按上游声明的错误码分类，不回显它的 message。
 	if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
-		return "", fmt.Errorf("上游返回错误：%s", truncateString(parsed.Error.Message, modelDegradationErrorSnippetLimit))
+		return "", diagnoseModelDegradationBodyError(raw)
 	}
 
 	parts := make([]string, 0, len(parsed.Content))
