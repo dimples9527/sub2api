@@ -39,6 +39,13 @@ const (
 	// 列表查询默认与最大条数。
 	modelDegradationDefaultListLimit = 20
 	modelDegradationMaxListLimit     = 100
+	// 检测历史的保留窗口与条数上限（两道闸，见 PruneHistory）。
+	// 体积几乎全在 model_audit_items.response（单条最多 modelDegradationMaxResponseBytes），
+	// 一轮最多 2 道题 ⇒ 条数闸才是磁盘占用的硬顶：500 条 × 2 × 256KB ≈ 256MB。
+	modelDegradationHistoryRetentionDays = 30
+	modelDegradationHistoryMaxRuns       = 500
+	// 单次 DELETE 的行数上限：分批删，别用一条语句锁住整张表。
+	modelDegradationPruneBatchSize = 200
 	// 判定 running 任务已失效的宽限期。
 	modelDegradationStaleGrace = time.Minute
 	// 读取上游模型列表的超时。这个请求比检测题轻得多。
@@ -171,6 +178,16 @@ func (s *ModelDegradationService) Start(ctx context.Context, userID int64, input
 		Status:          ModelDegradationStatusRunning,
 		Verdict:         ModelDegradationVerdictUnknown,
 	}
+	// 识别这次检测是不是在测平台自身链路：填的 Key 若命中发起者本人名下的平台 Key，
+	// 就记下它绑定的分组 —— 分组决定了平台会把它转发到哪些渠道，是事后归因的关键维度。
+	// 命中不了（填的是第三方上游 Key）是常态，不影响检测本身；查库出错也只告警不阻断。
+	groupID, groupName, lookupErr := s.repo.LookupAPIKeyGroup(ctx, userID, normalized.APIKey)
+	if lookupErr != nil {
+		logger.FromContext(ctx).Warn("model_degradation.lookup_group", zap.Error(lookupErr))
+	} else {
+		run.GroupID = groupID
+		run.GroupName = groupName
+	}
 	if err := s.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
@@ -182,9 +199,9 @@ func (s *ModelDegradationService) Start(ctx context.Context, userID int64, input
 	return run, nil
 }
 
-// Get 读取单次检测详情。返回 nil 表示记录不存在或不属于该用户。
-func (s *ModelDegradationService) Get(ctx context.Context, userID, runID int64) (*ModelDegradationRun, error) {
-	run, err := s.repo.GetRun(ctx, userID, runID)
+// Get 读取单次检测详情。历史是共享的，不做归属过滤；返回 nil 表示记录不存在。
+func (s *ModelDegradationService) Get(ctx context.Context, runID int64) (*ModelDegradationRun, error) {
+	run, err := s.repo.GetRun(ctx, runID)
 	if err != nil || run == nil {
 		return run, err
 	}
@@ -201,15 +218,52 @@ func (s *ModelDegradationService) Get(ctx context.Context, userID, runID int64) 
 	return run, nil
 }
 
-// List 读取用户的检测历史。
-func (s *ModelDegradationService) List(ctx context.Context, userID int64, limit int) ([]ModelDegradationRun, error) {
+// List 读取共享的检测历史（所有人的记录）。
+func (s *ModelDegradationService) List(ctx context.Context, limit int) ([]ModelDegradationRun, error) {
 	if limit <= 0 {
 		limit = modelDegradationDefaultListLimit
 	}
 	if limit > modelDegradationMaxListLimit {
 		limit = modelDegradationMaxListLimit
 	}
-	return s.repo.ListRuns(ctx, userID, limit)
+	return s.repo.ListRuns(ctx, limit)
+}
+
+// PruneHistory 按「保留天数 + 最多条数」双闸清理检测历史。
+//
+// 两道闸各管一半风险：天数闸管「长期没人测也别一直留着」，条数闸管
+// 「短期高频测试把磁盘打满」—— 体积几乎全在 model_audit_items.response，
+// 单条最多 modelDegradationMaxResponseBytes，只靠天数挡不住短期爆发。
+//
+// 由 OpsCleanupService 的每日 cron 调用（共享 schedule 与 leader lock，
+// 不另起调度）。分批删到返回 0 行为止；任一道闸出错就直接返回错误，
+// 由调用方记日志 —— 清理失败不影响检测本身，也不影响其它维护任务。
+func (s *ModelDegradationService) PruneHistory(ctx context.Context) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -modelDegradationHistoryRetentionDays)
+	for {
+		deleted, err := s.repo.DeleteRunsOlderThan(ctx, cutoff, modelDegradationPruneBatchSize)
+		if err != nil {
+			return err
+		}
+		if deleted == 0 {
+			break
+		}
+		logger.FromContext(ctx).Info("model_degradation.prune_by_age", zap.Int64("deleted", deleted))
+	}
+	for {
+		deleted, err := s.repo.DeleteRunsBeyondKeep(ctx, modelDegradationHistoryMaxRuns, modelDegradationPruneBatchSize)
+		if err != nil {
+			return err
+		}
+		if deleted == 0 {
+			break
+		}
+		logger.FromContext(ctx).Info("model_degradation.prune_by_count", zap.Int64("deleted", deleted))
+	}
+	return nil
 }
 
 // validateModelDegradationCredentials 校验并归一化用户提交的上游凭据。

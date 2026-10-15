@@ -100,10 +100,18 @@ func normalizeModelDegradationProtocol(raw string) (string, error) {
 // 注意：这里不保存用户提交的 API Key。凭据只活在当次检测的调用栈里，
 // 落库或回传给前端都没有必要，见 migrations/249_model_audit.sql 的说明。
 type ModelDegradationRun struct {
-	ID      int64
-	UserID  int64
-	BaseURL string
-	ModelID string
+	ID     int64
+	UserID int64
+	// OwnerEmail 发起者邮箱，由仓储层 LEFT JOIN users 带出，只为共享历史里展示用
+	// （对外一律脱敏后再出网）。它不落库，CreateRun 不会写这个字段。
+	OwnerEmail string
+	// GroupID / GroupName 本次检测填的 Key 若命中发起者本人名下的平台 Key，
+	// 就记下它绑定的分组。命中不了（填的是第三方上游 Key）时 GroupID 为 nil、GroupName 为空。
+	// GroupName 是发起时的名字快照 —— 分组会被改名或删除，历史记录要保留当时的语义。
+	GroupID   *int64
+	GroupName string
+	BaseURL   string
+	ModelID   string
 	// Protocol 本次检测使用的上游协议；取值见 ModelDegradationProtocol*，空串按 chat_completions 处理。
 	Protocol string
 	// ReasoningEffort 本次检测使用的思考等级；空串表示未指定。
@@ -187,8 +195,10 @@ type ModelDegradationRepository interface {
 	CreateRun(ctx context.Context, run *ModelDegradationRun) error
 	CreateItems(ctx context.Context, items []ModelDegradationItem) error
 	FinishRun(ctx context.Context, run *ModelDegradationRun) error
-	GetRun(ctx context.Context, userID, runID int64) (*ModelDegradationRun, error)
-	ListRuns(ctx context.Context, userID int64, limit int) ([]ModelDegradationRun, error)
+	// GetRun / ListRuns 是共享历史：不带 user_id 过滤，任何人都能读到全部检测记录。
+	// 读取放开、写入不放开 —— 中止仍由 MarkRunCancelled 的 user_id 过滤拦着。
+	GetRun(ctx context.Context, runID int64) (*ModelDegradationRun, error)
+	ListRuns(ctx context.Context, limit int) ([]ModelDegradationRun, error)
 	// CountSourceHash 统计该源码指纹在历史记录中已出现的次数，用于识别
 	// 「多次检测返回同一份源码」。返回 0 表示这是首次出现。
 	CountSourceHash(ctx context.Context, hash string) (int, error)
@@ -203,4 +213,21 @@ type ModelDegradationRepository interface {
 	// 第二个返回值表示这行是不是「属于自己的、仍在 running」——false 说明
 	// 它已经完结或已被中止过，调用方应据此回绝，不要重复更新。
 	MarkRunCancelled(ctx context.Context, userID, runID int64) (bool, error)
+	// LookupAPIKeyGroup 用检测请求里填的明文 Key 反查平台 API Key 绑定的分组，
+	// 只认该用户名下的 Key。命中返回 groupID（可为 nil，表示该 Key 未绑分组）与分组名；
+	// 未命中返回 (nil, "", nil) —— 填的是第三方上游 Key 属于常态，不算错误。
+	LookupAPIKeyGroup(ctx context.Context, userID int64, apiKey string) (*int64, string, error)
+	// DeleteRunsOlderThan 物理删除 created_at 早于 cutoff 的历史记录，单次最多 batchSize 条。
+	// 返回本次实际删掉的行数（0 表示已经清完）。仍在跑的那一条不删。
+	DeleteRunsOlderThan(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+	// DeleteRunsBeyondKeep 只保留最新的 keep 条，超出的按时间倒序物理删除，
+	// 单次最多 batchSize 条。天数闸之外的条数兜底。
+	DeleteRunsBeyondKeep(ctx context.Context, keep, batchSize int) (int64, error)
+}
+
+// ModelDegradationHistoryMaintainer 是每日运维清理任务需要的检测历史清理能力。
+// 检测历史是共享池子、且题目明细里存着整份模型输出（单条最多 256KB），
+// 不清理会一直涨，所以挂进 OpsCleanupService 的 cron（与模型监控历史同一套路）。
+type ModelDegradationHistoryMaintainer interface {
+	PruneHistory(ctx context.Context) error
 }

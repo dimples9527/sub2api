@@ -8,7 +8,7 @@ import (
 )
 
 // ProvideOpsCleanupService 创建并启动运维清理服务。
-// 模型监控历史和渠道监控共用运维清理任务的调度、主节点锁和心跳记录。
+// 模型监控历史、降智检测历史和渠道监控共用运维清理任务的调度、主节点锁和心跳记录。
 func ProvideOpsCleanupService(
 	opsRepo OpsRepository,
 	db *sql.DB,
@@ -16,10 +16,11 @@ func ProvideOpsCleanupService(
 	cfg *config.Config,
 	channelMonitorSvc *ChannelMonitorService,
 	llmMonitorHistory *LLMMonitorHistoryService,
+	modelDegradationSvc *ModelDegradationService,
 	settingRepo SettingRepository,
 	opsService *OpsService,
 ) *OpsCleanupService {
-	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, llmMonitorHistory, settingRepo)
+	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, llmMonitorHistory, modelDegradationSvc, settingRepo)
 	svc.Start()
 	if opsService != nil {
 		opsService.SetCleanupReloader(svc)

@@ -3,7 +3,9 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -87,18 +89,28 @@ type modelDegradationRunResponse struct {
 	BaseURL string `json:"base_url"`
 	ModelID string `json:"model_id"`
 	// Protocol 本次检测使用的上游协议。
-	Protocol        string                   `json:"protocol"`
-	ReasoningEffort string                   `json:"reasoning_effort"`
-	Status          string                   `json:"status"`
-	Verdict         string                   `json:"verdict"`
-	LogicPassed     int                      `json:"logic_passed"`
-	LogicTotal      int                      `json:"logic_total"`
-	RenderVerdict   string                   `json:"render_verdict"`
-	ErrorMessage    string                   `json:"error_message"`
-	DurationMs      int                      `json:"duration_ms"`
-	CreatedAt       time.Time                `json:"created_at"`
-	CompletedAt     *time.Time               `json:"completed_at,omitempty"`
+	Protocol        string                         `json:"protocol"`
+	ReasoningEffort string                         `json:"reasoning_effort"`
+	Status          string                         `json:"status"`
+	Verdict         string                         `json:"verdict"`
+	LogicPassed     int                            `json:"logic_passed"`
+	LogicTotal      int                            `json:"logic_total"`
+	RenderVerdict   string                         `json:"render_verdict"`
+	ErrorMessage    string                         `json:"error_message"`
+	DurationMs      int                            `json:"duration_ms"`
+	CreatedAt       time.Time                      `json:"created_at"`
+	CompletedAt     *time.Time                     `json:"completed_at,omitempty"`
 	Items           []modelDegradationItemResponse `json:"items,omitempty"`
+	// 共享历史：所有人的检测记录都在同一个池子里，因此需要标出「是谁跑的」。
+	// 邮箱一律脱敏，只保留首字符与域名。
+	OwnerEmail string `json:"owner_email"`
+	// GroupID / GroupName 本次检测填的 Key 命中的平台分组；空表示没识别出分组
+	// （填的是第三方上游 Key，或该 Key 未绑分组）。
+	GroupID   *int64 `json:"group_id,omitempty"`
+	GroupName string `json:"group_name"`
+	// IsOwner 表示这条是不是当前登录者自己发起的。前端据此决定是否给「中止」入口，
+	// 后端 MarkRunCancelled 另有 user_id 过滤兜底，不依赖这个字段做鉴权。
+	IsOwner bool `json:"is_owner"`
 }
 
 // Start 发起一次降智检测。
@@ -135,7 +147,7 @@ func (h *ModelDegradationHandler) Start(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, modelDegradationRunToResponse(run, false))
+	response.Success(c, modelDegradationRunToResponse(run, subject.UserID, false))
 }
 
 // Tasks 返回内置题库，供前端铺下拉与「查看题目」。
@@ -195,7 +207,8 @@ func (h *ModelDegradationHandler) Get(c *gin.Context) {
 		return
 	}
 
-	run, err := h.auditService.Get(c.Request.Context(), subject.UserID, runID)
+	// 共享历史：详情同样不做归属过滤，任何人都能点开看。
+	run, err := h.auditService.Get(c.Request.Context(), runID)
 	if err != nil {
 		response.InternalError(c, "读取检测结果失败")
 		return
@@ -205,7 +218,7 @@ func (h *ModelDegradationHandler) Get(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, modelDegradationRunToResponse(run, true))
+	response.Success(c, modelDegradationRunToResponse(run, subject.UserID, true))
 }
 
 // Cancel 中止用户自己的、仍在运行中的检测。
@@ -253,7 +266,7 @@ func (h *ModelDegradationHandler) List(c *gin.Context) {
 		}
 	}
 
-	runs, err := h.auditService.List(c.Request.Context(), subject.UserID, limit)
+	runs, err := h.auditService.List(c.Request.Context(), limit)
 	if err != nil {
 		response.InternalError(c, "读取检测历史失败")
 		return
@@ -261,15 +274,61 @@ func (h *ModelDegradationHandler) List(c *gin.Context) {
 
 	items := make([]modelDegradationRunResponse, 0, len(runs))
 	for i := range runs {
-		items = append(items, modelDegradationRunToResponse(&runs[i], false))
+		items = append(items, modelDegradationRunToResponse(&runs[i], subject.UserID, false))
 	}
 	response.Success(c, gin.H{"items": items})
 }
 
-func modelDegradationRunToResponse(run *service.ModelDegradationRun, withItems bool) modelDegradationRunResponse {
+// maskBaseURL 只保留 scheme + host，路径与查询串一律抹掉。
+//
+// 共享历史会把上游地址暴露给所有人，而 base_url 是用户自己填的，
+// 很可能指向私有中继或内部网关 —— 完整回显等于把别人的中转入口交出去。
+func maskBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		// 解析不出来的（用户填了非 URL 的怪值）整体脱敏，至少不回显原文。
+		return "***"
+	}
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + u.Host + "/***"
+}
+
+// maskEmail 保留邮箱首字符与域名，中间抹掉。
+func maskEmail(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	at := strings.LastIndex(raw, "@")
+	if at <= 0 {
+		return "***"
+	}
+	local := raw[:at]
+	if len(local) > 1 {
+		local = local[:1] + "***"
+	} else {
+		local = "***"
+	}
+	return local + "@" + raw[at+1:]
+}
+
+func modelDegradationRunToResponse(run *service.ModelDegradationRun, viewerID int64, withItems bool) modelDegradationRunResponse {
+	isOwner := viewerID > 0 && run.UserID == viewerID
+	// 自己的记录看完整上游地址，别人的只留域名。
+	baseURL := run.BaseURL
+	if !isOwner {
+		baseURL = maskBaseURL(run.BaseURL)
+	}
 	resp := modelDegradationRunResponse{
 		ID:              run.ID,
-		BaseURL:         run.BaseURL,
+		BaseURL:         baseURL,
 		ModelID:         run.ModelID,
 		Protocol:        run.Protocol,
 		ReasoningEffort: run.ReasoningEffort,
@@ -282,6 +341,10 @@ func modelDegradationRunToResponse(run *service.ModelDegradationRun, withItems b
 		DurationMs:      run.DurationMs,
 		CreatedAt:       run.CreatedAt,
 		CompletedAt:     run.CompletedAt,
+		OwnerEmail:      maskEmail(run.OwnerEmail),
+		GroupID:         run.GroupID,
+		GroupName:       run.GroupName,
+		IsOwner:         isOwner,
 	}
 	if !withItems || len(run.Items) == 0 {
 		return resp

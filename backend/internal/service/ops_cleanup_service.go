@@ -39,16 +39,17 @@ return 0
 // - Multi-instance: best-effort Redis leader lock so only one node runs cleanup.
 // - Safety: deletes in batches to avoid long transactions.
 //
-// 附带：在 runCleanupOnce 末尾调用渠道监控和模型监控历史维护，
+// 附带：在 runCleanupOnce 末尾调用渠道监控、模型监控与降智检测的历史维护，
 // 统一共享 cron schedule + leader lock + heartbeat，避免再引一套调度。
 type OpsCleanupService struct {
 	opsRepo           OpsRepository
 	db                *sql.DB
 	redisClient       *redis.Client
 	cfg               *config.Config
-	channelMonitorSvc *ChannelMonitorService
-	llmMonitorHistory LLMMonitorHistoryMaintainer
-	settingRepo       SettingRepository
+	channelMonitorSvc   *ChannelMonitorService
+	llmMonitorHistory   LLMMonitorHistoryMaintainer
+	modelDegradationSvc ModelDegradationHistoryMaintainer
+	settingRepo         SettingRepository
 
 	instanceID string
 
@@ -76,17 +77,19 @@ func NewOpsCleanupService(
 	cfg *config.Config,
 	channelMonitorSvc *ChannelMonitorService,
 	llmMonitorHistory LLMMonitorHistoryMaintainer,
+	modelDegradationSvc ModelDegradationHistoryMaintainer,
 	settingRepo SettingRepository,
 ) *OpsCleanupService {
 	return &OpsCleanupService{
-		opsRepo:           opsRepo,
-		db:                db,
-		redisClient:       redisClient,
-		cfg:               cfg,
-		channelMonitorSvc: channelMonitorSvc,
-		llmMonitorHistory: llmMonitorHistory,
-		settingRepo:       settingRepo,
-		instanceID:        uuid.NewString(),
+		opsRepo:             opsRepo,
+		db:                  db,
+		redisClient:         redisClient,
+		cfg:                 cfg,
+		channelMonitorSvc:   channelMonitorSvc,
+		llmMonitorHistory:   llmMonitorHistory,
+		modelDegradationSvc: modelDegradationSvc,
+		settingRepo:         settingRepo,
+		instanceID:          uuid.NewString(),
 	}
 }
 
@@ -367,6 +370,11 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 	if s.llmMonitorHistory != nil {
 		if err := s.llmMonitorHistory.RunDailyMaintenance(ctx); err != nil {
 			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] 模型监控历史维护失败: %v", err)
+		}
+	}
+	if s.modelDegradationSvc != nil {
+		if err := s.modelDegradationSvc.PruneHistory(ctx); err != nil {
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] 降智检测历史清理失败: %v", err)
 		}
 	}
 
