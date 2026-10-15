@@ -480,6 +480,15 @@
               >
                 <Icon name="externalLink" size="sm" />
               </button>
+              <button
+                type="button"
+                :disabled="!artworkPreviewHtml"
+                :title="t('modelDegradation.result.downloadArtwork')"
+                :aria-label="t('modelDegradation.result.downloadArtwork')"
+                @click="downloadArtwork(currentRun)"
+              >
+                <Icon name="document" size="sm" />
+              </button>
             </div>
           </header>
 
@@ -686,6 +695,15 @@
                     @click.stop="downloadRunReport(run)"
                   >
                     <Icon name="download" size="sm" />
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="!renderHtmlOf(run)"
+                    :title="t('modelDegradation.result.downloadArtwork')"
+                    :aria-label="t('modelDegradation.result.downloadArtwork')"
+                    @click.stop="downloadArtwork(run)"
+                  >
+                    <Icon name="document" size="sm" />
                   </button>
                 </div>
               </div>
@@ -1424,6 +1442,25 @@ const openArtwork = (run: ModelDegradationRun) => {
   window.open(url, '_blank', 'noopener')
   // 立刻 revoke 会让新标签页读到空文档；交给浏览器在页面卸载后回收。
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+// 下载作品 = 把生成题的页面源码存成 .html 落盘。
+// 与「下载报告」是两件事：那个下的是整轮检测记录（JSON），这个是模型吐出来的页面本身。
+// 没有产物（纯逻辑题、或生成题请求失败）时按钮禁用，跟复制源码 / 打开作品一致。
+const downloadArtwork = (run: ModelDegradationRun) => {
+  const html = renderHtmlOf(run)
+  if (!html) return
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `model-degradation-${run.id}.html`
+  // 先挂进文档再点：游离节点上的 .click() 在部分浏览器不触发下载。
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // revoke 挪到下一帧：紧跟 click 同步撤销，下载还没读到 blob 就被掐掉了。
+  window.requestAnimationFrame(() => URL.revokeObjectURL(url))
 }
 
 /* ============ 我的检测：结果轮播 ============ */
@@ -3446,9 +3483,15 @@ onUnmounted(() => {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.ma-more-actions button:hover {
+.ma-more-actions button:hover:not(:disabled) {
   background: var(--ma-seg-bg);
   color: var(--ma-control-fg);
+}
+
+/* 纯逻辑题没有产物，「下载作品」没有对象可指 —— 置灰而不是点了没反应。 */
+.ma-more-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* 指标页脚：第一行是档位与耗时，第二行是两道题的判定。

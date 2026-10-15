@@ -734,6 +734,7 @@ export default {
       answer: '模型回答',
       reason: '失败原因',
       copyArtwork: '复制作品源码',
+      downloadArtwork: '下载作品',
       openArtwork: '在新标签页打开作品',
       artworkCopied: '作品源码已复制到剪贴板'
     },

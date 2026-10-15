@@ -730,6 +730,7 @@ export default {
       answer: 'Model answer',
       reason: 'Failure reason',
       copyArtwork: 'Copy artwork source',
+      downloadArtwork: 'Download artwork',
       openArtwork: 'Open artwork in a new tab',
       artworkCopied: 'Artwork source copied to clipboard'
     },
