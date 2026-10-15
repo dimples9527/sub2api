@@ -1797,6 +1797,17 @@
       @cancel="deleteSupplierAccountRecordTarget = null"
     />
 
+    <ConfirmDialog
+      :show="Boolean(deleteLocalAndUpstreamTarget)"
+      title="删除本地和上游记录"
+      :message="deleteLocalAndUpstreamMessage"
+      confirm-text="全部删除"
+      cancel-text="取消"
+      danger
+      @confirm="confirmDeleteLocalAndUpstream"
+      @cancel="deleteLocalAndUpstreamTarget = null"
+    />
+
     <BaseDialog
       :show="Boolean(duplicateResultAccount)"
       title="账号已复制"
@@ -2017,6 +2028,21 @@
             <Icon name="trash" size="sm" />
             <span>{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</span>
           </button>
+          <!-- 综合删除：一步清掉本地账号 + 它对应的上游账号记录。
+               顺序固定为先删本地账号、再删记录行 —— 反过来一旦本地账号删除失败，
+               记录行已经消失，残留的本地账号就再也看不见了。 -->
+          <button
+            v-if="canManageLocalAccount(account)"
+            type="button"
+            class="sp-account-action-item danger sp-account-action-delete"
+            :data-test="`supplier-account-delete-local-and-upstream-${account.id}`"
+            :disabled="deletingLocalAndUpstreamID === account.id"
+            title="同时删除本地账号和本地保存的上游账号记录（不会删除上游系统数据）"
+            @click="runAccountActionMenuAction(requestDeleteLocalAndUpstreamAccount)"
+          >
+            <Icon name="trash" size="sm" />
+            <span>{{ deletingLocalAndUpstreamID === account.id ? '删除中' : '删除本地和上游记录' }}</span>
+          </button>
         </div>
       </div>
     </Teleport>
@@ -2201,6 +2227,8 @@ const renamingLocalAccountID = ref<number | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
 const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
 const deleteSupplierAccountRecordTarget = ref<SupplierProviderAccount | null>(null)
+const deleteLocalAndUpstreamTarget = ref<SupplierProviderAccount | null>(null)
+const deletingLocalAndUpstreamID = ref<number | null>(null)
 const duplicateResultAccount = ref<Account | null>(null)
 const testingAccountID = ref<number | null>(null)
 const testingAccount = ref<Account | null>(null)
@@ -3998,6 +4026,51 @@ async function confirmDeleteSupplierAccountRecord() {
     appStore.showError(extractApiErrorMessage(err, '删除上游账号记录失败'))
   } finally {
     deletingSupplierAccountRecordID.value = null
+  }
+}
+
+// 「删除本地和上游记录」的确认文案：必须把「不动上游系统数据」写在里面 ——
+// 这个按钮名字里的「上游」指的是本地保存的上游账号快照，不是上游供应商系统里的账号，
+// 不写清会让人以为它比「删除上游账号记录」多删了上游的东西。
+const deleteLocalAndUpstreamMessage = computed(() => {
+  const account = deleteLocalAndUpstreamTarget.value
+  if (!account) return ''
+  const upstreamName = account.name || account.upstream_account_key || `账号 #${account.id}`
+  const localName = account.local_account_name || account.name || `#${account.local_account_id}`
+  return `确认同时删除本地账号「${localName}」和它对应的上游账号记录「${upstreamName}」？将先删除本地账号，再清理本地保存的上游账号记录。本操作不会删除上游系统数据，且删除后无法恢复。`
+})
+
+function requestDeleteLocalAndUpstreamAccount(account: SupplierProviderAccount) {
+  if (!canManageLocalAccount(account) || deletingLocalAndUpstreamID.value !== null) return
+
+  deleteLocalAndUpstreamTarget.value = account
+}
+
+async function confirmDeleteLocalAndUpstream() {
+  const target = deleteLocalAndUpstreamTarget.value
+  const localAccountID = target ? manageableLocalAccountID(target) : null
+  if (!target || localAccountID === null || deletingLocalAndUpstreamID.value !== null) return
+
+  deletingLocalAndUpstreamID.value = target.id
+  deleteLocalAndUpstreamTarget.value = null
+
+  try {
+    // 先删本地账号：它失败时记录行还在，用户能看见并重试；
+    // 反过来先删记录行，一旦本地账号删除失败，残留的本地账号在列表里就没有对应行了。
+    await adminAPI.accounts.delete(localAccountID)
+    if (selected.value?.local_account_id === localAccountID) selected.value = null
+    try {
+      await deleteSupplierAccount(target.id)
+      appStore.showSuccess('本地账号和上游账号记录已删除')
+    } catch (err) {
+      // 本地账号已经删掉了，不能整条报成失败 —— 必须说清哪一半没做完，否则用户会以为白删了。
+      appStore.showError(`本地账号已删除，但上游账号记录清理失败：${extractApiErrorMessage(err, '请重新执行删除记录')}`)
+    }
+    await loadAccounts()
+  } catch (err) {
+    appStore.showError(extractApiErrorMessage(err, '删除账号失败'))
+  } finally {
+    deletingLocalAndUpstreamID.value = null
   }
 }
 
