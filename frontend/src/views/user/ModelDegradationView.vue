@@ -3294,10 +3294,14 @@ onUnmounted(() => {
    内容显示的是分组名（不再是判定），颜色仍按判定取，见 ribbonClass。 */
 .ma-ribbon {
   position: absolute;
-  /* 往内收一点：rotate(45deg) 后文字两端会探出作品框、被 overflow 裁掉，
-     缎带贴角太紧时「分组未知」这种长词就显示不全。 */
-  top: 12px;
-  right: -38px;
+  /* 往内收：rotate(45deg) 后缎带的「左上端」和「右下端」都会探出作品框、被 overflow 裁掉，
+     贴角越紧可见段越短。原来 top/right 都贴角时，136px 的缎带只剩约 75px 可见，
+     「内部测试分组」这种六个字的名字就只露出中间一截。
+     沿垂直于缎带的方向往卡内挪约 24px 后，右下端不再超出、只剩左上端被裁，
+     可见段回到约 118px —— 六个字能完整放下。
+     ⚠️ top 与 right 必须成对调：只挪 top，右下端仍在框外，可见段几乎不变。 */
+  top: 24px;
+  right: -18px;
   width: 136px;
   padding: 4px 0;
   overflow: hidden;
