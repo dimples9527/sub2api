@@ -400,6 +400,14 @@
                 <Icon name="terminal" size="sm" />
                 <span class="text-xs">{{ t('keys.useKey') }}</span>
               </button>
+              <!-- Test Connection Button -->
+              <button
+                @click="openTestModal(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-900/20 dark:hover:text-violet-400"
+              >
+                <Icon name="beaker" size="sm" />
+                <span class="text-xs">{{ t('keys.test.button') }}</span>
+              </button>
               <!-- Import to CC Switch Button -->
               <button
                 v-if="!publicSettings?.hide_ccs_import_button"
@@ -532,6 +540,13 @@
       @close="closeUseKeyModal"
     />
 
+    <!-- Test Connection Modal -->
+    <KeyTestModal
+      :show="showTestModal"
+      :api-key="testTargetKey"
+      @close="closeTestModal"
+    />
+
     <!-- CCS Client Selection Dialog for Antigravity -->
     <BaseDialog
       :show="showCcsClientSelect"
@@ -613,6 +628,7 @@ import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 	import SearchInput from '@/components/common/SearchInput.vue'
 	import Icon from '@/components/icons/Icon.vue'
 	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+	import KeyTestModal from '@/components/keys/KeyTestModal.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
 	import KeyGroupSelectorPopover from '@/components/keys/KeyGroupSelectorPopover.vue'
 	import type { KeyGroupSelectorPosition } from '@/components/keys/KeyGroupSelectorPopover.vue'
@@ -776,6 +792,9 @@ const showDeleteDialog = ref(false)
 const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
+const showTestModal = ref(false)
+// 独立于 selectedKey：测试弹窗打开期间，编辑/删除等流程会清空 selectedKey，共用会让弹窗丢失目标密钥。
+const testTargetKey = ref<ApiKey | null>(null)
 const showCcsClientSelect = ref(false)
 const showColumnDropdown = ref(false)
 const pendingCcsRow = ref<ApiKey | null>(null)
@@ -968,6 +987,16 @@ const openUseKeyModal = (key: ApiKey) => {
 const closeUseKeyModal = () => {
   showUseKeyModal.value = false
   selectedKey.value = null
+}
+
+const openTestModal = (key: ApiKey) => {
+  testTargetKey.value = key
+  showTestModal.value = true
+}
+
+const closeTestModal = () => {
+  showTestModal.value = false
+  testTargetKey.value = null
 }
 
 const handlePageChange = (page: number) => {

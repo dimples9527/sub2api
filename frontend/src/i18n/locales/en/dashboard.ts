@@ -158,6 +158,24 @@ export default {
     lastUsedAt: 'Last Used',
     lastUsedIP: 'Last Used IP',
     useKey: 'Use Key',
+    test: {
+      button: 'Test',
+      title: 'Test API Key',
+      hint: 'Sends one fixed short message with this key and its group, billed by the normal rules. First-token latency is the time from sending the request to receiving the first text chunk, including network and queueing time.',
+      modelLabel: 'Test model',
+      modelPlaceholder: 'Select a test model',
+      loadingModels: 'Loading models...',
+      noModels: 'No model is available for the group this key belongs to',
+      modelsFailed: 'Failed to load models: {reason}',
+      run: 'Test',
+      testing: 'Testing...',
+      waitingFirstToken: 'Request sent, waiting for the first text chunk...',
+      firstToken: 'First token {seconds}s',
+      success: 'Test passed · current model is available',
+      failed: 'Test failed',
+      emptyResponse: 'No reply content was received. Try again or switch models',
+      requestFailed: 'Request failed. Try again later'
+    },
     useKeyModal: {
       title: 'Use API Key',
       description:
