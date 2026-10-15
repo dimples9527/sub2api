@@ -728,6 +728,7 @@ export default {
       questionDetail: 'Questions & answers',
       expected: 'Expected',
       answer: 'Model answer',
+      reason: 'Failure reason',
       copyArtwork: 'Copy artwork source',
       openArtwork: 'Open artwork in a new tab',
       artworkCopied: 'Artwork source copied to clipboard'
@@ -831,6 +832,14 @@ export default {
       copyOk: 'Check summary copied to clipboard',
       verdictLabel: 'Verdict',
       upstream: 'Upstream',
+      // Shared history: every user's checks live in one pool, so the runner is shown (email masked).
+      owner: 'Run by',
+      ownerSelf: 'Mine',
+      ownerUnknown: 'Unknown user',
+      // Present when the check's key matches one of the platform's own keys.
+      groupLabel: 'Group',
+      // Shown on the corner ribbon when the group could not be resolved.
+      groupUnknown: 'Unknown group',
       ribbon: {
         normal: 'Passed',
         degraded: 'Degraded',

@@ -732,6 +732,7 @@ export default {
       questionDetail: '题目与回答',
       expected: '期望答案',
       answer: '模型回答',
+      reason: '失败原因',
       copyArtwork: '复制作品源码',
       openArtwork: '在新标签页打开作品',
       artworkCopied: '作品源码已复制到剪贴板'
@@ -831,6 +832,14 @@ export default {
       copyOk: '检测结论已复制到剪贴板',
       verdictLabel: '判定',
       upstream: '上游',
+      // 共享历史：所有人的检测都在同一个池子里，故标出发起者（邮箱已脱敏）。
+      owner: '发起者',
+      ownerSelf: '本人',
+      ownerUnknown: '未知用户',
+      // 本次检测填的 Key 若命中平台自己签发的 Key，会带出它绑定的分组。
+      groupLabel: '分组',
+      // 右上角缎带显示分组，没命中（第三方上游 Key / 未绑分组）时用这个占位。
+      groupUnknown: '分组未知',
       ribbon: {
         normal: '通过',
         degraded: '降智',

@@ -312,7 +312,12 @@
               <template v-if="running">
                 <div class="ma-running">
                   <div class="ma-running-row">
-                    <span class="ma-running-spin"><Icon name="sync" size="sm" /></span>
+                    <span class="ma-running-mascot">
+                      <ModelDegradationMascot
+                        :animal="mascotAnimal(String(runModelLabel))"
+                        state="thinking"
+                      />
+                    </span>
                     <span class="ma-running-label">{{ t('modelDegradation.resultPanel.running') }}</span>
                     <span class="ma-running-count">{{ arrivedCount }}/{{ progressTotal }}</span>
                     <span class="ma-running-right">
@@ -343,6 +348,10 @@
                     class="ma-mine-stage"
                     :class="[thumbTone(currentRun), { 'is-render': !!artworkPreviewHtml }]"
                   >
+                    <ModelDegradationWave
+                      v-if="!artworkPreviewHtml"
+                      :running="currentRun.status === 'running'"
+                    />
                     <iframe
                       v-if="artworkPreviewHtml"
                       :srcdoc="artworkPreviewHtml"
@@ -351,8 +360,20 @@
                       :title="t('modelDegradation.item.preview')"
                     ></iframe>
                     <template v-else>
-                      <Icon :name="tileIcon(currentRun)" size="lg" class="ma-card-glyph" />
-                      <span class="ma-card-glyph-text">{{ tileSummary(currentRun) }}</span>
+                      <span class="ma-mascot">
+                        <ModelDegradationMascot
+                          :animal="mascotAnimal(String(currentRun.model_id ?? currentRun.id))"
+                          :state="mascotState(currentRun)"
+                        />
+                      </span>
+                      <strong class="ma-logic-verdict">{{ logicVerdictLabel(currentRun) }}</strong>
+                      <span class="ma-logic-score">{{ tileSummary(currentRun) }}</span>
+                      <dl class="ma-logic-rows">
+                        <div v-for="row in logicRows(currentRun)" :key="row.label">
+                          <dt>{{ row.label }}</dt>
+                          <dd>{{ row.value }}</dd>
+                        </div>
+                      </dl>
                     </template>
                   </div>
                   <span class="ma-ribbon" :class="ribbonClass(currentRun)">{{
@@ -417,6 +438,12 @@
             <div class="ma-detail-id">
               <span class="ma-detail-name">{{ currentRun.model_id }}</span>
               <span class="ma-detail-time">{{ formatDateTime(currentRun.created_at) }}</span>
+              <span class="ma-detail-owner">
+                {{ ownerLabel(currentRun) }}
+                <span v-if="currentRun.is_owner" class="ma-owner-tag">{{
+                  t('modelDegradation.history.ownerSelf')
+                }}</span>
+              </span>
             </div>
             <div class="ma-detail-actions">
               <button
@@ -460,6 +487,8 @@
             class="ma-detail-stage"
             :class="[thumbTone(currentRun), { 'is-render': !!artworkPreviewHtml }]"
           >
+            <!-- 结果卡只在跑完之后出现，波形没必要进 is-running -->
+            <ModelDegradationWave v-if="!artworkPreviewHtml" />
             <iframe
               v-if="artworkPreviewHtml"
               :srcdoc="artworkPreviewHtml"
@@ -468,10 +497,24 @@
               :title="t('modelDegradation.item.preview')"
             ></iframe>
             <template v-else>
-              <Icon :name="tileIcon(currentRun)" size="lg" class="ma-card-glyph" />
-              <span class="ma-card-glyph-text">{{ tileSummary(currentRun) }}</span>
+              <span class="ma-mascot">
+                <ModelDegradationMascot
+                  :animal="mascotAnimal(String(currentRun.model_id ?? currentRun.id))"
+                  :state="mascotState(currentRun)"
+                />
+              </span>
+              <strong class="ma-logic-verdict">{{ logicVerdictLabel(currentRun) }}</strong>
+              <span class="ma-logic-score">{{ tileSummary(currentRun) }}</span>
+              <dl class="ma-logic-rows">
+                <div v-for="row in logicRows(currentRun)" :key="row.label">
+                  <dt>{{ row.label }}</dt>
+                  <dd>{{ row.value }}</dd>
+                </div>
+              </dl>
             </template>
-            <span class="ma-ribbon" :class="ribbonClass(currentRun)">{{ ribbonLabel(currentRun) }}</span>
+            <span class="ma-ribbon" :class="ribbonClass(currentRun)">{{
+              ribbonLabel(currentRun)
+            }}</span>
           </div>
 
           <footer class="ma-detail-foot">
@@ -578,6 +621,7 @@
                      缩放加在包裹 div 上而不是 iframe 自己身上 —— 直接给 iframe
                      transform 时 Chrome 会把内部视口按缩放后的尺寸再算一遍，
                      实测缩略图只买到左上四分之一块。 -->
+                <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
                 <span v-if="renderHtmlOf(run)" class="ma-card-cover">
                   <iframe
                     :srcdoc="renderHtmlOf(run)"
@@ -595,6 +639,7 @@
                     :class="run.status === 'running' ? 'animate-spin' : ''"
                   />
                   <span class="ma-card-glyph-text">{{ tileSummary(run) }}</span>
+                  <span v-if="tileReason(run)" class="ma-card-glyph-note">{{ tileReason(run) }}</span>
                 </template>
                 <!-- 勋章压的是「预览」的角：源站那张详情卡里，标题行在上面、
                      缎带从作品框的右上角斜插下来，被作品框的圆角裁断。
@@ -610,6 +655,12 @@
                 <div class="ma-more-title">
                   <span class="ma-more-name">{{ run.model_id }}</span>
                   <span class="ma-more-time">{{ formatDateTime(run.created_at) }}</span>
+                  <span class="ma-more-owner">
+                    {{ ownerLabel(run) }}
+                    <span v-if="run.is_owner" class="ma-owner-tag">{{
+                      t('modelDegradation.history.ownerSelf')
+                    }}</span>
+                  </span>
                 </div>
                 <div class="ma-more-actions">
                   <button
@@ -644,6 +695,7 @@
                 :class="[thumbTone(run), { 'is-render': !!renderHtmlOf(run) }]"
               >
                 <!-- 只在悬停这一张上建 iframe：铺满墙的话每张卡都要多一份文档 -->
+                <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
                 <span v-if="renderHtmlOf(run) && zoomId === run.id" class="ma-hover-cover">
                   <iframe
                     :srcdoc="renderHtmlOf(run)"
@@ -655,6 +707,7 @@
                 <template v-else>
                   <Icon :name="tileIcon(run)" size="lg" class="ma-card-glyph" />
                   <span class="ma-card-glyph-text">{{ tileSummary(run) }}</span>
+                  <span v-if="tileReason(run)" class="ma-card-glyph-note">{{ tileReason(run) }}</span>
                 </template>
                 <span class="ma-ribbon" :class="ribbonClass(run)">{{ ribbonLabel(run) }}</span>
               </span>
@@ -709,6 +762,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import ModelDegradationWave from './ModelDegradationWave.vue'
+import ModelDegradationMascot from './ModelDegradationMascot.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1160,11 +1215,11 @@ const itemAnswerText = (item: ModelDegradationItem) =>
 // 当前选中那一轮的产物预览。结果卡与「我的检测」都用它，抽出来免得两处各算一遍。
 const artworkPreviewHtml = computed(() => renderHtmlOf(currentRun.value))
 
-// 只补「跑过生成题」的卡片：纯逻辑题拉回来的明细没有可预览的产物，白占请求。
+// 卡片封面要用明细：生成题取作品源码，纯逻辑题取「请求回了什么」的补充说明。
 // 串行而不是并发：一次铺开二十个请求会把接口拖慢，也会把限流打出来。
 const prefetchTileDetails = async () => {
   for (const run of historyCards.value) {
-    if (!run.render_verdict || detailCache.has(run.id)) continue
+    if (detailCache.has(run.id)) continue
     await loadRunDetail(run.id)
   }
 }
@@ -1185,6 +1240,20 @@ const tileIcon = (run: ModelDegradationRun) => {
   return 'infoCircle'
 }
 
+// 吉祥物按模型名分角色：同一个模型永远摊到同一只动物，历史里一眼能认出「又是这条狗」。
+const mascotAnimal = (seed: string): 'dog' | 'monkey' => {
+  let hash = 0
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  return hash % 2 === 0 ? 'dog' : 'monkey'
+}
+
+const mascotState = (run: ModelDegradationRun): 'thinking' | 'pass' | 'fail' | 'unknown' => {
+  if (run.status === 'running') return 'thinking'
+  if (run.verdict === 'normal') return 'pass'
+  if (run.verdict === 'degraded') return 'fail'
+  return 'unknown'
+}
+
 // 封面中间那行字：逻辑题的得分，没跑逻辑题就报生成题判定。
 const tileSummary = (run: ModelDegradationRun) => {
   if (run.status === 'running') return t('modelDegradation.resultPanel.running')
@@ -1195,7 +1264,63 @@ const tileSummary = (run: ModelDegradationRun) => {
   return '—'
 }
 
-// 斜皮带勋章：中止与进行中不是判定结果，配色也跟着中性化。
+// 没有产物可预览时（纯逻辑题、或上游直接报错），光靠一个图标加「逻辑题 0/1」
+// 看不出这一轮到底发生了什么：上游 400、超时、模型答了什么，全都不在卡面上。
+// 这里补一段「请求到底回了什么」—— 优先模型的回答，答不出来就给单题的失败原因
+// （item.detail 里是上游报错原文），再没有就退回 run 级的错误信息。
+// 列表接口不返回 items，历史小卡回退到按 id 拉的明细缓存；还没拉到就先不显示。
+const tileReason = (run: ModelDegradationRun | null) => {
+  if (!run || run.status === 'running') return ''
+  const items = run.items ?? detailCache.get(run.id)?.items ?? []
+  for (const item of items) {
+    const answer = (
+      item.task_type === 'logic' ? item.response : extractArtworkText(item.response)
+    ).trim()
+    if (answer) return answer
+    const reason = item.detail.trim()
+    if (reason) return reason
+  }
+  return run.error_message.trim()
+}
+
+// 大卡（我的检测 / 结果卡）在「没有作品可预览」时铺的判定概览。
+// 逻辑题没有产物，卡面如果只剩一个图标加得分就太单调了，而且看不出错在哪 ——
+// 这里把判定、得分、期望、模型回答、失败原因摊在同一张卡面上。
+//
+// 优先挑没通过的那道题：用户最关心的是「哪道错了」，全对时才挑第一道。
+const logicFocusItem = (run: ModelDegradationRun | null): ModelDegradationItem | null => {
+  if (!run) return null
+  const items = run.items ?? detailCache.get(run.id)?.items ?? []
+  const logicItems = items.filter((item) => item.task_type === 'logic')
+  if (logicItems.length === 0) return null
+  return logicItems.find((item) => !item.passed) ?? logicItems[0]
+}
+
+// 卡面主标题：跑完才谈判定，进行中与中止各有说法。
+const logicVerdictLabel = (run: ModelDegradationRun) => {
+  if (run.status === 'running') return t('modelDegradation.resultPanel.running')
+  if (run.status === 'cancelled') return t('modelDegradation.resultPanel.cancelled')
+  return t('modelDegradation.verdict.' + run.verdict)
+}
+
+// 卡面上那几行。没有的行直接不出现：跑着的那一轮还没有题目，
+// 上游直接失败时模型回答是空的（此时由「失败原因」那一行说明）。
+const logicRows = (run: ModelDegradationRun | null) => {
+  const item = logicFocusItem(run)
+  if (!item) return []
+  const rows: { label: string; value: string }[] = []
+  if (item.expected) {
+    rows.push({ label: t('modelDegradation.result.expected'), value: item.expected })
+  }
+  const answer = itemAnswerText(item)
+  rows.push({ label: t('modelDegradation.result.answer'), value: answer || '—' })
+  const reason = tileReason(run)
+  if (reason) rows.push({ label: t('modelDegradation.result.reason'), value: reason })
+  return rows
+}
+
+// 缎带配色：文字换成了分组，但颜色仍表判定结果 —— 缩略图上这是唯一的判定信号。
+// 中止与进行中不是判定结果，配色也跟着中性化。
 const ribbonClass = (run: ModelDegradationRun) => {
   if (run.status === 'running') return 'is-running'
   if (run.status === 'cancelled') return 'is-cancelled'
@@ -1207,16 +1332,16 @@ const ribbonClass = (run: ModelDegradationRun) => {
   return 'is-unknown'
 }
 
-const ribbonLabel = (run: ModelDegradationRun) => {
-  if (run.status === 'running') return t('modelDegradation.history.ribbon.running')
-  if (run.status === 'cancelled') return t('modelDegradation.history.ribbon.cancelled')
-  if (run.status === 'failed') return t('modelDegradation.history.ribbon.failed')
-  // 只跑了生成题：封面就是作品本身，角标标「已生成」而不是「无法判定」。
-  if (run.render_verdict === 'generated' && run.logic_total === 0) {
-    return t('modelDegradation.history.ribbon.generated')
-  }
-  return t('modelDegradation.history.ribbon.' + run.verdict)
-}
+// 右上角缎带改显示「分组」：本次检测填的 Key 命中的平台分组名；没命中（填的是第三方
+// 上游 Key，或该 Key 未绑分组）时给占位。判定不再占用这个位置 —— 它由 ribbonClass
+// 的颜色和卡片下方的判定提示表达。
+const ribbonLabel = (run: ModelDegradationRun) =>
+  run.group_name || t('modelDegradation.history.groupUnknown')
+
+// 共享历史：标出是谁跑的。邮箱后端已脱敏（只留首字符与域名），前端不再加工。
+// 用户被软删后 LEFT JOIN 不到邮箱，此时给个占位而不是显示空。
+const ownerLabel = (run: ModelDegradationRun) =>
+  run.owner_email || t('modelDegradation.history.ownerUnknown')
 
 // 鼠标移入（或键盘聚焦）时展开的那张卡，只记 id。
 // 展开态是 .ma-hover-card：相对 .ma-tile 绝对定位，比卡片高出一截，
@@ -1261,7 +1386,11 @@ const copyRunSummary = (run: ModelDegradationRun) => {
     `${t('modelDegradation.metrics.render')}: ${renderVerdictLabel(run.render_verdict)}`,
     `${t('modelDegradation.metrics.duration')}: ${formatDuration(run.duration_ms)}`,
     formatDateTime(run.created_at),
-    `${t('modelDegradation.history.upstream')}: ${run.base_url}`
+    `${t('modelDegradation.history.upstream')}: ${run.base_url}`,
+    // 共享历史：复制出去的摘要也带上发起者，否则转发给别人就分不清是谁跑的。
+    `${t('modelDegradation.history.owner')}: ${ownerLabel(run)}`,
+    // 只有识别出平台分组时才带这一行（填第三方上游 Key 时没有分组）。
+    ...(run.group_name ? [`${t('modelDegradation.history.groupLabel')}: ${run.group_name}`] : [])
   ].join('\n')
   void copyToClipboard(text, t('modelDegradation.history.copyOk'))
 }
@@ -2689,6 +2818,15 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* 共享历史：发起者（邮箱已由后端脱敏）。 */
+.ma-detail-owner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ma-faint);
+  font-size: 11.5px;
+}
+
 .ma-detail-actions {
   display: flex;
   flex: none;
@@ -3066,6 +3204,67 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
+/* 没有产物可预览时补的那段说明（模型答了什么 / 上游为什么失败）。
+   卡面尺寸差得多 —— 历史小卡只有 240px 宽 —— 超过三行就截断，
+   别把上面的图标和得分挤没了。上游报错原文可能是一长串不带空格的 JSON。 */
+.ma-card-glyph-note {
+  display: -webkit-box;
+  max-width: 88%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ma-faint);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* 逻辑题没有作品可预览，两张大卡（我的检测 / 结果卡）改铺「判定概览」：
+   判定 + 得分 + 期望 / 模型回答 / 失败原因，卡面自己就能看完一轮。
+   两张卡宽度差得远（侧栏那张只有 ~280px），靠 max-width 与省略号自适应，
+   行多了就被 .ma-mine-stage / .ma-detail-stage 的 overflow 裁掉而不是撑破卡面。 */
+.ma-logic-verdict {
+  color: var(--ma-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ma-logic-score {
+  color: var(--ma-label);
+  font-size: 12px;
+}
+
+.ma-logic-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 92%;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.ma-logic-rows > div {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ma-logic-rows dt {
+  flex: none;
+  color: var(--ma-faint);
+}
+
+/* 期望/回答/原因都可能是长文本（上游报错原文尤其长），单行省略。 */
+.ma-logic-rows dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ma-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ma-card-thumb.is-normal .ma-card-glyph,
 .ma-hover-stage.is-normal .ma-card-glyph {
   color: var(--ma-pass);
@@ -3091,13 +3290,17 @@ onUnmounted(() => {
 /* 斜角勋章：压的是「作品框」的角 —— 源站那张详情卡里标题行在上面，
    缎带从作品框右上角斜插下来、被作品框的圆角裁断。
    rotate 45° 后探出作品框的部分由 .ma-card-thumb / .ma-hover-stage 的 overflow 裁掉，
-   切口刚好落在圆角内侧。 */
+   切口刚好落在圆角内侧。
+   内容显示的是分组名（不再是判定），颜色仍按判定取，见 ribbonClass。 */
 .ma-ribbon {
   position: absolute;
-  top: 2px;
-  right: -50px;
+  /* 往内收一点：rotate(45deg) 后文字两端会探出作品框、被 overflow 裁掉，
+     缎带贴角太紧时「分组未知」这种长词就显示不全。 */
+  top: 12px;
+  right: -38px;
   width: 136px;
   padding: 4px 0;
+  overflow: hidden;
   transform: rotate(45deg);
   background: var(--ma-pass);
   color: #ffffff;
@@ -3105,6 +3308,9 @@ onUnmounted(() => {
   font-weight: 700;
   text-align: center;
   letter-spacing: 0.5px;
+  /* 分组名长度不可控：超宽就省略，别撑破角标。 */
+  text-overflow: ellipsis;
+  white-space: nowrap;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
 }
 
@@ -3193,6 +3399,27 @@ onUnmounted(() => {
 .ma-more-time {
   color: var(--ma-faint);
   font-size: 10.5px;
+}
+
+/* 共享历史：发起者（邮箱已由后端脱敏）。 */
+.ma-more-owner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--ma-faint);
+  font-size: 10.5px;
+}
+
+/* 「本人」标记：历史池里混着所有人的记录，用它区分自己跑的那几条。 */
+.ma-owner-tag {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--ma-input-border);
+  border-radius: 5px;
+  color: var(--ma-muted);
+  font-size: 10px;
+  line-height: 15px;
 }
 
 .ma-more-actions {
@@ -3332,6 +3559,216 @@ onUnmounted(() => {
 
 .ma-page :deep(.select-value) {
   font-size: 12px;
+}
+
+/* 吉祥物是 100% 宽高的 SVG，直接丢进 flex 列会被拉满 —— 尺寸由外层 span 定死。 */
+.ma-mascot {
+  flex: none;
+  width: 66px;
+  height: 66px;
+}
+
+.ma-running-mascot {
+  flex: none;
+  width: 34px;
+  height: 34px;
+}
+
+/* ============ 动态底纹 ============
+   没有产物可预览的卡面只剩几行字，撑不住画面 —— 底下铺两层一直在动的底纹：
+   一层判定色光晕缓慢漂移、一层网格匀速平移；跑着的那一轮网格换成自上而下的扫描带。
+   颜色跟判定走：--ma-glow 由下面各 .is-* 规则给出，默认取灰。
+   三层动画全走 transform，不碰 background-position —— 历史里可能有几十张卡，
+   重绘动画会一起掉帧。 */
+
+.ma-mine-stage,
+.ma-detail-stage,
+.ma-card-thumb,
+.ma-hover-stage {
+  /* 底纹层压在 z-index:-1，不建层就会掉到卡片自己的背景后面、彻底看不见。 */
+  isolation: isolate;
+  --ma-glow: var(--ma-faint);
+}
+
+.ma-mine-stage.is-normal,
+.ma-detail-stage.is-normal,
+.ma-card-thumb.is-normal,
+.ma-hover-stage.is-normal {
+  --ma-glow: var(--ma-pass);
+}
+
+.ma-mine-stage.is-degraded,
+.ma-detail-stage.is-degraded,
+.ma-card-thumb.is-degraded,
+.ma-hover-stage.is-degraded {
+  --ma-glow: var(--ma-fail);
+}
+
+.ma-mine-stage.is-unknown,
+.ma-detail-stage.is-unknown,
+.ma-card-thumb.is-unknown,
+.ma-hover-stage.is-unknown {
+  --ma-glow: var(--ma-warn);
+}
+
+/* 两层都比框大一圈（inset 负值），漂移 / 平移时才不会露出边。 */
+.ma-mine-stage::before,
+.ma-detail-stage::before,
+.ma-card-thumb::before,
+.ma-hover-stage::before,
+.ma-mine-stage::after,
+.ma-detail-stage::after,
+.ma-card-thumb::after,
+.ma-hover-stage::after {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.ma-mine-stage::before,
+.ma-detail-stage::before,
+.ma-card-thumb::before,
+.ma-hover-stage::before {
+  background-image:
+    radial-gradient(
+      34% 30% at 26% 28%,
+      color-mix(in srgb, var(--ma-glow) 26%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      38% 34% at 74% 72%,
+      color-mix(in srgb, var(--ma-glow) 16%, transparent),
+      transparent 72%
+    );
+  animation: ma-glow-drift 17s ease-in-out infinite alternate;
+}
+
+.ma-mine-stage::after,
+.ma-detail-stage::after,
+.ma-card-thumb::after,
+.ma-hover-stage::after {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--ma-glow) 13%, transparent) 0 1px,
+      transparent 1px 26px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--ma-glow) 13%, transparent) 0 1px,
+      transparent 1px 26px
+    );
+  animation: ma-grid-slide 26s linear infinite;
+}
+
+/* 跑着的那一轮：光晕快一倍，网格换成扫描带，一眼看得出还在动。 */
+.ma-mine-stage.is-running::before,
+.ma-detail-stage.is-running::before,
+.ma-card-thumb.is-running::before,
+.ma-hover-stage.is-running::before {
+  animation-duration: 6s;
+}
+
+.ma-mine-stage.is-running::after,
+.ma-detail-stage.is-running::after,
+.ma-card-thumb.is-running::after,
+.ma-hover-stage.is-running::after {
+  background-image: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--ma-glow) 26%, transparent) 50%,
+    transparent
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 38%;
+  animation: ma-scan 2.8s ease-in-out infinite;
+}
+
+/* 生成题有产物时整层关掉：产物自己带底色，叠上去只会糊。 */
+.ma-mine-stage.is-render::before,
+.ma-detail-stage.is-render::before,
+.ma-card-thumb.is-render::before,
+.ma-hover-stage.is-render::before,
+.ma-mine-stage.is-render::after,
+.ma-detail-stage.is-render::after,
+.ma-card-thumb.is-render::after,
+.ma-hover-stage.is-render::after {
+  display: none;
+}
+
+@keyframes ma-glow-drift {
+  from {
+    transform: translate3d(-3%, -2%, 0);
+  }
+
+  to {
+    transform: translate3d(4%, 3%, 0);
+  }
+}
+
+@keyframes ma-grid-slide {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(26px, 26px, 0);
+  }
+}
+
+@keyframes ma-scan {
+  from {
+    transform: translate3d(0, -120%, 0);
+  }
+
+  to {
+    transform: translate3d(0, 320%, 0);
+  }
+}
+
+/* 页头光晕：跟封面同一套做法，只是更淡、铺得更开，给整页一层会呼吸的底。 */
+.ma-top {
+  position: relative;
+  isolation: isolate;
+}
+
+.ma-top::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  right: -6%;
+  left: -6%;
+  z-index: -1;
+  height: 260px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(
+      44% 58% at 18% 32%,
+      color-mix(in srgb, var(--ma-primary) 15%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      38% 50% at 84% 8%,
+      color-mix(in srgb, var(--ma-pass) 11%, transparent),
+      transparent 70%
+    );
+  animation: ma-glow-drift 22s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ma-top::before,
+  .ma-mine-stage::before,
+  .ma-detail-stage::before,
+  .ma-card-thumb::before,
+  .ma-hover-stage::before,
+  .ma-mine-stage::after,
+  .ma-detail-stage::after,
+  .ma-card-thumb::after,
+  .ma-hover-stage::after {
+    animation: none;
+  }
 }
 
 /* ============ 响应式 ============ */

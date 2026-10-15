@@ -72,6 +72,14 @@ export interface ModelDegradationRun {
   created_at: string
   completed_at?: string
   items?: ModelDegradationItem[]
+  /** 发起者邮箱（脱敏），共享历史里所有人都看得到。 */
+  owner_email: string
+  /** 本次检测填的 Key 命中的平台分组名；空表示没识别出分组（第三方上游 Key 或未绑分组）。 */
+  group_name: string
+  /** 命中的分组 ID；没识别出分组时后端不下发这个字段。 */
+  group_id?: number
+  /** 这条是不是当前登录者自己发起的；非本人不给「中止」入口。 */
+  is_owner: boolean
 }
 
 export interface StartModelDegradationPayload {
