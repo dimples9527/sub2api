@@ -891,8 +891,14 @@ describe('supplier local data views component usage', () => {
 
   it('loads local groups and sends the selected local group to the paged account query', async () => {
     const wrapper = await mountSupplierAccounts()
+    const setupState = (wrapper.vm as any).$?.setupState
 
     expect(supplierAccountMocks.listGroups).toHaveBeenCalledTimes(1)
+
+    // 本用例验证的是「选中的本地分组会传给分页查询」，与首屏默认值无关：
+    // 先把首屏默认选中的分组清回「全部本地分组」，再从这个起点断言。
+    setupState.groupID = 0
+    await flushPromises()
     expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
       group_id: undefined,
     }))
@@ -937,7 +943,13 @@ describe('supplier local data views component usage', () => {
 
   it('filters local-group options by platform and clears an incompatible selection', async () => {
     const wrapper = await mountSupplierAccounts()
+    const setupState = (wrapper.vm as any).$?.setupState
     const selectTriggers = wrapper.findAll('.select-trigger')
+
+    // 本用例验证的是「平台筛选会过滤分组选项并清掉不兼容的选择」，
+    // 先把首屏默认选中的分组清回「全部本地分组」—— 否则 SelectStub 的点击会落到下一个选项上。
+    setupState.groupID = 0
+    await flushPromises()
 
     // select-trigger 顺序：供应商、供应商状态、平台、本地分组、同步有效性、上游状态。
     expect(selectTriggers[3].attributes('data-option-labels')).toContain('本地分组 A #201')

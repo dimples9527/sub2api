@@ -2774,7 +2774,9 @@ async function submitBindByGroup() {
   if (batchBindFailures.value.length > 0) showBatchBindResultDialog.value = true
 }
 
-const sortBy = ref('')
+// 默认按上游倍率升序：这是挑账号时最先要比的量，默认排序落在它上面，首屏就不用再点一次表头。
+// 方向沿用 sortOrder 的初值 asc；列头能排序的键与这里必须同名（见 accountColumns 的 rate_multiplier）。
+const sortBy = ref('rate_multiplier')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const mobileFiltersExpanded = ref(false)
 const toolbarMoreOpen = ref(false)
@@ -3322,7 +3324,10 @@ onMounted(async () => {
   guardFreshnessTimer = window.setInterval(() => {
     guardFreshnessNow.value = Date.now()
   }, 30000)
-  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount(), loadAutomationTaskHints()])
+  // 用 finally 而不是紧随其后的一句赋值：分组接口失败时也要恢复筛选监听，否则之后所有筛选都不生效。
+  await Promise.all([ensureCustomPlatformLabels(), loadCustomPlatforms(), loadProviders(), loadLocalGroups(), loadAccountRateGuardPendingCount(), loadAutomationTaskHints()]).finally(() => {
+    accountFiltersInitialized = true
+  })
   await loadAccounts()
 })
 
@@ -3345,7 +3350,12 @@ watch([bindByGroupPlatformFilter, bindByGroupProviderFilter], () => {
   void loadBindableLocalAccounts()
 })
 
+// 首屏的默认筛选值由初始化流程写入（见 loadLocalGroups），那一次变化不该再触发一轮重复加载：
+// 两次并发 loadAccounts 会让 loading 提前结束、列表短暂显示不全。
+let accountFiltersInitialized = false
+
 watch([providerID, providerStatusFilter, groupID, activeFilter, upstreamStatusFilter], () => {
+  if (!accountFiltersInitialized) return
   resetPageAndLoad()
 })
 
@@ -3378,6 +3388,17 @@ async function loadProviders() {
 
 async function loadLocalGroups() {
   localGroups.value = await adminAPI.groups.getAll()
+  groupID.value = defaultLocalGroupID()
+}
+
+// 首屏默认选中 OpenAI 分组。按平台 code 认而不是按分组名 —— 分组名随时会改，平台是稳定枚举；
+// 名字匹配只作兜底（平台字段缺失或走自定义平台时的旧数据）。认不出来就保持「全部本地分组」，
+// 不能默认落到某个不确定的分组上，否则用户会以为账号凭空变少了。
+function defaultLocalGroupID(): number {
+  const groups = localGroups.value
+  const openaiGroup = groups.find(group => group.platform === 'openai')
+    || groups.find(group => group.name.trim().toLowerCase() === 'openai')
+  return openaiGroup ? openaiGroup.id : 0
 }
 
 async function loadCustomPlatforms() {
