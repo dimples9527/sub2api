@@ -1798,6 +1798,37 @@
     />
 
     <ConfirmDialog
+      :show="Boolean(renameConfirmTarget)"
+      title="确认快捷改名"
+      :message="renameConfirmMessage"
+      confirm-text="确认改名"
+      cancel-text="取消"
+      @confirm="confirmRenameLocalAccount"
+      @cancel="closeRenameConfirm"
+    />
+
+    <ConfirmDialog
+      :show="Boolean(deleteLocalAccountTarget)"
+      title="删除本地账号"
+      :message="deleteLocalAccountMessage"
+      confirm-text="删除账号"
+      cancel-text="取消"
+      danger
+      @confirm="confirmDeleteLocalAccount"
+      @cancel="deleteLocalAccountTarget = null"
+    />
+
+    <ConfirmDialog
+      :show="syncModelsPendingApply !== null"
+      title="确认同步上游模型"
+      :message="syncModelsConfirmMessage"
+      :confirm-text="syncModelsMode === 'replace' ? '去除并增加' : '保留并增加'"
+      cancel-text="取消"
+      @confirm="confirmSyncUpstreamModels"
+      @cancel="closeSyncModelsConfirm"
+    />
+
+    <ConfirmDialog
       :show="Boolean(deleteLocalAndUpstreamTarget)"
       title="删除本地和上游记录"
       :message="deleteLocalAndUpstreamMessage"
@@ -1965,7 +1996,7 @@
             :disabled="renamingLocalAccountID === renameTargetLocalAccountID(account) || accountActionLoadingID === renameTargetLocalAccountID(account) || testingAccountID === renameTargetLocalAccountID(account) || duplicatingAccountID === renameTargetLocalAccountID(account)"
             :title="renameLocalAccountTitle(account)"
             :data-test="`supplier-account-rename-${renameTargetLocalAccountID(account)}`"
-            @click="runAccountActionMenuAction(renameLocalAccountToConvention)"
+            @click="runAccountActionMenuAction(requestRenameLocalAccount)"
           >
             <Icon name="swap" size="sm" />
             <span>{{ renamingLocalAccountID === renameTargetLocalAccountID(account) ? '改名中' : '快捷改名' }}</span>
@@ -2023,7 +2054,7 @@
             type="button"
             class="sp-account-action-item danger sp-account-action-delete"
             :disabled="deletingAccountID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-            @click="runAccountActionMenuAction(deleteLocalAccount)"
+            @click="runAccountActionMenuAction(requestDeleteLocalAccount)"
           >
             <Icon name="trash" size="sm" />
             <span>{{ deletingAccountID === account.local_account_id ? '删除中' : '删除' }}</span>
@@ -2221,9 +2252,14 @@ const editingPriorityAccountID = ref<number | null>(null)
 const savingPriorityAccountID = ref<number | null>(null)
 const accountActionLoadingID = ref<number | null>(null)
 const deletingAccountID = ref<number | null>(null)
+// 「删除」本地账号的确认目标。与「删除上游账号记录」是两套删除，各用一个 target 免得互相顶掉。
+const deleteLocalAccountTarget = ref<SupplierProviderAccount | null>(null)
 const deletingSupplierAccountRecordID = ref<number | null>(null)
 const recoveringAccountID = ref<number | null>(null)
 const renamingLocalAccountID = ref<number | null>(null)
+// 「快捷改名」确认弹窗的目标行。改名会改本地账号名，必须走项目通用确认框，不能用 window.confirm
+// （原生弹窗会阻塞页面、不跟主题，也无法在本页 Teleport 的弹窗栈里保持一致的层级）。
+const renameConfirmTarget = ref<SupplierProviderAccount | null>(null)
 const duplicatingAccountID = ref<number | null>(null)
 const duplicateConfirmAccount = ref<SupplierProviderAccount | null>(null)
 const deleteSupplierAccountRecordTarget = ref<SupplierProviderAccount | null>(null)
@@ -2429,6 +2465,8 @@ const showSyncModelsDialog = ref(false)
 const syncModelsMode = ref<UpstreamModelBatchSyncMode>('merge')
 const syncModelsSubmitting = ref(false)
 const syncModelsCancelling = ref(false)
+// 批量同步的二次确认目标：null = 没有待确认的同步，true/false = 那次要不要真的落库。
+const syncModelsPendingApply = ref<boolean | null>(null)
 // 进度条需要「进行中」的中间态，所以这里存的是任务快照而不是一次性结果。
 // 快照的 total/success/failed/results/applied 与原来的同步结果同名，模板可直接复用。
 const syncModelsResult = ref<UpstreamModelBatchSyncJob | null>(null)
@@ -2525,19 +2563,39 @@ function syncModelsItemProgress(item: UpstreamModelBatchSyncItem): number {
   return 100
 }
 
+// 二次确认文案：就是原来 window.confirm 那一句，只换成页面通用确认弹窗。
+const syncModelsConfirmMessage = computed(() => {
+  if (syncModelsPendingApply.value === null) return ''
+  const verb = syncModelsMode.value === 'replace' ? '去除现有白名单并增加新的' : '保留现有并增加新的'
+  const extra = syncModelsMode.value === 'replace'
+    ? '；上游已下架的模型会被移除（手写别名映射保留）'
+    : ''
+  return `将对 ${syncModelsTargets.value.length} 个账号${verb}上游模型${extra}。是否继续？`
+})
+
 async function runSyncUpstreamModels(apply: boolean) {
   if (syncModelsSubmitting.value || syncModelsTargets.value.length === 0) return
   // 「去除现有并增加新的」会把白名单里上游已下架的条目删掉（手写映射不受影响），
   // 属于不可逆的写入，所以只在真正落库且账号多于一个时才要求确认。
   if (apply && syncModelsTargets.value.length > 1) {
-    const verb = syncModelsMode.value === 'replace' ? '去除现有白名单并增加新的' : '保留现有并增加新的'
-    const extra = syncModelsMode.value === 'replace'
-      ? '；上游已下架的模型会被移除（手写别名映射保留）'
-      : ''
-    if (!window.confirm(`将对 ${syncModelsTargets.value.length} 个账号${verb}上游模型${extra}。是否继续？`)) {
-      return
-    }
+    syncModelsPendingApply.value = apply
+    return
   }
+  await startSyncUpstreamModels(apply)
+}
+
+function confirmSyncUpstreamModels() {
+  const apply = syncModelsPendingApply.value
+  if (apply === null) return
+  void startSyncUpstreamModels(apply)
+}
+
+function closeSyncModelsConfirm() {
+  syncModelsPendingApply.value = null
+}
+
+async function startSyncUpstreamModels(apply: boolean) {
+  syncModelsPendingApply.value = null
   syncModelsSubmitting.value = true
   syncModelsCancelling.value = false
   syncModelsResult.value = null
@@ -4356,11 +4414,24 @@ async function saveAccountBinding() {
   }
 }
 
-async function deleteLocalAccount(account: SupplierProviderAccount) {
-  const localAccountID = manageableLocalAccountID(account)
-  if (localAccountID === null || deletingAccountID.value !== null) return
+// 删除本地账号的确认文案：本地账号名为空时回落到上游账号名 / 上游 key，与按钮那行显示的名字同源。
+const deleteLocalAccountMessage = computed(() => {
+  const account = deleteLocalAccountTarget.value
+  if (!account) return ''
   const accountName = account.local_account_name || account.name || account.upstream_account_key
-  if (!window.confirm('确认删除本地账号「' + accountName + '」？')) return
+  return `确认删除本地账号「${accountName}」？`
+})
+
+function requestDeleteLocalAccount(account: SupplierProviderAccount) {
+  if (manageableLocalAccountID(account) === null || deletingAccountID.value !== null) return
+  deleteLocalAccountTarget.value = account
+}
+
+async function confirmDeleteLocalAccount() {
+  const account = deleteLocalAccountTarget.value
+  const localAccountID = account ? manageableLocalAccountID(account) : null
+  if (!account || localAccountID === null || deletingAccountID.value !== null) return
+  deleteLocalAccountTarget.value = null
   deletingAccountID.value = localAccountID
   try {
     await adminAPI.accounts.delete(localAccountID)
@@ -4559,23 +4630,44 @@ async function recoverLocalAccountState(account: SupplierProviderAccount) {
   }
 }
 
+// 断链时本地账号名是空的（本地列不显示），确认框里退回用「疑似」账号的名字。
+const renameConfirmMessage = computed(() => {
+  const account = renameConfirmTarget.value
+  if (!account) return ''
+  const localAccountID = renameTargetLocalAccountID(account)
+  const nextName = conventionalLocalAccountName(account)
+  const currentName = (account.local_account_name || suspectedLocalAccountName(account)).trim()
+  return `确认把本地账号「${currentName || `#${localAccountID}`}」改名为「${nextName}」？`
+})
+
 // 快捷改名：把本地账号名改成规范写法（见 conventionalLocalAccountName）。
 // 只传 name —— 后端 UpdateAccount 里 `if input.Name != ""` 才落库（admin_account.go），
 // 所以不会连带清空其它字段。
-async function renameLocalAccountToConvention(account: SupplierProviderAccount) {
+function requestRenameLocalAccount(account: SupplierProviderAccount) {
   const localAccountID = renameTargetLocalAccountID(account)
   const nextName = conventionalLocalAccountName(account)
   if (localAccountID === null || !nextName || renamingLocalAccountID.value === localAccountID) return
 
-  // 断链时本地账号名是空的（本地列不显示），确认框里退回用「疑似」账号的名字。
+  // 已经是规范写法就不弹确认框也不发请求，避免一次无意义的写库。
   const currentName = (account.local_account_name || suspectedLocalAccountName(account)).trim()
-  // 已经是规范写法就不发请求，避免一次无意义的写库。
   if (currentName === nextName) {
     appStore.showSuccess(`本地账号名已是规范写法：${nextName}`)
     return
   }
-  if (!window.confirm(`确认把本地账号「${currentName || `#${localAccountID}`}」改名为「${nextName}」？`)) return
+  renameConfirmTarget.value = account
+}
 
+function closeRenameConfirm() {
+  renameConfirmTarget.value = null
+}
+
+async function confirmRenameLocalAccount() {
+  const account = renameConfirmTarget.value
+  const localAccountID = account ? renameTargetLocalAccountID(account) : null
+  const nextName = account ? conventionalLocalAccountName(account) : ''
+  if (!account || localAccountID === null || !nextName || renamingLocalAccountID.value === localAccountID) return
+
+  renameConfirmTarget.value = null
   renamingLocalAccountID.value = localAccountID
   try {
     await adminAPI.accounts.update(localAccountID, { name: nextName })

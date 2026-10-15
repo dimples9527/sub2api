@@ -1274,13 +1274,15 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain("import GroupSelector from '@/components/common/GroupSelector.vue'")
     expect(accountsSource).toContain('@click="runAccountActionMenuAction(openLocalAccountEditor)"')
     expect(accountsSource).toContain('@click.stop="openAccountBindingEditor(account)"')
-    expect(accountsSource).toContain('@click="runAccountActionMenuAction(deleteLocalAccount)"')
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(requestDeleteLocalAccount)"')
     expect(accountsSource).toContain('<EditAccountModal')
     expect(accountsSource).toContain('<GroupSelector')
     expect(accountsSource).toContain('adminAPI.accounts.getById(localAccountID)')
     expect(accountsSource).toContain('adminAPI.accounts.update(account.id, { group_ids: bindingGroupIDs })')
     expect(accountsSource).toContain('adminAPI.accounts.delete(localAccountID)')
-    expect(accountsSource).toContain('window.confirm')
+    // 二次确认走页面通用 ConfirmDialog，不用原生 window.confirm（会阻塞页面且不跟主题）。
+    expect(accountsSource).toContain('function confirmDeleteLocalAccount()')
+    expect(accountsSource).toContain('@confirm="confirmDeleteLocalAccount"')
     expect(accountsSource).toContain('账号已删除')
   })
 

@@ -63,7 +63,11 @@ describe('SupplierAccountsView 批量同步上游模型', () => {
 
   it('「去除现有并增加新的」是不可逆写入，多于一个账号时必须二次确认', () => {
     const runBlock = source.match(/async function runSyncUpstreamModels\(apply: boolean\) \{([\s\S]*?)\n\}/)?.[1] || ''
-    expect(runBlock).toContain('window.confirm')
+    // 二次确认走页面通用 ConfirmDialog，不用原生 window.confirm（会阻塞页面且不跟主题）。
+    expect(runBlock).toContain('syncModelsPendingApply.value = apply')
+    expect(source).toContain('@confirm="confirmSyncUpstreamModels"')
+    // 只禁「调用」，不禁注释里的字面量（注释说明为什么换掉它时会提到这个词）。
+    expect(source).not.toMatch(/window\.confirm\s*\(/)
     // 单个账号的操作认知成本低，不打断；预览不写入，也不该弹确认。
     expect(runBlock).toContain('syncModelsTargets.value.length > 1')
     expect(runBlock).toContain('apply &&')
