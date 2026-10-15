@@ -195,3 +195,35 @@ password_encrypted=EXCLUDED.password_encrypted, updated_at=NOW()`)).
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// 余额汇总卡要同时给出生效成本与上游原始成本两个口径，列的顺序与 Scan 必须对齐 ——
+// 这里钉住查询列，避免日后加列时只改 SQL、忘了改 Scan（那会静默把上游成本扫成 0）。
+func TestSupplierProviderRepositoryListBalanceSummaryDaysScansUpstreamCost(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierProviderRepository(db)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
+       COALESCE(SUM(d.current_balance), 0) AS balance,
+       COALESCE(SUM(d.today_cost), 0) AS cost,
+       COALESCE(SUM(COALESCE(d.raw_upstream_cost, d.today_cost)), 0) AS upstream_cost
+FROM supplier_provider_daily_stats d
+JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
+GROUP BY d.stat_date
+ORDER BY d.stat_date`)).
+		WillReturnRows(sqlmock.NewRows([]string{"date", "balance", "cost", "upstream_cost"}).
+			AddRow("2026-08-14", 170.0, 60.0, 72.5))
+
+	days, err := repo.ListBalanceSummaryDays(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, days, 1)
+	require.Equal(t, "2026-08-14", days[0].Date)
+	require.Equal(t, 170.0, days[0].Balance)
+	require.Equal(t, 60.0, days[0].Cost)
+	require.Equal(t, 72.5, days[0].UpstreamCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

@@ -313,8 +313,8 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.updateCostDeviationSettings.mockResolvedValue({ threshold: 0.5 })
     providerViewMocks.getBalanceSummary.mockResolvedValue({
       latest_date: '2026-08-14',
-      today: { date: '2026-08-14', balance: 170, cost: 60 },
-      previous: { date: '2026-08-13', balance: 140, cost: 55 },
+      today: { date: '2026-08-14', balance: 170, cost: 60, upstream_cost: 72.5 },
+      previous: { date: '2026-08-13', balance: 140, cost: 55, upstream_cost: 58 },
       history: { first_date: '2026-08-01', days: 14, total_balance: 2400, total_cost: 620 },
     })
     providerViewMocks.listProviders.mockResolvedValue({
@@ -458,6 +458,8 @@ describe('SupplierProvidersView payload normalization', () => {
     const wrapper = await mountSupplierProviders()
     const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
 
+    // 页面默认选中「启用供应商」指标卡，排序断言与默认筛选无关，先按「全部」回到完整基线
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
     expect(rowIds()).toEqual(['1', '2', '3'])
 
     const todayCostHeader = wrapper.findAll('thead th').at(5)
@@ -473,6 +475,8 @@ describe('SupplierProvidersView payload normalization', () => {
     const wrapper = await mountSupplierProviders()
     const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
 
+    // 快捷筛选与「启用供应商」指标卡是两个维度，指标卡默认已选中，先清掉再验本组按钮
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
     expect(rowIds()).toEqual(['1', '2', '3'])
 
     await wrapper.get('[data-test="supplier-provider-filter-enabled"]').trigger('click')
@@ -488,29 +492,29 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(rowIds()).toEqual(['1', '2', '3'])
   })
 
-  it('点击「启用供应商」指标卡按启用状态过滤，再点一次或点「全部」都能清除', async () => {
+  it('默认选中「启用供应商」指标卡，再点一次或点「全部」都能清除', async () => {
     const wrapper = await mountSupplierProviders()
     const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
 
-    expect(rowIds()).toEqual(['1', '2', '3'])
-
-    // 回归点：这张卡的 label 与数字都指向「启用供应商」，key 曾写成 'all'，
-    // 而 filteredProviders 里没有 all 分支 ⇒ 点击是 no-op（不报错、列表一行不少）。
+    // 回归点：这张卡进页面就是选中态，列表也只留启用中的供应商
     const card = wrapper.get('[data-test="supplier-provider-metric-enabled"]')
-    await card.trigger('click')
     expect(rowIds()).toEqual(['1', '3'])
     expect(card.classes()).toContain('selected')
     expect(card.attributes('aria-pressed')).toBe('true')
 
-    // 出口一：再点同一张卡取消（同 SupplierAccountHealthView / SupplierAutomationView 的语义）
+    // 回归点：这张卡的 label 与数字都指向「启用供应商」，key 曾写成 'all'，
+    // 而 filteredProviders 里没有 all 分支 ⇒ 点击是 no-op（不报错、列表一行不少）。
     await card.trigger('click')
     expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(card.classes()).not.toContain('selected')
     expect(card.attributes('aria-pressed')).toBe('false')
 
-    // 出口二：「全部」按字面意思清除全部维度。filter 只由指标卡写入，
-    // 若它不清 filter，就会出现「点了全部仍是 2 个结果」的陷阱
     await card.trigger('click')
     expect(rowIds()).toEqual(['1', '3'])
+    expect(card.attributes('aria-pressed')).toBe('true')
+
+    // 出口： 「全部」按字面意思清除全部维度。filter 只由指标卡写入，
+    // 若它不清 filter，就会出现「点了全部仍是 2 个结果」的陷阱
     await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
     expect(rowIds()).toEqual(['1', '2', '3'])
     expect(card.attributes('aria-pressed')).toBe('false')
@@ -519,6 +523,9 @@ describe('SupplierProvidersView payload normalization', () => {
   it('每张指标卡都对应 filteredProviders 的一个分支，不存在点击无效的卡片', async () => {
     const wrapper = await mountSupplierProviders()
     const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
+
+    // 默认选中「启用供应商」卡，基线先清掉它，否则第一张卡点下去是「取消筛选」
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
     const allIds = rowIds()
 
     // 从源码取卡片键：新增卡片却忘了加筛选分支时，会在这里失败
@@ -536,6 +543,8 @@ describe('SupplierProvidersView payload normalization', () => {
   it('prevents syncing a disabled provider until it is enabled again', async () => {
     const wrapper = await mountSupplierProviders()
 
+    // 停用供应商默认被「启用供应商」指标卡筛掉，先按「全部」把它放回列表
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
     const syncButton = wrapper.get('[data-test="supplier-provider-sync-all-2"]')
 
     expect(syncButton.attributes('disabled')).toBeDefined()
@@ -545,6 +554,9 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('未启用的供应商行带 data-provider-enabled=0 标记，供整行灰化样式定位', async () => {
     const wrapper = await mountSupplierProviders()
+
+    // 灰化标记必须覆盖停用行，先按「全部」把默认被筛掉的停用供应商放回列表
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
 
     // DataTable 是通用组件且不消费 rowClass，整行灰化只能靠行内标记 + :has() 反选，
     // 标记一旦丢失，样式会静默失效（页面看不出报错），故在此钉住。
@@ -556,6 +568,10 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('整行灰化标记跟随开关的乐观更新，而不是写死初值', async () => {
     const wrapper = await mountSupplierProviders()
+
+    // 默认「启用供应商」筛选会在停用的一瞬间把该行移出列表，灰化标记就无从观察，
+    // 先按「全部」把这行留在列表里
+    await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
     const markOf = () => wrapper.get('[data-test="supplier-provider-enabled-1"]').element
       .closest('[data-provider-enabled]')?.getAttribute('data-provider-enabled')
 
@@ -1180,6 +1196,9 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-balance-today"]').text()).toContain('今日总余额')
     expect(wrapper.get('[data-test="supplier-balance-today"]').text()).toContain('170')
     expect(wrapper.get('[data-test="supplier-cost-today"]').text()).toContain('今日总成本')
+    // 上游原始成本与生效成本是两个口径，卡上必须各显各的数（都取 today 的对应字段）
+    expect(wrapper.get('[data-test="supplier-cost-upstream-today"]').text()).toContain('今日上游总成本')
+    expect(wrapper.get('[data-test="supplier-cost-upstream-today"]').text()).toContain('72.5')
     expect(wrapper.get('[data-test="supplier-balance-previous"]').text()).toContain('历史总余额')
     expect(wrapper.get('[data-test="supplier-balance-previous"]').text()).toContain('140')
     expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('历史总成本')

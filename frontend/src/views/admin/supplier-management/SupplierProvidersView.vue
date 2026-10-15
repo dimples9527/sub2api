@@ -107,6 +107,13 @@
             <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.cost) }}</strong>
             <small class="sp-balance-summary-foot">最近统计日 {{ balanceSummary.today.date || '—' }}</small>
           </article>
+          <!-- 与「今日总成本」并列而不是替代：前者是本地生效成本（含成本核对的人工结论），
+               这张是上游自己记的原始成本，两者不等时说明有审批修正或上游口径偏差。 -->
+          <article class="sp-balance-summary-card upstream-cost" data-test="supplier-cost-upstream-today">
+            <span class="sp-balance-summary-label">今日上游总成本</span>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.upstream_cost) }}</strong>
+            <small class="sp-balance-summary-foot">最近统计日 {{ balanceSummary.today.date || '—' }} · 上游原始上报，缺失回退生效成本</small>
+          </article>
           <article class="sp-balance-summary-card history-balance" data-test="supplier-balance-previous">
             <span class="sp-balance-summary-label">历史总余额</span>
             <strong class="sp-balance-summary-value">{{ currency(balanceSummary.previous?.balance) }}</strong>
@@ -1355,7 +1362,9 @@ const costSingleDay = ref(formatLocalDate(new Date()))
 const costSingleDayLoading = ref(false)
 const search = ref('')
 const providerQuickFilter = ref<ProviderQuickFilter>('all')
-const filter = ref('all')
+// 默认选中「启用供应商」指标卡：停用供应商不承载流量，进页面先只看启用中的，
+// 免得它们混进列表抢占视线。清除入口仍是「全部」与再点一次该卡。
+const filter = ref('enabled')
 const providerSortKey = ref('')
 const providerSortOrder = ref<'asc' | 'desc'>('asc')
 // 手机端筛选卡片默认收起：与账号页同一套交互（那边也是 ref(false)）。
@@ -3548,7 +3557,7 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-balance-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -3575,6 +3584,7 @@ function errorMessage(err: unknown, fallback: string): string {
 
 .sp-balance-summary-card.balance { --sp-card-accent: var(--sp-green, #16a34a); }
 .sp-balance-summary-card.cost { --sp-card-accent: var(--sp-amber, #d97706); }
+.sp-balance-summary-card.upstream-cost { --sp-card-accent: var(--sp-orange, #ea580c); }
 .sp-balance-summary-card.history-balance { --sp-card-accent: var(--sp-cyan, #3b82f6); }
 .sp-balance-summary-card.history-cost { --sp-card-accent: var(--sp-violet, #7c3aed); }
 
@@ -3691,19 +3701,18 @@ function errorMessage(err: unknown, fallback: string): string {
 
 @media (max-width: 1100px) {
   .sp-balance-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 /*
-  手机端 4 张余额卡并成一行。一行里每张只剩 ~80px，卡内说明小字（sp-balance-summary-foot，
-  如「上一统计日 2026-09-20（与今日对比）」）在这个宽度下读不出来，隐藏，只留标题 + 金额。
+  手机端余额卡按 3 列排布（5 张 ⇒ 3 + 2 两行）。列宽不足以读出卡内说明小字
+  （sp-balance-summary-foot，如「上一统计日 2026-09-20（与今日对比）」），隐藏，只留标题 + 金额。
   金额带千分位（¥ 1,712.4），窄格里允许在货币符号后的空格处折行 ——
   卡片本身是 overflow: hidden，不给折行的话超宽金额会被直接裁掉、看不到数。
 */
 @media (max-width: 560px) {
   .sp-balance-summary-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.35rem;
   }
 

@@ -378,11 +378,13 @@ ORDER BY p.sort_order ASC, p.id ASC`
 }
 
 // ListBalanceSummaryDays 按统计日汇总全部供应商的余额与成本快照。
+// upstream_cost 取上游原始上报成本，缺失时回退生效成本（与同表 cost 口径一致的做法见 ListCostTrends）。
 func (r *supplierProviderRepository) ListBalanceSummaryDays(ctx context.Context) ([]service.SupplierProviderBalanceSummaryDay, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
        COALESCE(SUM(d.current_balance), 0) AS balance,
-       COALESCE(SUM(d.today_cost), 0) AS cost
+       COALESCE(SUM(d.today_cost), 0) AS cost,
+       COALESCE(SUM(COALESCE(d.raw_upstream_cost, d.today_cost)), 0) AS upstream_cost
 FROM supplier_provider_daily_stats d
 JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
 GROUP BY d.stat_date
@@ -395,7 +397,7 @@ ORDER BY d.stat_date`)
 	days := make([]service.SupplierProviderBalanceSummaryDay, 0)
 	for rows.Next() {
 		var day service.SupplierProviderBalanceSummaryDay
-		if scanErr := rows.Scan(&day.Date, &day.Balance, &day.Cost); scanErr != nil {
+		if scanErr := rows.Scan(&day.Date, &day.Balance, &day.Cost, &day.UpstreamCost); scanErr != nil {
 			return nil, fmt.Errorf("scan supplier provider balance summary day: %w", scanErr)
 		}
 		days = append(days, day)

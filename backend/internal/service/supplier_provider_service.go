@@ -234,7 +234,11 @@ type SupplierProviderCostTrendResult struct {
 type SupplierProviderBalanceSummaryDay struct {
 	Date    string  `json:"date"`
 	Balance float64 `json:"balance"`
-	Cost    float64 `json:"cost"`
+	// Cost 是生效成本合计（today_cost），已含成本核对页的人工审批结论。
+	Cost float64 `json:"cost"`
+	// UpstreamCost 是上游原始上报成本合计（raw_upstream_cost 缺失时回退生效成本），
+	// 口径与 Cost 不同：它反映上游自己记了多少，不经过本地审批修正。
+	UpstreamCost float64 `json:"upstream_cost"`
 }
 
 // SupplierProviderBalanceHistory 表示历史统计区间内的累计口径。
