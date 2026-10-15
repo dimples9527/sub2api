@@ -156,7 +156,7 @@
             <span class="sp-section-index">01</span>
             <div>
               <h2>供应商运行列表</h2>
-              <span>默认按真实业务风险排序</span>
+              <span>默认按余额从少到多排序</span>
             </div>
           </div>
           <!-- 手机端列表渲染成卡片、没有表头可点，排序只能靠这一组控件；
@@ -183,12 +183,16 @@
           </div>
         </header>
 
+        <!-- 真正的排序由页面 sortedProviders 做（server-side-sort 下 DataTable 不排序）；
+             这里传 default-sort-key 只为让表头指示器与页面初值一致 —— 不传的话页面按余额升序
+             而表头不亮，且第一次点「余额可用」会被当成新列而给出 asc，表现为「点了没反应」。 -->
         <DataTable
           :columns="providerColumns"
           :data="sortedProviders"
           :loading="loading"
           row-key="id"
           server-side-sort
+          default-sort-key="current_balance"
           clickable-rows
           @sort="handleProviderSort"
           @row-click="selectProviderForDetail"
@@ -1365,7 +1369,10 @@ const providerQuickFilter = ref<ProviderQuickFilter>('all')
 // 默认选中「启用供应商」指标卡：停用供应商不承载流量，进页面先只看启用中的，
 // 免得它们混进列表抢占视线。清除入口仍是「全部」与再点一次该卡。
 const filter = ref('enabled')
-const providerSortKey = ref('')
+// 列表默认按余额升序：余额直接决定这个供应商还能跑多久，最少的排最前面，
+// 一进页面先看到的就是最可能断供的那几个。原来的「风险优先」排序保留在手机端下拉的
+// 「默认排序」项里（value 为空串 ⇒ sortedProviders 走 riskWeight 分支），没被删掉。
+const providerSortKey = ref('current_balance')
 const providerSortOrder = ref<'asc' | 'desc'>('asc')
 // 手机端筛选卡片默认收起：与账号页同一套交互（那边也是 ref(false)）。
 const mobileFiltersExpanded = ref(false)
@@ -1423,8 +1430,8 @@ const providerColumns: Column[] = [
 ]
 
 // 手机排序与桌面表头使用同一份可排序列，字段增加后两边口径不会各走各的。
-// 首项「默认排序」（value 为空串）对应 providerSortKey 的初值 —— 那种情况下 sortedProviders
-// 走「风险优先」分支；下拉里若没有这一项，用户一进页面看到的就是一个与当前排序对不上的字段名。
+// 首项「默认排序」（value 为空串）是「风险优先」的回退分支：页面初值已是余额升序，
+// 这一项留给用户从列排序切回风险优先；没有它就没有回到非列排序视图的入口。
 const providerSortOptions: SelectOption[] = [
   { value: '', label: '默认排序' },
   ...providerColumns.filter(column => column.sortable).map(column => ({ value: column.key, label: column.label })),

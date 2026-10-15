@@ -336,7 +336,9 @@ describe('SupplierProvidersView payload normalization', () => {
 
   it('loads masked token status and paged login history without triggering a new login', async () => {
     const wrapper = await mountSupplierProviders()
-    const loginHistoryButton = wrapper.findAll('button').find(button => button.text() === '登录记录')
+    // 按行定位而不是「全表第一个登录记录按钮」：列表默认排序一变，第一个匹配到的就换人了
+    const providerRow = wrapper.get('tbody tr[data-row-id="1"]')
+    const loginHistoryButton = providerRow.findAll('button').find(button => button.text() === '登录记录')
     expect(loginHistoryButton).toBeDefined()
 
     await loginHistoryButton!.trigger('click')
@@ -460,16 +462,18 @@ describe('SupplierProvidersView payload normalization', () => {
 
     // 页面默认选中「启用供应商」指标卡，排序断言与默认筛选无关，先按「全部」回到完整基线
     await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
-    expect(rowIds()).toEqual(['1', '2', '3'])
-
-    const todayCostHeader = wrapper.findAll('thead th').at(5)
-    await todayCostHeader.trigger('click')
-    await flushPromises()
+    // 夹具余额 1→100 / 2→20 / 3→50，默认余额升序即 2、3、1
     expect(rowIds()).toEqual(['2', '3', '1'])
 
-    await todayCostHeader.trigger('click')
+    // 换一列点：余额与今日成本的升序在夹具里恰好同序，点今日成本验不出「换列生效」
+    const nameHeader = wrapper.findAll('thead th').at(1)
+    await nameHeader.trigger('click')
     await flushPromises()
-    expect(rowIds()).toEqual(['1', '3', '2'])
+    expect(rowIds()).toEqual(['1', '2', '3'])
+
+    await nameHeader.trigger('click')
+    await flushPromises()
+    expect(rowIds()).toEqual(['3', '2', '1'])
   })
   it('filters provider rows by the selected quick filter', async () => {
     const wrapper = await mountSupplierProviders()
@@ -477,10 +481,10 @@ describe('SupplierProvidersView payload normalization', () => {
 
     // 快捷筛选与「启用供应商」指标卡是两个维度，指标卡默认已选中，先清掉再验本组按钮
     await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
-    expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(rowIds()).toEqual(['2', '3', '1'])
 
     await wrapper.get('[data-test="supplier-provider-filter-enabled"]').trigger('click')
-    expect(rowIds()).toEqual(['1', '3'])
+    expect(rowIds()).toEqual(['3', '1'])
 
     await wrapper.get('[data-test="supplier-provider-filter-disabled"]').trigger('click')
     expect(rowIds()).toEqual(['2'])
@@ -489,34 +493,34 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(rowIds()).toEqual(['3'])
 
     await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
-    expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(rowIds()).toEqual(['2', '3', '1'])
   })
 
   it('默认选中「启用供应商」指标卡，再点一次或点「全部」都能清除', async () => {
     const wrapper = await mountSupplierProviders()
     const rowIds = () => wrapper.findAll('tbody tr[data-row-id]').map(row => row.attributes('data-row-id'))
 
-    // 回归点：这张卡进页面就是选中态，列表也只留启用中的供应商
+    // 回归点：这张卡进页面就是选中态，列表也只留启用中的供应商（余额升序 ⇒ 3 在 1 前面）
     const card = wrapper.get('[data-test="supplier-provider-metric-enabled"]')
-    expect(rowIds()).toEqual(['1', '3'])
+    expect(rowIds()).toEqual(['3', '1'])
     expect(card.classes()).toContain('selected')
     expect(card.attributes('aria-pressed')).toBe('true')
 
     // 回归点：这张卡的 label 与数字都指向「启用供应商」，key 曾写成 'all'，
     // 而 filteredProviders 里没有 all 分支 ⇒ 点击是 no-op（不报错、列表一行不少）。
     await card.trigger('click')
-    expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(rowIds()).toEqual(['2', '3', '1'])
     expect(card.classes()).not.toContain('selected')
     expect(card.attributes('aria-pressed')).toBe('false')
 
     await card.trigger('click')
-    expect(rowIds()).toEqual(['1', '3'])
+    expect(rowIds()).toEqual(['3', '1'])
     expect(card.attributes('aria-pressed')).toBe('true')
 
     // 出口： 「全部」按字面意思清除全部维度。filter 只由指标卡写入，
     // 若它不清 filter，就会出现「点了全部仍是 2 个结果」的陷阱
     await wrapper.get('[data-test="supplier-provider-filter-all"]').trigger('click')
-    expect(rowIds()).toEqual(['1', '2', '3'])
+    expect(rowIds()).toEqual(['2', '3', '1'])
     expect(card.attributes('aria-pressed')).toBe('false')
   })
 
@@ -615,10 +619,9 @@ describe('SupplierProvidersView payload normalization', () => {
     })
 
     const wrapper = await mountSupplierProviders()
-    const syncButton = wrapper.findAll('button').find(button => button.text() === '同步全部')
-    expect(syncButton).toBeDefined()
+    const syncButton = wrapper.get('[data-test="supplier-provider-sync-all-1"]')
 
-    await syncButton!.trigger('click')
+    await syncButton.trigger('click')
     await flushPromises()
 
     expect(providerViewMocks.streamSupplierProviderSync).toHaveBeenCalledWith(
@@ -641,10 +644,9 @@ describe('SupplierProvidersView payload normalization', () => {
     })
 
     const wrapper = await mountSupplierProviders()
-    const syncButton = wrapper.findAll('button').find(button => button.text() === '同步全部')
-    expect(syncButton).toBeDefined()
+    const syncButton = wrapper.get('[data-test="supplier-provider-sync-all-1"]')
 
-    await syncButton!.trigger('click')
+    await syncButton.trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-test="supplier-sync-progress"]').text()).toContain('上游登录失败：打码平台超时')
     expect(wrapper.get('[data-test="supplier-sync-progress-all"]').text()).toContain('失败')
@@ -790,7 +792,7 @@ describe('SupplierProvidersView payload normalization', () => {
     }
     expect(supplierProvidersSource).toContain('server-side-sort')
     expect(supplierProvidersSource).toContain('@sort="handleProviderSort"')
-    expect(supplierProvidersSource).toContain("const providerSortKey = ref('')")
+    expect(supplierProvidersSource).toContain("const providerSortKey = ref('current_balance')")
     expect(supplierProvidersSource).toContain("const providerSortOrder = ref<'asc' | 'desc'>('asc')")
     expect(supplierProvidersSource).toContain("case 'auth_summary':")
     expect(supplierProvidersSource).toContain('numericValue(left.auth_summary?.login_count) - numericValue(right.auth_summary?.login_count)')
