@@ -41,6 +41,21 @@ export const MODEL_AUDIT_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 
  */
 export type ModelDegradationReasoningEffort = '' | (typeof MODEL_AUDIT_REASONING_EFFORTS)[number]
 
+/**
+ * 生成题单题超时的可选档位（分钟）。
+ *
+ * 只是常用值，用户可以直接输入区间内的任意整数；
+ * 区间与默认值与后端 modelDegradationRenderTaskTimeout(Min/Max) 一致，改动时要一起改。
+ */
+export const MODEL_AUDIT_RENDER_TIMEOUT_MINUTES = [5, 10, 15, 20, 30, 45, 60] as const
+
+/** 生成题单题超时的默认值（分钟），与后端 modelDegradationRenderTaskTimeout 一致。 */
+export const MODEL_AUDIT_RENDER_TIMEOUT_DEFAULT_MINUTES = 15
+
+/** 生成题单题超时的可调范围（分钟），与后端 Min/Max 一致。 */
+export const MODEL_AUDIT_RENDER_TIMEOUT_MIN_MINUTES = 1
+export const MODEL_AUDIT_RENDER_TIMEOUT_MAX_MINUTES = 60
+
 export interface ModelDegradationItem {
   task_type: ModelDegradationTaskType
   task_key: string
@@ -62,6 +77,8 @@ export interface ModelDegradationRun {
   protocol: ModelDegradationProtocol
   /** 本次检测使用的思考等级；空串表示未指定。 */
   reasoning_effort: ModelDegradationReasoningEffort
+  /** 本次检测生成题的单题超时（秒）。 */
+  render_timeout_seconds: number
   status: ModelDegradationRunStatus
   verdict: ModelDegradationVerdict
   logic_passed: number
@@ -90,6 +107,8 @@ export interface StartModelDegradationPayload {
   protocol: ModelDegradationProtocol
   /** 思考等级；不传表示不指定，由上游使用默认值。 */
   reasoning_effort?: ModelDegradationReasoningEffort
+  /** 生成题的单题超时（秒）；不传表示用服务端默认值（15 分钟）。 */
+  render_timeout_seconds?: number
   tasks?: ModelDegradationTaskType[]
   /** 本次要跑的具体题目；不传则按 tasks 跑该类型下的全部预制题。 */
   questions?: ModelDegradationQuestionPayload[]

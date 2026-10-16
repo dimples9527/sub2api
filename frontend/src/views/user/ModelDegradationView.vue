@@ -251,6 +251,20 @@
                     :searchable="false"
                   />
                 </div>
+                <div class="ma-field">
+                  <span class="ma-label">{{ t('modelDegradation.form.renderTimeout') }}</span>
+                  <Select
+                    v-model="form.renderTimeoutMinutes"
+                    :options="renderTimeoutOptions"
+                    :placeholder="t('modelDegradation.form.renderTimeoutPlaceholder')"
+                    :aria-label="t('modelDegradation.form.renderTimeout')"
+                    :disabled="renderTimeoutDisabled"
+                    searchable
+                    creatable
+                    :creatable-prefix="t('modelDegradation.form.renderTimeoutCreatablePrefix')"
+                    :search-placeholder="t('modelDegradation.form.renderTimeoutSearchPlaceholder')"
+                  />
+                </div>
               </div>
               <div class="ma-submit">
                 <button
@@ -436,6 +450,10 @@
                   <div>
                     <dt>{{ t('modelDegradation.metrics.protocol') }}</dt>
                     <dd>{{ t('modelDegradation.form.protocolLabel.' + currentRun.protocol) }}</dd>
+                  </div>
+                  <div>
+                    <dt>{{ t('modelDegradation.metrics.renderTimeout') }}</dt>
+                    <dd>{{ renderTimeoutLabel(currentRun.render_timeout_seconds) }}</dd>
                   </div>
                   <div>
                     <dt>{{ t('modelDegradation.metrics.duration') }}</dt>
@@ -944,6 +962,10 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import modelDegradationAPI, {
   MODEL_AUDIT_PROTOCOLS,
   MODEL_AUDIT_REASONING_EFFORTS,
+  MODEL_AUDIT_RENDER_TIMEOUT_DEFAULT_MINUTES,
+  MODEL_AUDIT_RENDER_TIMEOUT_MAX_MINUTES,
+  MODEL_AUDIT_RENDER_TIMEOUT_MINUTES,
+  MODEL_AUDIT_RENDER_TIMEOUT_MIN_MINUTES,
   type ModelDegradationItem,
   type ModelDegradationItemVerdict,
   type ModelDegradationProtocol,
@@ -987,22 +1009,50 @@ const credentialInputAttrs: Record<string, string> = {
 }
 
 /**
- * 上次选的模型与思考等级。
+ * 上次选的模型、思考等级与生成题超时。
  *
- * 只记这两项：凭据（Base URL / API Key）绝不落盘 —— 它们是上游密钥，
- * 本功能的前提就是「只在本次调用里用一次、服务端不保存」。而模型与思考等级
- * 是用户的偏好，每次重进页面都要重选一遍很烦。
+ * 只记这几项：凭据（Base URL / API Key）绝不落盘 —— 它们是上游密钥，
+ * 本功能的前提就是「只在本次调用里用一次、服务端不保存」。而模型、思考等级
+ * 与超时是用户的偏好，每次重进页面都要重选一遍很烦。
  */
 const LAST_SELECTION_KEY = 'model_degradation_last_selection'
 
-const readLastSelection = (): { modelId: string; reasoningEffort: ModelDegradationReasoningEffort } => {
-  const empty = { modelId: '', reasoningEffort: '' as ModelDegradationReasoningEffort }
+// 超时档位必须是区间内的整数：旧版本存下的值、或存储被改坏时的怪值一律退回默认，
+// 否则会把一个必然被后端拒绝的值填回输入框。
+const readRenderTimeoutMinutes = (raw: unknown): string => {
+  const fallback = String(MODEL_AUDIT_RENDER_TIMEOUT_DEFAULT_MINUTES)
+  if (typeof raw !== 'string') return fallback
+  const parsed = Number(raw.trim())
+  if (!Number.isInteger(parsed)) return fallback
+  if (
+    parsed < MODEL_AUDIT_RENDER_TIMEOUT_MIN_MINUTES ||
+    parsed > MODEL_AUDIT_RENDER_TIMEOUT_MAX_MINUTES
+  ) {
+    return fallback
+  }
+  return String(parsed)
+}
+
+const readLastSelection = (): {
+  modelId: string
+  reasoningEffort: ModelDegradationReasoningEffort
+  renderTimeoutMinutes: string
+} => {
+  const empty = {
+    modelId: '',
+    reasoningEffort: '' as ModelDegradationReasoningEffort,
+    renderTimeoutMinutes: String(MODEL_AUDIT_RENDER_TIMEOUT_DEFAULT_MINUTES)
+  }
   try {
     const raw = globalThis.localStorage?.getItem(LAST_SELECTION_KEY)
     if (!raw) return empty
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return empty
-    const { modelId, reasoningEffort } = parsed as { modelId?: unknown; reasoningEffort?: unknown }
+    const { modelId, reasoningEffort, renderTimeoutMinutes } = parsed as {
+      modelId?: unknown
+      reasoningEffort?: unknown
+      renderTimeoutMinutes?: unknown
+    }
     // 档位必须仍在本版枚举里：旧版本存下的值直接丢掉，
     // 否则会把一个上游不认识的参数发出去，白白换回一次 400。
     const effort =
@@ -1010,7 +1060,11 @@ const readLastSelection = (): { modelId: string; reasoningEffort: ModelDegradati
       (MODEL_AUDIT_REASONING_EFFORTS as readonly string[]).includes(reasoningEffort)
         ? (reasoningEffort as ModelDegradationReasoningEffort)
         : ''
-    return { modelId: typeof modelId === 'string' ? modelId : '', reasoningEffort: effort }
+    return {
+      modelId: typeof modelId === 'string' ? modelId : '',
+      reasoningEffort: effort,
+      renderTimeoutMinutes: readRenderTimeoutMinutes(renderTimeoutMinutes)
+    }
   } catch {
     // 存储被禁用、或内容被改坏时静默退回默认值 —— 记不住偏好不该让页面打不开。
     return empty
@@ -1027,6 +1081,9 @@ const form = reactive({
   modelId: lastSelection.modelId,
   // 空串 = 不指定，请求里不带 reasoning_effort。
   reasoningEffort: lastSelection.reasoningEffort,
+  // 生成题单题超时（分钟）。存字符串而不是数字：下拉是 creatable 的，
+  // 用户手输时输入框会经过 "1"、"15" 这类半成品，用数字存会把输入卡住。
+  renderTimeoutMinutes: lastSelection.renderTimeoutMinutes,
   // 页签单选，一轮只跑一类。默认逻辑题：它最快、结果最直观，需要时切到生成题。
   tasks: ['logic'] as ModelDegradationTaskType[]
 })
@@ -1035,7 +1092,11 @@ const persistLastSelection = () => {
   try {
     globalThis.localStorage?.setItem(
       LAST_SELECTION_KEY,
-      JSON.stringify({ modelId: form.modelId, reasoningEffort: form.reasoningEffort })
+      JSON.stringify({
+        modelId: form.modelId,
+        reasoningEffort: form.reasoningEffort,
+        renderTimeoutMinutes: form.renderTimeoutMinutes
+      })
     )
   } catch {
     // 隐私模式 / 存储被禁用：静默跳过，不影响检测本身。
@@ -1065,7 +1126,7 @@ watch(
 
 // 选择一变就记下来，下次进页面直接填好。放在协议监听之后：被协议清掉档位那一下
 // 也会落盘，正是想要的（否则下次会填回一个当前协议用不了的档位）。
-watch(() => [form.modelId, form.reasoningEffort], persistLastSelection)
+watch(() => [form.modelId, form.reasoningEffort, form.renderTimeoutMinutes], persistLastSelection)
 
 // 协议提示随协议变：追加的路径、认证头、以及哪些参数不生效都在这里说清楚。
 const protocolHint = computed(() => t(`modelDegradation.form.protocolHint.${form.protocol}`))
@@ -1078,6 +1139,15 @@ const effortOptions = computed<SelectOption[]>(() => [
     label: formatReasoningEffort(level)
   }))
 ])
+
+// 生成题超时：常用档位铺出来，同时允许手输区间内的任意整数（creatable）。
+// 档位与区间跟后端 modelDegradationRenderTaskTimeout(Min/Max) 同源。
+const renderTimeoutOptions = computed<SelectOption[]>(() =>
+  MODEL_AUDIT_RENDER_TIMEOUT_MINUTES.map((minutes) => ({
+    value: String(minutes),
+    label: t('modelDegradation.form.renderTimeoutUnit', { minutes })
+  }))
+)
 
 const running = ref(false)
 const currentRun = ref<ModelDegradationRun | null>(null)
@@ -1249,6 +1319,10 @@ const fetchModelsDisabled = computed(() => loadingModels.value || busy.value || 
 // Anthropic Messages 不接受 reasoning_effort（它用 thinking.budget_tokens），
 // 该档位对它是无效参数，因此置灰而不是让它看着能设。
 const reasoningEffortDisabled = computed(() => busy.value || form.protocol === 'messages')
+
+// 生成题超时只对生成题生效：逻辑题的回答只有一句话，单题预算固定 60s。
+// 当前页签是逻辑题时置灰而不是隐藏 —— 藏在页签后面会让人以为这个设置不存在。
+const renderTimeoutDisabled = computed(() => busy.value || !form.tasks.includes('render'))
 
 const modelPlaceholder = computed(() => {
   if (loadingModels.value) return `${t('common.loading')}...`
@@ -2047,6 +2121,11 @@ const formatDuration = (ms: number) => {
   return `${(ms / 1000).toFixed(1)} s`
 }
 
+// 结果面板里的「生成题超时」。库里存的是秒，界面上按分钟说 ——
+// 下拉本身就是分钟粒度，回显成 900 秒反而要用户自己换算。
+const renderTimeoutLabel = (seconds: number) =>
+  t('modelDegradation.form.renderTimeoutUnit', { minutes: Math.round(seconds / 60) })
+
 const itemBadgeClass = (item: ModelDegradationItem) => {
   if (item.verdict === 'ok') return 'is-ok'
   if (item.verdict === 'degraded') return 'is-degraded'
@@ -2062,7 +2141,7 @@ const itemBadgeLabel = (item: ModelDegradationItem) => {
 }
 
 // 运行中的进度：已到题目数 / 本次提交的总题数。
-// 不再逐题铺卡片 —— 单轮最长 10 分钟，用户要看的是「还要等多久、能不能停」。
+// 不再逐题铺卡片 —— 生成题单轮能跑十几分钟（超时可调），用户要看的是「还要等多久、能不能停」。
 const progressTotal = computed(() => pendingQuestions.value.length)
 const arrivedCount = computed(() => {
   const items = currentRun.value?.items ?? []
@@ -2201,6 +2280,24 @@ const handleStart = async () => {
     appStore.showError(t('modelDegradation.errors.needTask'))
     return
   }
+  // 生成题超时是 creatable 下拉，用户能输入任意字符串：先在本地说清哪不对，
+  // 别让它变成一个看起来像上游故障的 400。只跑逻辑题时这项不生效，也就不校验。
+  const needsRender = form.tasks.includes('render')
+  const renderTimeoutMinutes = Number(form.renderTimeoutMinutes)
+  if (
+    needsRender &&
+    (!Number.isInteger(renderTimeoutMinutes) ||
+      renderTimeoutMinutes < MODEL_AUDIT_RENDER_TIMEOUT_MIN_MINUTES ||
+      renderTimeoutMinutes > MODEL_AUDIT_RENDER_TIMEOUT_MAX_MINUTES)
+  ) {
+    appStore.showError(
+      t('modelDegradation.errors.needRenderTimeout', {
+        min: MODEL_AUDIT_RENDER_TIMEOUT_MIN_MINUTES,
+        max: MODEL_AUDIT_RENDER_TIMEOUT_MAX_MINUTES
+      })
+    )
+    return
+  }
   if (selectedQuestions.value.length === 0) {
     appStore.showError(t('modelDegradation.errors.needQuestion'))
     return
@@ -2231,6 +2328,8 @@ const handleStart = async () => {
       protocol: form.protocol,
       // 不指定时不带该字段，避免把「上游不支持」变成一次 400。
       reasoning_effort: form.reasoningEffort || undefined,
+      // 只跑逻辑题时不带：这项对逻辑题不生效，写进记录里只会是噪音。
+      render_timeout_seconds: needsRender ? renderTimeoutMinutes * 60 : undefined,
       tasks: form.tasks,
       questions
     })
@@ -2928,15 +3027,18 @@ onUnmounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px 16px;
-  /* 三个下拉加两个按钮在窄卡片里放不下：允许换行，别把按钮挤到卡片外面。 */
+  /* 四个下拉加两个按钮在窄卡片里放不下：允许换行，别把按钮挤到卡片外面。 */
   flex-wrap: wrap;
 }
 
 .ma-selects {
   display: grid;
-  /* 三个下拉的宽度上限。用 minmax 而不是固定值：卡片在 1101px 附近最窄，
-     固定宽会整块溢出（flex-wrap 只能挪整块，救不了比一行还宽的单个元素）。 */
-  grid-template-columns: minmax(0, 174px) minmax(0, 160px) minmax(0, 130px);
+  /* 四个下拉的宽度上限。用 minmax 而不是固定值：卡片在 1101px 附近最窄，
+     固定宽会整块溢出（flex-wrap 只能挪整块，救不了比一行还宽的单个元素）。
+     上限整体收窄过一轮：多了「生成题超时」这一列后，四个下拉的总宽一旦超过
+     卡片内容宽，flex 换行会把两个按钮整块挤到下一行（换行按「不收缩的假设宽度」
+     判定，跟能不能挤下无关）。收窄后仍保持原有的换行时机。 */
+  grid-template-columns: minmax(0, 158px) minmax(0, 152px) minmax(0, 104px) minmax(0, 96px);
   gap: 10px;
 }
 
@@ -4778,7 +4880,7 @@ onUnmounted(() => {
   }
 
   .ma-selects {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .ma-submit {

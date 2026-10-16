@@ -33,9 +33,11 @@ type modelDegradationStartRequest struct {
 	APIKey  string `json:"api_key" binding:"required"`
 	ModelID string `json:"model_id" binding:"required"`
 	// Protocol 上游协议；不传按 chat_completions 处理。
-	Protocol        string   `json:"protocol"`
-	ReasoningEffort string   `json:"reasoning_effort"`
-	Tasks           []string `json:"tasks"`
+	Protocol        string `json:"protocol"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	// RenderTimeoutSeconds 生成题的单题超时（秒）；不传或 0 用服务端默认值（15 分钟）。
+	RenderTimeoutSeconds int      `json:"render_timeout_seconds"`
+	Tasks                []string `json:"tasks"`
 	// Questions 本次要跑的具体题目。不传则按 Tasks 跑该类型下的全部预制题。
 	Questions []modelDegradationQuestionRequest `json:"questions"`
 }
@@ -89,18 +91,20 @@ type modelDegradationRunResponse struct {
 	BaseURL string `json:"base_url"`
 	ModelID string `json:"model_id"`
 	// Protocol 本次检测使用的上游协议。
-	Protocol        string                         `json:"protocol"`
-	ReasoningEffort string                         `json:"reasoning_effort"`
-	Status          string                         `json:"status"`
-	Verdict         string                         `json:"verdict"`
-	LogicPassed     int                            `json:"logic_passed"`
-	LogicTotal      int                            `json:"logic_total"`
-	RenderVerdict   string                         `json:"render_verdict"`
-	ErrorMessage    string                         `json:"error_message"`
-	DurationMs      int                            `json:"duration_ms"`
-	CreatedAt       time.Time                      `json:"created_at"`
-	CompletedAt     *time.Time                     `json:"completed_at,omitempty"`
-	Items           []modelDegradationItemResponse `json:"items,omitempty"`
+	Protocol        string `json:"protocol"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	// RenderTimeoutSeconds 本次检测生成题的单题超时（秒）。
+	RenderTimeoutSeconds int                            `json:"render_timeout_seconds"`
+	Status               string                         `json:"status"`
+	Verdict              string                         `json:"verdict"`
+	LogicPassed          int                            `json:"logic_passed"`
+	LogicTotal           int                            `json:"logic_total"`
+	RenderVerdict        string                         `json:"render_verdict"`
+	ErrorMessage         string                         `json:"error_message"`
+	DurationMs           int                            `json:"duration_ms"`
+	CreatedAt            time.Time                      `json:"created_at"`
+	CompletedAt          *time.Time                     `json:"completed_at,omitempty"`
+	Items                []modelDegradationItemResponse `json:"items,omitempty"`
 	// 共享历史：所有人的检测记录都在同一个池子里，因此需要标出「是谁跑的」。
 	// 邮箱一律脱敏，只保留首字符与域名。
 	OwnerEmail string `json:"owner_email"`
@@ -129,13 +133,14 @@ func (h *ModelDegradationHandler) Start(c *gin.Context) {
 	}
 
 	run, err := h.auditService.Start(c.Request.Context(), subject.UserID, service.ModelDegradationInput{
-		BaseURL:         req.BaseURL,
-		APIKey:          req.APIKey,
-		ModelID:         req.ModelID,
-		Protocol:        req.Protocol,
-		ReasoningEffort: req.ReasoningEffort,
-		Tasks:           req.Tasks,
-		Questions:       modelDegradationQuestionsFromRequest(req.Questions),
+		BaseURL:              req.BaseURL,
+		APIKey:               req.APIKey,
+		ModelID:              req.ModelID,
+		Protocol:             req.Protocol,
+		ReasoningEffort:      req.ReasoningEffort,
+		RenderTimeoutSeconds: req.RenderTimeoutSeconds,
+		Tasks:                req.Tasks,
+		Questions:            modelDegradationQuestionsFromRequest(req.Questions),
 	})
 	if err != nil {
 		// 同一用户已有检测在执行：这是并发冲突，不是参数错误，用 409 区分开。
@@ -327,24 +332,25 @@ func modelDegradationRunToResponse(run *service.ModelDegradationRun, viewerID in
 		baseURL = maskBaseURL(run.BaseURL)
 	}
 	resp := modelDegradationRunResponse{
-		ID:              run.ID,
-		BaseURL:         baseURL,
-		ModelID:         run.ModelID,
-		Protocol:        run.Protocol,
-		ReasoningEffort: run.ReasoningEffort,
-		Status:          run.Status,
-		Verdict:         run.Verdict,
-		LogicPassed:     run.LogicPassed,
-		LogicTotal:      run.LogicTotal,
-		RenderVerdict:   run.RenderVerdict,
-		ErrorMessage:    run.ErrorMessage,
-		DurationMs:      run.DurationMs,
-		CreatedAt:       run.CreatedAt,
-		CompletedAt:     run.CompletedAt,
-		OwnerEmail:      maskEmail(run.OwnerEmail),
-		GroupID:         run.GroupID,
-		GroupName:       run.GroupName,
-		IsOwner:         isOwner,
+		ID:                   run.ID,
+		BaseURL:              baseURL,
+		ModelID:              run.ModelID,
+		Protocol:             run.Protocol,
+		ReasoningEffort:      run.ReasoningEffort,
+		RenderTimeoutSeconds: run.RenderTimeoutSeconds,
+		Status:               run.Status,
+		Verdict:              run.Verdict,
+		LogicPassed:          run.LogicPassed,
+		LogicTotal:           run.LogicTotal,
+		RenderVerdict:        run.RenderVerdict,
+		ErrorMessage:         run.ErrorMessage,
+		DurationMs:           run.DurationMs,
+		CreatedAt:            run.CreatedAt,
+		CompletedAt:          run.CompletedAt,
+		OwnerEmail:           maskEmail(run.OwnerEmail),
+		GroupID:              run.GroupID,
+		GroupName:            run.GroupName,
+		IsOwner:              isOwner,
 	}
 	if !withItems || len(run.Items) == 0 {
 		return resp

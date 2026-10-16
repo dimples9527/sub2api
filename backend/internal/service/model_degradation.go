@@ -21,8 +21,8 @@ const (
 // ErrModelDegradationRunInProgress 该用户已有一轮检测在执行。
 //
 // 执行名额是进程级共享的（modelDegradationMaxConcurrent），而单轮最长能占用它
-// modelDegradationTotalTimeout；不拦并发提交的话，多出来的请求不会失败，而是变成
-// 无上限的 goroutine 排队 —— 每个排队协程还攥着用户提交的 API Key。
+// 约 62 分钟（生成题超时上限 60 分钟 + 逻辑题 60s + 收尾余量）；不拦并发提交的话，
+// 多出来的请求不会失败，而是变成无上限的 goroutine 排队 —— 每个排队协程还攥着用户提交的 API Key。
 var ErrModelDegradationRunInProgress = errors.New("已有一轮检测正在进行，请等它结束后再发起")
 
 // ErrModelDegradationRunNotCancellable 要中止的检测已经不在运行中。
@@ -117,16 +117,19 @@ type ModelDegradationRun struct {
 	// ReasoningEffort 本次检测使用的思考等级；空串表示未指定。
 	// 取值见 modelDegradationReasoningEfforts。
 	ReasoningEffort string
-	Status          string
-	Verdict         string
-	LogicPassed     int
-	LogicTotal      int
-	RenderVerdict   string
-	ErrorMessage    string
-	DurationMs      int
-	CreatedAt       time.Time
-	CompletedAt     *time.Time
-	Items           []ModelDegradationItem
+	// RenderTimeoutSeconds 本次检测生成题的单题超时（秒）。0 表示调用方没指定、按默认值处理。
+	// 取值范围见 modelDegradationRenderTaskTimeoutMin/Max。
+	RenderTimeoutSeconds int
+	Status               string
+	Verdict              string
+	LogicPassed          int
+	LogicTotal           int
+	RenderVerdict        string
+	ErrorMessage         string
+	DurationMs           int
+	CreatedAt            time.Time
+	CompletedAt          *time.Time
+	Items                []ModelDegradationItem
 }
 
 // ModelDegradationItem 单道题的检测明细。
@@ -181,6 +184,9 @@ type ModelDegradationInput struct {
 	// ReasoningEffort 思考等级；留空表示请求里不带该字段。
 	// 取值见 modelDegradationReasoningEfforts，非法值会被拒绝。
 	ReasoningEffort string
+	// RenderTimeoutSeconds 生成题的单题超时（秒）；0 或负数表示用默认值。
+	// 超出 modelDegradationRenderTaskTimeoutMin/Max 会被拒绝。
+	RenderTimeoutSeconds int
 	// Tasks 指定要跑的检测项，为空表示全部。取值见 ModelDegradationTaskLogic / ModelDegradationTaskRender。
 	// 仅在 Questions 为空时生效 —— 那时每个选中的类型跑它的第一道预制题（老调用方的行为）。
 	Tasks []string
@@ -188,6 +194,11 @@ type ModelDegradationInput struct {
 	// 非空时以它为准，Tasks 被忽略。数量上限见 modelDegradationMaxLogicQuestions /
 	// modelDegradationMaxRenderQuestions。
 	Questions []ModelDegradationQuestion
+}
+
+// renderTimeout 本次检测生成题的单题超时。未指定时落到默认值。
+func (in ModelDegradationInput) renderTimeout() time.Duration {
+	return modelDegradationRenderTimeout(in.RenderTimeoutSeconds)
 }
 
 // ModelDegradationRepository 检测记录的持久化接口。
@@ -202,13 +213,18 @@ type ModelDegradationRepository interface {
 	// CountSourceHash 统计该源码指纹在历史记录中已出现的次数，用于识别
 	// 「多次检测返回同一份源码」。返回 0 表示这是首次出现。
 	CountSourceHash(ctx context.Context, hash string) (int, error)
-	// MarkStaleRunsFailed 把超时仍停留在 running 的任务标记为失败。
+	// MarkStaleRunsFailed 把超出各自有效期仍停留在 running 的任务标记为失败。
 	// 进程重启会让内存中的执行协程消失，没有这一步这些记录会永远卡在 running。
-	MarkStaleRunsFailed(ctx context.Context, startedBefore time.Time) error
+	//
+	// 有效期逐行算：该行的 render_timeout_seconds + baseSeconds。baseSeconds 是
+	// 「与生成题超时无关的那部分预算」（逻辑题预算 + 收尾余量 + 宽限期，见
+	// modelDegradationStaleBaseSeconds）—— 传一个统一的时间点做不到这一点，
+	// 会让选了长超时的轮次被提前判失败。
+	MarkStaleRunsFailed(ctx context.Context, baseSeconds int) error
 	// HasActiveRun 判断该用户是否有仍在有效期内的执行中任务。
-	// createdAfter 之前的 running 行视为进程重启的残留、不算占用名额，
-	// 否则一次异常退出就会把该用户永久锁死。
-	HasActiveRun(ctx context.Context, userID int64, createdAfter time.Time) (bool, error)
+	// 超出各自有效期的 running 行视为进程重启的残留、不算占用名额，
+	// 否则一次异常退出就会把该用户永久锁死。有效期口径同 MarkStaleRunsFailed。
+	HasActiveRun(ctx context.Context, userID int64, baseSeconds int) (bool, error)
 	// MarkRunCancelled 把指定检测标记为用户中止。
 	// 第二个返回值表示这行是不是「属于自己的、仍在 running」——false 说明
 	// 它已经完结或已被中止过，调用方应据此回绝，不要重复更新。

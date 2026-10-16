@@ -21,6 +21,7 @@ func NewModelDegradationRepository(db *sql.DB) service.ModelDegradationRepositor
 
 // 带 `r.` 前缀：读历史要 LEFT JOIN users 带出发起者邮箱，不带前缀 id 会二义。
 const modelDegradationRunColumns = `r.id, r.user_id, r.base_url, r.model_id, r.protocol, r.reasoning_effort,
+       r.render_timeout_seconds,
        r.status, r.verdict, r.logic_passed, r.logic_total, r.render_verdict, r.error_message,
        r.duration_ms, r.created_at, r.completed_at, r.group_id, r.group_name`
 
@@ -41,9 +42,10 @@ func (r *modelDegradationRepository) CreateRun(ctx context.Context, run *service
 
 	query := `
 INSERT INTO model_audit_runs
-    (user_id, base_url, model_id, protocol, reasoning_effort, status, verdict, logic_passed, logic_total,
+    (user_id, base_url, model_id, protocol, reasoning_effort, render_timeout_seconds,
+     status, verdict, logic_passed, logic_total,
      render_verdict, error_message, duration_ms, group_id, group_name)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING id, created_at`
 
 	return r.db.QueryRowContext(ctx, query,
@@ -52,6 +54,7 @@ RETURNING id, created_at`
 		run.ModelID,
 		run.Protocol,
 		run.ReasoningEffort,
+		run.RenderTimeoutSeconds,
 		run.Status,
 		run.Verdict,
 		run.LogicPassed,
@@ -162,6 +165,7 @@ func (r *modelDegradationRepository) GetRun(ctx context.Context, runID int64) (*
 		&run.ModelID,
 		&run.Protocol,
 		&run.ReasoningEffort,
+		&run.RenderTimeoutSeconds,
 		&run.Status,
 		&run.Verdict,
 		&run.LogicPassed,
@@ -225,6 +229,7 @@ LIMIT $1`,
 			&run.ModelID,
 			&run.Protocol,
 			&run.ReasoningEffort,
+			&run.RenderTimeoutSeconds,
 			&run.Status,
 			&run.Verdict,
 			&run.LogicPassed,
@@ -396,7 +401,12 @@ func (r *modelDegradationRepository) CountSourceHash(ctx context.Context, hash s
 	return count, nil
 }
 
-func (r *modelDegradationRepository) MarkStaleRunsFailed(ctx context.Context, startedBefore time.Time) error {
+// MarkStaleRunsFailed 逐行按各自的超时窗口判断失效。
+//
+// 不能传一个统一的时间点：生成题单题超时是可调的（1~60 分钟），
+// 用统一时间点意味着只能按最长的那档算 —— 选了 5 分钟超时的记录要白等一小时才被标失败。
+// 这里让每行拿自己的 render_timeout_seconds 加基数比。
+func (r *modelDegradationRepository) MarkStaleRunsFailed(ctx context.Context, baseSeconds int) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -406,11 +416,12 @@ UPDATE model_audit_runs
 SET status = $1,
     error_message = $2,
     completed_at = NOW()
-WHERE status = $3 AND created_at < $4`,
+WHERE status = $3
+  AND created_at < NOW() - make_interval(secs => render_timeout_seconds + $4)`,
 		service.ModelDegradationStatusFailed,
 		"检测超时或服务重启导致中断",
 		service.ModelDegradationStatusRunning,
-		startedBefore,
+		baseSeconds,
 	)
 	if err != nil {
 		return fmt.Errorf("mark stale model audit runs failed: %w", err)
@@ -418,22 +429,26 @@ WHERE status = $3 AND created_at < $4`,
 	return nil
 }
 
-func (r *modelDegradationRepository) HasActiveRun(ctx context.Context, userID int64, createdAfter time.Time) (bool, error) {
+// HasActiveRun 判断该用户是否有仍在有效期内的执行中任务，口径与 MarkStaleRunsFailed 一致：
+// 逐行按各自的 render_timeout_seconds + baseSeconds 算窗口。
+//
+// 走 idx_model_audit_runs_user_created，先按用户收敛；窗口右端依赖行内列、不是常量，
+// 因此 created_at 上剩下的比较只能逐行做 —— 单个用户的记录很少，代价可忽略。
+func (r *modelDegradationRepository) HasActiveRun(ctx context.Context, userID int64, baseSeconds int) (bool, error) {
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("model audit repository database is not initialized")
 	}
 
-	// 走 idx_model_audit_runs_user_created，先按用户收敛再比时间；
-	// 单个用户的记录很少，status 不建索引也无所谓。
 	var exists bool
 	if err := r.db.QueryRowContext(ctx, `
 SELECT EXISTS (
     SELECT 1 FROM model_audit_runs
-    WHERE user_id = $1 AND status = $2 AND created_at > $3
+    WHERE user_id = $1 AND status = $2
+      AND created_at > NOW() - make_interval(secs => render_timeout_seconds + $3)
 )`,
 		userID,
 		service.ModelDegradationStatusRunning,
-		createdAfter,
+		baseSeconds,
 	).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check active model audit run: %w", err)
 	}

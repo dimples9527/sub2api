@@ -22,14 +22,23 @@ import (
 const (
 	// 逻辑题的单题超时。回答只有一句话，60s 足够。
 	modelDegradationPerTaskTimeout = 60 * time.Second
-	// 生成题的单题超时。这题要吐一整个 HTML 文档，实测上游 60s 根本出不来，
-	// 给到 6 分钟才保险。
-	modelDegradationRenderTaskTimeout = 6 * time.Minute
-	// 单次检测的整体上限 = 1 道逻辑题 + 1 道生成题（每类各一道，见
-	// modelDegradationMaxLogicQuestions / modelDegradationMaxRenderQuestions），
-	// 再加 1 分钟收尾余量。必须严格大于各题上限之和，否则生成题
-	// 会被整体上限提前掐断。
-	modelDegradationTotalTimeout = modelDegradationPerTaskTimeout + modelDegradationRenderTaskTimeout + time.Minute
+	// 生成题的单题超时默认值。这题要吐一整个 HTML 文档（实测成品 10~14KB），
+	// 上游慢起来远超预期：生产实测同一道题在 codex 系路由上要 354.9s，
+	// 另两次直接撞满当时 6 分钟的上限被掐断；而同一模型在非 codex 分组
+	// 只要 83~118s —— 这是上游路由速度差异，不是故障。
+	//
+	// 15 分钟是默认值，用户可在发起检测时按需调整（见下面的 Min/Max），
+	// 让慢路由也能跑完，而不是把它误判成「上游超时」。
+	modelDegradationRenderTaskTimeout = 15 * time.Minute
+	// 生成题单题超时的可调范围。
+	// 下限 1 分钟：比逻辑题的 60s 还短没有意义；上限 60 分钟：再长一轮检测就占用太久，
+	// 用户等不下去，执行名额也被压住。
+	modelDegradationRenderTaskTimeoutMin = time.Minute
+	modelDegradationRenderTaskTimeoutMax = 60 * time.Minute
+	// 失效窗口里「与生成题超时无关」的那部分秒数 = 逻辑题预算 + 收尾余量 + 宽限期。
+	// 每轮检测的失效窗口 = 该轮自己的 render_timeout_seconds + 这个基数 —— 逐行算，
+	// 选了 60 分钟的轮次才不会被按 15 分钟的窗口提前判失败。
+	modelDegradationStaleBaseSeconds = int((modelDegradationPerTaskTimeout + time.Minute + modelDegradationStaleGrace) / time.Second)
 	// 同时执行的检测任务数上限，避免批量发起打满上游与本地连接。
 	modelDegradationMaxConcurrent = 4
 	// 上游响应体读取上限，防止异常上游返回超大内容拖垮内存。
@@ -61,6 +70,38 @@ const (
 	// 模型列表路径。OpenAI 与 Anthropic 都是 {base}/v1/models。
 	modelDegradationModelsPath = "/models"
 )
+
+// modelDegradationRunTotalTimeout 一轮检测的整体上限：逻辑题预算 + 该轮的生成题超时 + 收尾余量。
+// 必须严格大于各题上限之和，否则生成题会被整体上限提前掐断。
+func modelDegradationRunTotalTimeout(renderTimeout time.Duration) time.Duration {
+	return modelDegradationPerTaskTimeout + renderTimeout + time.Minute
+}
+
+// modelDegradationRenderTimeout 把入参里的秒数解析成实际要用的单题超时。
+// 未指定（<=0）落到默认值；这里的兜底只为容错，正常入参已由
+// normalizeModelDegradationRenderTimeout 校验过。
+func modelDegradationRenderTimeout(seconds int) time.Duration {
+	if seconds <= 0 {
+		return modelDegradationRenderTaskTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// normalizeModelDegradationRenderTimeout 校验并归一化生成题的单题超时（秒）。
+//
+// 未指定（<=0）落到默认值；超出可调范围直接拒绝 —— 放行一个离谱的值只会让用户
+// 白等一轮，或者干脆在整体上限之外被掐断，两种都比一个明确的 400 差。
+func normalizeModelDegradationRenderTimeout(seconds int) (int, error) {
+	if seconds <= 0 {
+		return int(modelDegradationRenderTaskTimeout / time.Second), nil
+	}
+	minSeconds := int(modelDegradationRenderTaskTimeoutMin / time.Second)
+	maxSeconds := int(modelDegradationRenderTaskTimeoutMax / time.Second)
+	if seconds < minSeconds || seconds > maxSeconds {
+		return 0, fmt.Errorf("生成题超时需在 %d~%d 分钟之间", minSeconds/60, maxSeconds/60)
+	}
+	return seconds, nil
+}
 
 // modelDegradationTerminalPaths 已知的终端路径，用来剥掉用户可能直接粘进来的完整端点。
 // 顺序无关：这几个后缀互不为前缀。
@@ -155,13 +196,14 @@ func (s *ModelDegradationService) Start(ctx context.Context, userID int64, input
 	// 同一用户同一时间只允许一轮检测。
 	//
 	// 执行名额（modelDegradationMaxConcurrent）是进程级共享的，而单轮最长能占用它
-	// modelDegradationTotalTimeout；放开并发提交的话，多出来的请求不会失败，而是变成
-	// 无上限的 goroutine 排队（每个排队协程还攥着用户提交的 API Key）。
+	// 约 62 分钟（生成题超时上限 60 分钟 + 逻辑题 60s + 收尾余量）；放开并发提交的话，
+	// 多出来的请求不会失败，而是变成无上限的 goroutine 排队（每个排队协程还攥着用户提交的 API Key）。
 	//
 	// 只看「有效期内的」running：进程上次异常退出留下的行不算占用，否则一次崩溃
-	// 就会把该用户永久锁死。这里没有事务，两个同时到达的请求理论上可能都通过检查
-	// —— 代价只是退回「两轮并行」，比加唯一索引动迁移划算。
-	active, err := s.repo.HasActiveRun(ctx, userID, time.Now().Add(-(modelDegradationTotalTimeout + modelDegradationStaleGrace)))
+	// 就会把该用户永久锁死。有效期逐行按该轮自己的生成题超时算（见仓储实现），
+	// 所以这里只需要给出与超时无关的基数。这里没有事务，两个同时到达的请求理论上
+	// 可能都通过检查 —— 代价只是退回「两轮并行」，比加唯一索引动迁移划算。
+	active, err := s.repo.HasActiveRun(ctx, userID, modelDegradationStaleBaseSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +212,14 @@ func (s *ModelDegradationService) Start(ctx context.Context, userID int64, input
 	}
 
 	run := &ModelDegradationRun{
-		UserID:          userID,
-		BaseURL:         normalized.BaseURL,
-		ModelID:         normalized.ModelID,
-		Protocol:        normalized.Protocol,
-		ReasoningEffort: normalized.ReasoningEffort,
-		Status:          ModelDegradationStatusRunning,
-		Verdict:         ModelDegradationVerdictUnknown,
+		UserID:               userID,
+		BaseURL:              normalized.BaseURL,
+		ModelID:              normalized.ModelID,
+		Protocol:             normalized.Protocol,
+		ReasoningEffort:      normalized.ReasoningEffort,
+		RenderTimeoutSeconds: normalized.RenderTimeoutSeconds,
+		Status:               ModelDegradationStatusRunning,
+		Verdict:              ModelDegradationVerdictUnknown,
 	}
 	// 识别这次检测是不是在测平台自身链路：填的 Key 若命中发起者本人名下的平台 Key，
 	// 就记下它绑定的分组 —— 分组决定了平台会把它转发到哪些渠道，是事后归因的关键维度。
@@ -208,8 +251,10 @@ func (s *ModelDegradationService) Get(ctx context.Context, runID int64) (*ModelD
 
 	// 进程重启会让执行协程消失，这类记录会永远停在 running。
 	// 读取时兜底标记，避免前端一直转圈。
-	if run.Status == ModelDegradationStatusRunning && time.Since(run.CreatedAt) > modelDegradationTotalTimeout+modelDegradationStaleGrace {
-		if err := s.repo.MarkStaleRunsFailed(ctx, time.Now().Add(-(modelDegradationTotalTimeout + modelDegradationStaleGrace))); err != nil {
+	// 有效期按这一行自己的生成题超时算：读出来的是它发起时的取值，不是当前默认值。
+	runTotal := modelDegradationRunTotalTimeout(modelDegradationRenderTimeout(run.RenderTimeoutSeconds)) + modelDegradationStaleGrace
+	if run.Status == ModelDegradationStatusRunning && time.Since(run.CreatedAt) > runTotal {
+		if err := s.repo.MarkStaleRunsFailed(ctx, modelDegradationStaleBaseSeconds); err != nil {
 			logger.FromContext(ctx).Warn("model_degradation.mark_stale_failed", zap.Error(err))
 		}
 		run.Status = ModelDegradationStatusFailed
@@ -309,6 +354,11 @@ func (s *ModelDegradationService) validateInput(input ModelDegradationInput) (Mo
 		return ModelDegradationInput{}, err
 	}
 
+	renderTimeout, err := normalizeModelDegradationRenderTimeout(input.RenderTimeoutSeconds)
+	if err != nil {
+		return ModelDegradationInput{}, err
+	}
+
 	// 题目在入参校验阶段就定下来：这样「题号不存在 / 没填期望答案」这类错误
 	// 会在建 run 记录之前以 400 返回，而不是变成一个跑完才发现失败的记录。
 	questions, err := resolveModelDegradationQuestions(input.Tasks, input.Questions)
@@ -317,13 +367,14 @@ func (s *ModelDegradationService) validateInput(input ModelDegradationInput) (Mo
 	}
 
 	return ModelDegradationInput{
-		BaseURL:         baseURL,
-		APIKey:          apiKey,
-		ModelID:         modelID,
-		Protocol:        protocol,
-		ReasoningEffort: effort,
-		Tasks:           input.Tasks,
-		Questions:       questions,
+		BaseURL:              baseURL,
+		APIKey:               apiKey,
+		ModelID:              modelID,
+		Protocol:             protocol,
+		ReasoningEffort:      effort,
+		RenderTimeoutSeconds: renderTimeout,
+		Tasks:                input.Tasks,
+		Questions:            questions,
 	}, nil
 }
 
@@ -350,7 +401,7 @@ func (s *ModelDegradationService) execute(ctx context.Context, run *ModelDegrada
 	s.sem <- struct{}{}
 	defer func() { <-s.sem }()
 
-	ctx, cancel := context.WithTimeout(ctx, modelDegradationTotalTimeout)
+	ctx, cancel := context.WithTimeout(ctx, modelDegradationRunTotalTimeout(input.renderTimeout()))
 	defer cancel()
 
 	// 再包一层可取消的 ctx 并登记，用户按「停止」时能在下一道题之前收尾。
@@ -450,7 +501,7 @@ func (s *ModelDegradationService) runLogicTask(ctx context.Context, input ModelD
 
 	started := time.Now()
 	// 走带重试的调用：上游瞬时失败（连接被掐断、网关 502/524）不该被算成这一轮的检测结果。
-	// 重试共用单题预算，不会把总耗时撑到 modelDegradationTotalTimeout 之外。
+	// 重试共用单题预算，不会把总耗时撑到整体上限（modelDegradationRunTotalTimeout）之外。
 	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, modelDegradationPerTaskTimeout)
 	item.DurationMs = int(time.Since(started).Milliseconds())
 
@@ -481,9 +532,10 @@ func (s *ModelDegradationService) runRenderTask(ctx context.Context, input Model
 	}
 
 	started := time.Now()
-	// 生成题最容易撞上「连接被 idle timeout 掐断」：单题预算 6 分钟且输出很长。
-	// responses 协议已改走流式（边生成边吐帧），这里再叠一层重试兜住偶发中断。
-	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, modelDegradationRenderTaskTimeout)
+	// 生成题最容易撞上「连接被 idle timeout 掐断」：单题预算长（默认 15 分钟、可调到 60 分钟）
+	// 且输出很长。responses 协议已改走流式（边生成边吐帧），这里再叠一层重试兜住偶发中断。
+	// ⚠️ 重试兜不住「上游就是慢到超时」：首次尝试就拿满全部预算，超时后没有剩余可重试。
+	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, input.renderTimeout())
 	item.DurationMs = int(time.Since(started).Milliseconds())
 
 	if err != nil {
@@ -555,7 +607,7 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 		terminalPath = modelDegradationResponsesPath
 		headers["Authorization"] = "Bearer " + input.APIKey
 		// responses 走流式，而不是等上游一次性吐完：
-		// 生成题最多要等 modelDegradationRenderTaskTimeout（6 分钟），非流式期间连接
+		// 生成题最多要等 modelDegradationRenderTaskTimeout（默认 15 分钟，可调到 60 分钟），非流式期间连接
 		// 没有任何数据流动，中间任何反代 / CDN / 网关的 idle timeout 都会把它掐断，
 		// 表现为 HTTP/2 stream 被重置。流式边生成边吐帧，连接始终有流量。
 		headers["Accept"] = "text/event-stream"

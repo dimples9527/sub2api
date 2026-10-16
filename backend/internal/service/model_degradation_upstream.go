@@ -346,8 +346,12 @@ func modelDegradationRetryable(err error) bool {
 //
 // 关键约束：**重试不延长总预算**。attempt 0 用完整 timeout，之后的每次尝试只拿到
 // 「剩余预算」（deadline - now）。否则「重试 2 次」会让单题最长耗时变成 3 倍，
-// 一轮检测（逻辑题 60s + 生成题 6min）就会突破 modelDegradationTotalTimeout，
+// 一轮检测（逻辑题 60s + 生成题最长 60min）就会突破单轮整体上限，
 // 被整体超时掐断 —— 那比不重试更糟。
+//
+// ⚠️ 这个约束有个必然副作用：单题预算被首次尝试整段吃满的失败（典型就是生成题
+// 慢到超时）**永远不会触发重试** —— 超时回来时 remaining 已≈0。重试只兜得住
+// 「几秒内就失败」的错（502/524/连接被掐）。别指望它救「上游太慢」。
 //
 // 退避期间响应 ctx 取消：用户按「停止」时不必等完退避。
 func (s *ModelDegradationService) callUpstreamWithRetry(
@@ -394,7 +398,7 @@ func (s *ModelDegradationService) callUpstreamWithRetry(
 // extractModelDegradationResponsesStream 解析 responses 协议的 SSE 流。
 //
 // 为什么 responses 要走流式：非流式时客户端要一直 hold 住连接等上游一次性吐完，
-// 生成题最多要等 6 分钟，中间任何反代 / CDN / 网关的 idle timeout 都会把连接掐断
+// 生成题最多要等 15~60 分钟（用户可调），中间任何反代 / CDN / 网关的 idle timeout 都会把连接掐断
 // （表现为 HTTP/2 stream 被重置）。流式是边生成边吐帧，连接始终有流量，
 // 不会被 idle 判定掐断，长输出的成功率明显更高。
 //

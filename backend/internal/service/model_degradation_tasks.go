@@ -94,7 +94,7 @@ const modelDegradationCustomKey = "custom"
 // 每轮检测各类型最多能跑几道题。
 //
 // 单选：逻辑题与生成题在一轮里都只跑一道。这两个上限不是为了好看：
-// 单轮的整体超时是按「各题上限之和」推导出来的（见 modelDegradationTotalTimeout），
+// 单轮的整体超时是按「各题上限之和」推导出来的（见 modelDegradationRunTotalTimeout），
 // 放开数量会让它失效。题库里两类目前各只有一道预制题，前端单选呈现。
 const (
 	modelDegradationMaxLogicQuestions  = 1
