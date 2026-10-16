@@ -80,8 +80,6 @@ export default {
       deleteAccount: 'Delete Account',
       deleteFailed: 'Failed to delete account',
       searchAccounts: 'Search accounts...',
-      moreFilters: 'More filters',
-      moreFiltersActive: 'More filters ({count} active)',
       notes: 'Notes',
       notesPlaceholder: 'Enter notes',
       notesHint: 'Notes are optional',
