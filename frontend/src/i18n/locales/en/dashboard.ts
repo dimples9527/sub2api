@@ -725,6 +725,9 @@ export default {
     },
     result: {
       title: 'Check result',
+      // Expand / collapse toggle of the result card (label flips to Expand once collapsed).
+      expand: 'Expand',
+      collapse: 'Collapse',
       questionDetail: 'Questions & answers',
       expected: 'Expected',
       answer: 'Model answer',
@@ -851,13 +854,28 @@ export default {
         running: 'Running',
         generated: 'Generated'
       },
-      filterLabel: 'Filter',
+      filterLabel: 'Verdict',
       filter: {
         all: 'All records',
         passed: 'Passed',
         degraded: 'Degraded',
         unknown: 'Unknown',
         failed: 'Request failed'
+      },
+      // Group filter: filters by the platform group a key matched; records without a
+      // match are bucketed by upstream host (same rule as the card ribbon).
+      groupFilterLabel: 'Group',
+      groupFilter: {
+        all: 'All groups',
+        none: 'Ungrouped'
+      },
+      // Horizontal timeline: each node is one run from the filtered set and opens
+      // its detail on click; Today / Yesterday read naturally, older days show a date.
+      timeline: {
+        label: 'Check timeline',
+        today: 'Today',
+        yesterday: 'Yesterday',
+        date: '{month}/{day}'
       },
       filterEmpty: 'No detection records match this filter.',
       prevPage: 'Previous',

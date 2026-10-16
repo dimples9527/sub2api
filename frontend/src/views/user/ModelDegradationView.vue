@@ -457,11 +457,28 @@
         v-if="currentRun && !running && currentRun.status !== 'running'"
         class="ma-section"
       >
-        <div class="ma-section-head">
-          <h2 class="ma-h2">{{ t('modelDegradation.result.title') }}</h2>
-          <span class="ma-section-sub">{{ currentRun.base_url }}</span>
-        </div>
-        <article class="ma-detail">
+        <!-- 折叠下拉条：铺满整行的抬头条，整条可点，点哪里都收起 / 展开结果卡。
+             开合按钮做成正中间的圆片箭头（不写字），收起时留在页面上的是这条抬头。 -->
+        <h2 class="ma-result-heading">
+          <button
+            type="button"
+            class="ma-result-bar"
+            :aria-expanded="resultExpanded"
+            aria-controls="ma-result-body"
+            @click="resultExpanded = !resultExpanded"
+          >
+            <span class="ma-h2">{{ t('modelDegradation.result.title') }}</span>
+            <span class="ma-result-bar-sub">{{ currentRun.base_url }}</span>
+            <span
+              class="ma-result-bar-toggle"
+              :class="{ 'is-collapsed': !resultExpanded }"
+              aria-hidden="true"
+            >
+              <Icon name="chevronDown" size="md" />
+            </span>
+          </button>
+        </h2>
+        <article id="ma-result-body" v-show="resultExpanded" class="ma-detail">
           <header class="ma-detail-head">
             <div class="ma-detail-id">
               <span class="ma-detail-name">{{ currentRun.model_id }}</span>
@@ -639,6 +656,13 @@
               :aria-label="t('modelDegradation.history.filterLabel')"
               :searchable="false"
             />
+            <span class="ma-label">{{ t('modelDegradation.history.groupFilterLabel') }}</span>
+            <Select
+              v-model="historyGroupFilter"
+              :options="historyGroupOptions"
+              class="ma-group-select"
+              :aria-label="t('modelDegradation.history.groupFilterLabel')"
+            />
           </div>
         </div>
         <!-- 「一条记录都没有」和「筛掉了所有记录」是两件事，文案要分开：
@@ -649,7 +673,16 @@
         <p v-else-if="!filteredHistory.length" class="ma-empty">
           {{ t('modelDegradation.history.filterEmpty') }}
         </p>
-        <div v-else class="ma-grid">
+        <div v-else ref="historyWallRef" class="ma-groups">
+          <!-- 分组归类：同一分组的记录聚成一节，节头是分组名 + 条数 + 细线。
+               节头用 grid-column: 1 / -1 整行铺开，所以自己占一行、不抢瓦片的格子；
+               没命中分组的按上游主机名归节（与缎带同一口径）。 -->
+          <template v-for="group in historyGroups" :key="group.key">
+            <div class="ma-group-head">
+              <h3 class="ma-group-name">{{ group.label }}</h3>
+              <span class="ma-group-count">{{ group.runs.length }}</span>
+              <span class="ma-group-rule" aria-hidden="true"></span>
+            </div>
           <!-- 每张卡片是一个 .ma-tile：预览居中铺在卡面里，右上斜角勋章。
                静止时卡面上只有预览与勋章 —— 模型 / 耗时 / 判定不铺在卡上，
                它们留在展开层里（源站的墙就是这么干净的）。
@@ -659,18 +692,50 @@
                形制照源站那张访客详情卡。浮层 absolute 定位、比卡片高，所以网格不会重排；
                预览是浮层自己的一份 iframe，只在悬停的那一张上创建。 -->
           <div
-            v-for="run in historyCards"
+            v-for="(run, runIndex) in group.runs"
             :key="run.id"
             class="ma-tile"
-            :class="{ 'is-zoom': zoomId === run.id }"
-            @mouseenter="showZoom(run)"
-            @mouseleave="hideZoom"
+            :class="{
+              'is-zoom': zoomId === run.id,
+              'is-bound': timelineHoverId === run.id,
+              'is-chain-left': chainLeftIds.has(run.id),
+              'is-chain-right': chainRightIds.has(run.id)
+            }"
+            :data-run-id="run.id"
+            @mouseenter="timelineHoverId = run.id"
+            @mouseleave="hideZoom(); timelineHoverId = null"
           >
+            <!-- 卡片正上方的时间点：日期 + 时间，下面一条细线垂到卡片上沿。
+                 点与卡一一对应、互相点亮；点节点直接打开那一轮详情。 -->
+            <div class="ma-tile-cap">
+              <button
+                type="button"
+                class="ma-group-node"
+                :class="[
+                  group.nodes[runIndex].tone,
+                  {
+                    'is-latest': group.nodes[runIndex].latest,
+                    'is-bound': timelineHoverId === run.id
+                  }
+                ]"
+                :title="group.nodes[runIndex].title"
+                :aria-label="group.nodes[runIndex].title"
+                @click="openRun(run.id)"
+                @mouseenter="timelineHoverId = run.id"
+                @mouseleave="timelineHoverId = null"
+                @focus="timelineHoverId = run.id"
+                @blur="timelineHoverId = null"
+              >
+                <span class="ma-group-node-time">{{ group.nodes[runIndex].label }}</span>
+                <span class="ma-group-node-dot"></span>
+              </button>
+            </div>
             <div
               class="ma-card"
               role="button"
               tabindex="0"
               :aria-label="t('modelDegradation.history.open')"
+              @mouseenter="showZoom(run); timelineHoverId = run.id"
               @click="openRun(run.id)"
               @keydown.enter.prevent="openRun(run.id)"
               @keydown.space.prevent="openRun(run.id)"
@@ -832,6 +897,7 @@
               </div>
             </div>
           </div>
+          </template>
         </div>
         <!-- 翻页器：历史一次最多 BAR_COUNT 条，分页是纯客户端的（列表接口只给
              limit，没有 offset / status 参数），不为此动后端。页码用夹紧后的
@@ -869,7 +935,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -891,7 +957,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import { formatDateTime, formatDateTimeToMinute, formatReasoningEffort } from '@/utils/format'
 import ModelDegradationWave from './ModelDegradationWave.vue'
 import ModelDegradationMascot from './ModelDegradationMascot.vue'
 
@@ -1017,6 +1083,18 @@ const running = ref(false)
 const currentRun = ref<ModelDegradationRun | null>(null)
 const history = ref<ModelDegradationRun[]>([])
 const loadingHistory = ref(false)
+
+// 检测结果卡的展开 / 折叠。默认展开；用户手动收起后保持收起，只有结果换成
+// 另一轮（新跑完一次、或点开别的历史卡片）才自动回到展开态 —— 刚操作过的
+// 那条记录一定是可见的，手动收起的偏好也不会被无关的刷新重置。
+const resultExpanded = ref(true)
+
+watch(
+  () => currentRun.value?.id,
+  (id, prev) => {
+    if (id && id !== prev) resultExpanded.value = true
+  }
+)
 
 // 本次提交了哪些题。只用来在运行中渲染「等待卡片」——
 // run 记录里不存这个字段（轮询拿到的是库里的行），所以只能自己记。
@@ -1234,8 +1312,8 @@ const bars = computed(() => {
   return out
 })
 
-/* ---- 检测历史：判定筛选 + 翻页 ---- */
-// 两者都在客户端做：列表接口只给了 limit，没有 offset / status 参数，
+/* ---- 检测历史：判定筛选 + 分组筛选 + 翻页 ---- */
+// 三件事都在客户端做：列表接口只给了 limit，没有 offset / status / 分组参数，
 // 而历史一次最多 BAR_COUNT 条，本地过滤足够，不为此去动后端。
 
 const HISTORY_FILTERS = ['all', 'passed', 'degraded', 'unknown', 'failed'] as const
@@ -1249,6 +1327,38 @@ const historyFilterOptions = computed<SelectOption[]>(() =>
     label: t(`modelDegradation.history.filter.${value}`)
   }))
 )
+
+// 分组桶：优先用命中的平台分组名；没命中分组的（第三方上游 Key）按上游主机名
+// 归桶 —— 与卡片缎带同一口径，筛选列表与归类展示里每条记录都有明确归属，
+// 不会把各个第三方上游全堆进同一个「未知」桶。
+const GROUP_BUCKET_NONE = '__none__'
+
+const groupBucketOf = (run: ModelDegradationRun): { key: string; label: string } => {
+  if (run.group_name) return { key: 'g:' + run.group_name, label: run.group_name }
+  const host = run.base_url.replace(/^https?:\/\//i, '').split('/')[0]
+  if (host) return { key: 'u:' + host, label: host }
+  return { key: GROUP_BUCKET_NONE, label: t('modelDegradation.history.groupFilter.none') }
+}
+
+const historyGroupFilter = ref('all')
+
+// 选项从已加载的历史现算：按记录条数倒序，最常测的分组排最上面。
+const historyGroupOptions = computed<SelectOption[]>(() => {
+  const buckets = new Map<string, { label: string; count: number }>()
+  for (const run of history.value) {
+    const bucket = groupBucketOf(run)
+    const entry = buckets.get(bucket.key)
+    if (entry) entry.count += 1
+    else buckets.set(bucket.key, { label: bucket.label, count: 1 })
+  }
+  const options = [...buckets.entries()]
+    .sort((a, b) => b[1].count - a[1].count || a[1].label.localeCompare(b[1].label))
+    .map(([value, entry]) => ({ value, label: entry.label }))
+  return [{ value: 'all', label: t('modelDegradation.history.groupFilter.all') }, ...options]
+})
+
+const matchHistoryGroup = (run: ModelDegradationRun, filter: string) =>
+  filter === 'all' || groupBucketOf(run).key === filter
 
 // 「请求失败」在历史里不是一个独立的 status：整轮请求都打不通时，后端仍把这一轮
 // 记成 completed，只是整体 verdict 落成 unknown、逐题明细带上游失败前缀。
@@ -1285,8 +1395,62 @@ const matchHistoryFilter = (run: ModelDegradationRun, filter: HistoryFilter) => 
 }
 
 const filteredHistory = computed(() =>
-  history.value.filter((run) => matchHistoryFilter(run, historyFilter.value))
+  history.value.filter(
+    (run) => matchHistoryFilter(run, historyFilter.value) && matchHistoryGroup(run, historyGroupFilter.value)
+  )
 )
+
+/* ---- 检测历史：卡片时间点与行内连线 ---- */
+// 时间戳 → 节点上的「月-日 时:分」：每个节点都带完整日期，隔天不用回看上下文。
+// 日期走 i18n（zh 是 10-13，en 是 10/13），时间走 Intl 的 hour / minute 拆分。
+const timelineDateTimeLabel = (value: string) => {
+  const date = new Date(value)
+  const day = t('modelDegradation.history.timeline.date', {
+    month: date.getMonth() + 1,
+    day: date.getDate()
+  })
+  return `${day} ${formatDateTime(value, { hour: '2-digit', minute: '2-digit', hour12: false })}`
+}
+
+// 时间线悬停联动：节点与卡片是同一份记录的两端，悬停任一端另一端点亮。
+const timelineHoverId = ref<number | null>(null)
+
+// 行内连线：同一行相邻卡片之间的横线段由 JS 量行决定 —— 列数随宽度变化，
+// CSS 选不出「行首 / 行尾」。集合里存 run.id，模板里按 id 挂类名。
+const chainLeftIds = ref(new Set<number>())
+const chainRightIds = ref(new Set<number>())
+const historyWallRef = ref<HTMLElement | null>(null)
+
+const sameIdSet = (a: Set<number>, b: Set<number>) => a.size === b.size && [...a].every((id) => b.has(id))
+
+const markTileChains = () => {
+  const wall = historyWallRef.value
+  if (!wall) return
+  // 卡墙会被 v-if 摘下又挂回，观察目标要跟着最新的元素走（对同一元素重复 observe 是幂等的）。
+  wallResizeObserver.observe(wall)
+  const tiles = [...wall.querySelectorAll<HTMLElement>('.ma-tile[data-run-id]')]
+  const left = new Set<number>()
+  const right = new Set<number>()
+  let prev: HTMLElement | null = null
+  for (const tile of tiles) {
+    if (prev && prev.offsetTop === tile.offsetTop) {
+      right.add(Number(prev.dataset.runId))
+      left.add(Number(tile.dataset.runId))
+    }
+    prev = tile
+  }
+  // 值没变就不写回：ResizeObserver → rAF → 赋值 → 重渲染 的回路要能自己静下来。
+  if (!sameIdSet(chainLeftIds.value, left)) chainLeftIds.value = left
+  if (!sameIdSet(chainRightIds.value, right)) chainRightIds.value = right
+}
+
+let chainFrame = 0
+const scheduleTileChains = () => {
+  cancelAnimationFrame(chainFrame)
+  chainFrame = requestAnimationFrame(markTileChains)
+}
+
+const wallResizeObserver = new ResizeObserver(scheduleTileChains)
 
 const historyPage = ref(1)
 const historyPageCount = computed(() =>
@@ -1306,9 +1470,55 @@ const historyCards = computed(() => {
   return filteredHistory.value.slice(start, start + HISTORY_CARD_COUNT)
 })
 
+// 当前这一页按分组聚成若干节：节内保持时间倒序，节与节按组在页内首次出现的
+// 顺序排（最近有动静的组排最前）。分组只做归类展示，不参与分页计数。
+// nodes 与 runs 同序（新的在前）：每张卡片正上方挂一个时间点，悬停节点给
+// 「时间 · 模型 · 分组」整串信息，点节点打开那一轮详情。
+const historyGroups = computed(() => {
+  const sections: {
+    key: string
+    label: string
+    runs: ModelDegradationRun[]
+    nodes: { tone: string; latest: boolean; label: string; title: string }[]
+  }[] = []
+  const index = new Map<string, (typeof sections)[number]>()
+  for (const run of historyCards.value) {
+    const bucket = groupBucketOf(run)
+    let section = index.get(bucket.key)
+    if (!section) {
+      section = { key: bucket.key, label: bucket.label, runs: [], nodes: [] }
+      index.set(bucket.key, section)
+      sections.push(section)
+    }
+    section.runs.push(run)
+    section.nodes.push({
+      tone: barClassOf(run),
+      latest: section.runs.length === 1,
+      label: timelineDateTimeLabel(run.created_at),
+      title: `${formatDateTimeToMinute(run.created_at)} · ${run.model_id} · ${groupBucketOf(run).label}`
+    })
+  }
+  return sections
+})
+
+// 渲染之后量一次行：卡片换页 / 筛选 / 容器宽度变化都要重新量。
+watch(historyGroups, () => {
+  nextTick(scheduleTileChains)
+})
+
+onMounted(() => {
+  if (historyWallRef.value) wallResizeObserver.observe(historyWallRef.value)
+  scheduleTileChains()
+})
+
+onUnmounted(() => {
+  wallResizeObserver.disconnect()
+  cancelAnimationFrame(chainFrame)
+})
+
 // 换筛选回到第 1 页：否则从「全部」第 3 页切到只有 1 页的筛选、再切回来，
-// 会莫名停在原来的第 3 页。
-watch(historyFilter, () => {
+// 会莫名停在原来的第 3 页。两个筛选都要监听。
+watch([historyFilter, historyGroupFilter], () => {
   historyPage.value = 1
 })
 
@@ -1518,7 +1728,7 @@ const prefetchTileDetails = async () => {
 // 翻页 / 换筛选后要为这一页新露面的卡片补明细：封面（作品源码、判定概览的
 // 补充说明）都要 items 才画得出来，而列表接口不带 items。
 // 首屏那一次由 loadHistory 直接调，这里的 watch 只管后续翻页。
-watch([historyPageSafe, historyFilter], () => {
+watch([historyPageSafe, historyFilter, historyGroupFilter], () => {
   void prefetchTileDetails()
 })
 
@@ -2124,6 +2334,9 @@ const openRun = async (id: number, options: { scroll?: boolean } = {}) => {
     const detail = await loadRunDetail(id)
     if (!detail) throw new Error('empty detail')
     currentRun.value = detail
+    // 点开的是正在展示的这一轮（id 没变）时，结果区的 watch 不会响 ——
+    // 但「点节点 / 卡片就该看到结果」在任何情况下都成立，这里直接展开。
+    resultExpanded.value = true
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('modelDegradation.errors.loadFailed')))
@@ -3146,6 +3359,72 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+/* ============ 检测结果：折叠下拉条 ============ */
+/* 铺满整行的抬头条：标题、上游地址都在条上，点整条收起 / 展开结果卡。
+   条本身就是这块区域的抬头 —— 收起时留下的是它，不是一枚小开关。 */
+.ma-result-heading {
+  margin: 0;
+}
+
+.ma-result-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 18px;
+  border: 1px solid var(--ma-border);
+  border-radius: 12px;
+  background: var(--ma-panel);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ma-result-bar:hover {
+  border-color: var(--ma-input-border);
+  background: var(--ma-seg-bg);
+}
+
+/* 地址紧跟标题：封顶 32% 宽，长了走省略号，不会伸到中间的圆片底下。 */
+.ma-result-bar-sub {
+  flex: 0 1 auto;
+  max-width: 32%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ma-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 居中开合箭头：不描边、不填底，和条融成一体 —— 状态全交给箭头朝向（收起转 -90°），
+   悬停时箭头加深、再淡淡透出一圈底色，点按感还在，但不再是贴在条上的一枚圆扣。 */
+.ma-result-bar-toggle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ma-muted);
+  transform: translate(-50%, -50%);
+  transition: transform 0.25s ease, background 0.2s ease, color 0.15s ease;
+}
+
+.ma-result-bar:hover .ma-result-bar-toggle {
+  background: var(--ma-seg-on-bg);
+  color: var(--ma-seg-on-fg);
+}
+
+.ma-result-bar-toggle.is-collapsed {
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
 .ma-empty {
   margin: 0;
   padding: 24px 16px;
@@ -3505,6 +3784,7 @@ onUnmounted(() => {
    Select 的下拉 Teleport 到 body，不受这行 overflow 影响。 */
 .ma-gallery-filter {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-left: auto;
@@ -3517,6 +3797,11 @@ onUnmounted(() => {
 /* 筛选框本身窄一点就够：只有五个固定选项，不跟着 .ma-selects 的宽度走。 */
 .ma-gallery-filter :deep(.select-trigger) {
   width: 148px;
+}
+
+/* 分组筛选要装上游主机名，比判定筛选宽一档，长主机名才不至于统统省略号。 */
+.ma-gallery-filter :deep(.ma-group-select .select-trigger) {
+  width: 190px;
 }
 
 /* 翻页器：居中一行，形制照源站的画廊分页。历史一次最多 BAR_COUNT 条，
@@ -3574,10 +3859,188 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.ma-grid {
+/* ============ 卡片时间点：每张卡片正上方一个节点，连线垂到卡片 ============ */
+/* 节点定在卡片正上方（水平居中），一行内均匀分布；下面一条细线垂到卡片上沿，
+   把「点」和「卡」扣在一起；同一行相邻节点之间再用横线连成一条轴。
+   行是渲染结果（列数随宽度变化），行首 / 行尾由脚本量出来（is-chain-left / right），
+   CSS 只负责画线。节点配色沿用顶部监控条的同一套（passed / incorrect / error / empty）。 */
+.ma-tile-cap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: var(--ma-cap-height);
+}
+
+.ma-group-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  /* 顶部 2px + 标签 12px + 间距 5px + 圆点 10px = 盒高 29；下面的垂线从 29 起。 */
+  padding: 2px 0 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* 垂线：从圆点落到卡片上沿（cap 底部），长度 = cap 高 - 节点盒高。 */
+.ma-group-node::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: calc(var(--ma-cap-height) - 29px);
+  background: var(--ma-line);
+  transform: translateX(-50%);
+}
+
+.ma-group-node-time {
+  color: var(--ma-faint);
+  font-size: 10px;
+  line-height: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.15s ease;
+}
+
+.ma-group-node-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ma-bar-empty);
+  transition: transform 0.15s ease;
+}
+
+.ma-group-node.passed .ma-group-node-dot {
+  background: var(--ma-pass);
+}
+
+.ma-group-node.incorrect .ma-group-node-dot {
+  background: var(--ma-fail);
+}
+
+.ma-group-node.error .ma-group-node-dot {
+  background: var(--ma-warn);
+}
+
+/* 最新一次大一号；悬停 / 与卡片联动时再放大一档。 */
+.ma-group-node.is-latest .ma-group-node-dot {
+  transform: scale(1.3);
+}
+
+.ma-group-node:hover .ma-group-node-dot,
+.ma-group-node.is-bound .ma-group-node-dot {
+  transform: scale(1.45);
+}
+
+.ma-group-node:focus-visible {
+  outline: none;
+}
+
+.ma-group-node:focus-visible .ma-group-node-dot {
+  outline: 2px solid var(--ma-primary);
+  outline-offset: 2px;
+}
+
+.ma-group-node:hover .ma-group-node-time,
+.ma-group-node.is-bound .ma-group-node-time {
+  color: var(--ma-seg-on-fg);
+}
+
+/* 行内横线：圆点中心在 cap 顶下 24px（2 + 12 + 5 + 5），线就画在这个高度；
+   两端各探出半个槽距，和左右邻居的线段在槽正中严丝合缝地接上。 */
+.ma-tile.is-chain-left::after,
+.ma-tile.is-chain-right::before {
+  content: '';
+  position: absolute;
+  top: 24px;
+  height: 1px;
+  background: var(--ma-line);
+}
+
+.ma-tile.is-chain-right::before {
+  left: 50%;
+  right: calc(var(--ma-wall-gap) / -2);
+}
+
+.ma-tile.is-chain-left::after {
+  right: 50%;
+  left: calc(var(--ma-wall-gap) / -2);
+}
+
+/* 卡片侧的光环：悬停时间线节点时，同一条记录在墙上亮起来。 */
+.ma-tile.is-bound .ma-card {
+  border-color: var(--ma-seg-on-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ma-primary) 22%, transparent);
+}
+
+/* 分组墙：瓦片照旧按卡宽流式铺（原 .ma-grid 的同一套网格），节头整行铺开
+   把不同分组的瓦片隔开 —— 节头 grid-column: 1 / -1，永远独占一行。
+   --ma-cap-height / --ma-wall-gap 是量给时间点用的：cap 高决定垂线长度，
+   槽距决定行内横线的探出量，几处计算共用一套值。 */
+.ma-groups {
+  --ma-cap-height: 38px;
+  --ma-wall-gap: 16px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
-  gap: 16px;
+  gap: var(--ma-wall-gap);
+}
+
+.ma-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+  /* 换组时多留一点：上一组最后一行与这一组的节头之间要有「分节」的呼吸感。 */
+  margin-top: 6px;
+}
+
+.ma-group-head:first-child {
+  margin-top: 0;
+}
+
+/* 分组名：左侧一条竖标（与判定配色同系的绿），字号比页面级标题小半头。 */
+.ma-group-name {
+  position: relative;
+  margin: 0;
+  padding-left: 10px;
+  color: var(--ma-title);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.ma-group-name::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--ma-pass);
+  transform: translateY(-50%);
+}
+
+/* 条数：小圆角胶囊，数字用等宽字形，翻页时宽度不跳。 */
+.ma-group-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--ma-seg-bg);
+  color: var(--ma-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 细线：把节头剩余宽度补满，充当分节的分隔线。 */
+.ma-group-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--ma-line);
 }
 
 .ma-tile {
@@ -3843,7 +4306,12 @@ onUnmounted(() => {
    「看不见但能 Tab 到」的暗桩。 */
 .ma-hover-card {
   position: absolute;
-  top: -60px;
+  /* 必须压过 cap 里时间点的 z-index: 1：浮卡升起时要真正盖住
+     它后面透出来的圆点 / 时间标签，而不是被它们穿过去。 */
+  z-index: 2;
+  /* 展开层要回到卡面上（而不是 tile 顶上）：tile 顶上是时间点的 cap，
+     扣掉 cap 高才是卡片上沿，-60 的老校准值保持相对卡片不变。 */
+  top: calc(var(--ma-cap-height, 38px) - 60px);
   right: 0;
   left: 0;
   display: flex;

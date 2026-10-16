@@ -729,6 +729,9 @@ export default {
     },
     result: {
       title: '检测结果',
+      // 结果卡的展开 / 折叠开关（收起后按钮文案换成「展开」）。
+      expand: '展开',
+      collapse: '收起',
       questionDetail: '题目与回答',
       expected: '期望答案',
       answer: '模型回答',
@@ -852,13 +855,28 @@ export default {
         generated: '已生成'
       },
       // 判定筛选：历史是共享池子，一屏铺不下全部记录，故按判定筛 + 分页翻。
-      filterLabel: '筛选',
+      filterLabel: '判定',
       filter: {
         all: '全部记录',
         passed: '通过',
         degraded: '降智',
         unknown: '无法判定',
         failed: '请求失败'
+      },
+      // 分组筛选：按命中的平台分组筛；没命中分组的记录按上游主机名归桶
+      //（与卡片缎带同一口径），每条记录都有明确的归属。
+      groupFilterLabel: '分组',
+      groupFilter: {
+        all: '全部分组',
+        none: '未命中分组'
+      },
+      // 横向时间线：轴上的节点是筛选后的每次检测，点击打开对应详情；
+      // 今天 / 昨天说人话，更早的直接给 月-日。
+      timeline: {
+        label: '检测时间线',
+        today: '今天',
+        yesterday: '昨天',
+        date: '{month}-{day}'
       },
       filterEmpty: '没有符合该条件的检测记录。',
       prevPage: '上一页',
