@@ -889,6 +889,38 @@ describe('supplier local data views component usage', () => {
     wrapper.unmount()
   })
 
+  it('defaults the platform filter to openai without selecting a specific local group', async () => {
+    const wrapper = await mountSupplierAccounts()
+    const setupState = (wrapper.vm as any).$?.setupState
+
+    // 默认是按平台过滤而不是选中第一个 openai 分组：分组名与数量随时会变，
+    // 落到单个分组会随接口返回顺序选中用户没预期的分组。
+    expect(setupState.platformFilter).toBe('openai')
+    expect(setupState.groupID).toBe(0)
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      platform: 'openai',
+      group_id: undefined,
+      page: 1,
+    }))
+
+    wrapper.unmount()
+  })
+
+  it('keeps the platform filter empty when no openai local group exists', async () => {
+    supplierAccountMocks.listGroups.mockResolvedValue([
+      { id: 202, name: '本地分组 B', platform: 'anthropic' },
+    ])
+    const wrapper = await mountSupplierAccounts()
+    const setupState = (wrapper.vm as any).$?.setupState
+
+    expect(setupState.platformFilter).toBe('')
+    expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      platform: undefined,
+    }))
+
+    wrapper.unmount()
+  })
+
   it('loads local groups and sends the selected local group to the paged account query', async () => {
     const wrapper = await mountSupplierAccounts()
     const setupState = (wrapper.vm as any).$?.setupState
@@ -896,9 +928,8 @@ describe('supplier local data views component usage', () => {
     expect(supplierAccountMocks.listGroups).toHaveBeenCalledTimes(1)
 
     // 本用例验证的是「选中的本地分组会传给分页查询」，与首屏默认值无关：
-    // 先把首屏默认选中的分组清回「全部本地分组」，再从这个起点断言。
-    setupState.groupID = 0
-    await flushPromises()
+    // 首屏默认只做平台过滤、不选中具体分组，直接从「全部本地分组」的起点断言。
+    expect(setupState.groupID).toBe(0)
     expect(supplierAccountMocks.listAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
       group_id: undefined,
     }))
@@ -947,9 +978,10 @@ describe('supplier local data views component usage', () => {
     const selectTriggers = wrapper.findAll('.select-trigger')
 
     // 本用例验证的是「平台筛选会过滤分组选项并清掉不兼容的选择」，
-    // 先把首屏默认选中的分组清回「全部本地分组」—— 否则 SelectStub 的点击会落到下一个选项上。
-    setupState.groupID = 0
+    // 先把首屏默认的 OpenAI 平台过滤清回「全部平台」，让两个分组选项都可见。
+    setupState.platformFilter = ''
     await flushPromises()
+    expect(setupState.groupID).toBe(0)
 
     // select-trigger 顺序：供应商、供应商状态、平台、本地分组、同步有效性、上游状态。
     expect(selectTriggers[3].attributes('data-option-labels')).toContain('本地分组 A #201')

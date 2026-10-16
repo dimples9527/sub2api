@@ -3418,6 +3418,7 @@ watch([providerID, providerStatusFilter, groupID, activeFilter, upstreamStatusFi
 })
 
 watch(platformFilter, platform => {
+  if (!accountFiltersInitialized) return
   if (groupID.value && platform) {
     const selectedGroup = localGroups.value.find(group => group.id === groupID.value)
     if (selectedGroup?.platform !== platform) {
@@ -3446,17 +3447,18 @@ async function loadProviders() {
 
 async function loadLocalGroups() {
   localGroups.value = await adminAPI.groups.getAll()
-  groupID.value = defaultLocalGroupID()
+  platformFilter.value = defaultPlatformFilter()
 }
 
-// 首屏默认选中 OpenAI 分组。按平台 code 认而不是按分组名 —— 分组名随时会改，平台是稳定枚举；
-// 名字匹配只作兜底（平台字段缺失或走自定义平台时的旧数据）。认不出来就保持「全部本地分组」，
-// 不能默认落到某个不确定的分组上，否则用户会以为账号凭空变少了。
-function defaultLocalGroupID(): number {
+// 首屏默认按 OpenAI 平台过滤。按平台 code 认而不是按分组名 —— 分组名随时会改、openai 分组也可能有多个，
+// 落到单个分组会随接口返回顺序漂移到用户没预期的分组上；平台过滤才能稳定筛出「全部 OpenAI 账号」。
+// 名字匹配只作兜底（平台字段缺失或走自定义平台时的旧数据）。认不出来就保持「全部平台」，
+// 不能把不确定的实例默认过滤成空列表，否则用户会以为账号凭空变少了。
+function defaultPlatformFilter(): string {
   const groups = localGroups.value
-  const openaiGroup = groups.find(group => group.platform === 'openai')
-    || groups.find(group => group.name.trim().toLowerCase() === 'openai')
-  return openaiGroup ? openaiGroup.id : 0
+  const hasOpenAIGroup = groups.some(group => group.platform === 'openai')
+    || groups.some(group => group.name.trim().toLowerCase() === 'openai')
+  return hasOpenAIGroup ? 'openai' : ''
 }
 
 async function loadCustomPlatforms() {
