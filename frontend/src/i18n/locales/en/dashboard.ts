@@ -714,8 +714,9 @@ export default {
       title: 'My check',
       waiting: 'Waiting for results',
       running: 'In progress',
+      retrying: 'Retrying',
       seconds: '{count}s',
-      minutes: '{count} min',
+      minutesSeconds: '{minutes}m {seconds}s',
       stop: 'Stop this check',
       cancelled: 'Stopped',
       cancelledHint: 'You stopped this run yourself. Questions that already finished are still valid.',
@@ -860,6 +861,8 @@ export default {
         running: 'Running',
         generated: 'Generated'
       },
+      // Type filter: the kind of questions a run covered (rendering vs logic); defaults to rendering.
+      typeFilterLabel: 'Type',
       filterLabel: 'Verdict',
       filter: {
         all: 'All records',

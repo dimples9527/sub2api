@@ -94,17 +94,20 @@ type modelDegradationRunResponse struct {
 	Protocol        string `json:"protocol"`
 	ReasoningEffort string `json:"reasoning_effort"`
 	// RenderTimeoutSeconds 本次检测生成题的单题超时（秒）。
-	RenderTimeoutSeconds int                            `json:"render_timeout_seconds"`
-	Status               string                         `json:"status"`
-	Verdict              string                         `json:"verdict"`
-	LogicPassed          int                            `json:"logic_passed"`
-	LogicTotal           int                            `json:"logic_total"`
-	RenderVerdict        string                         `json:"render_verdict"`
-	ErrorMessage         string                         `json:"error_message"`
-	DurationMs           int                            `json:"duration_ms"`
-	CreatedAt            time.Time                      `json:"created_at"`
-	CompletedAt          *time.Time                     `json:"completed_at,omitempty"`
-	Items                []modelDegradationItemResponse `json:"items,omitempty"`
+	RenderTimeoutSeconds int        `json:"render_timeout_seconds"`
+	Status               string     `json:"status"`
+	Verdict              string     `json:"verdict"`
+	LogicPassed          int        `json:"logic_passed"`
+	LogicTotal           int        `json:"logic_total"`
+	RenderVerdict        string     `json:"render_verdict"`
+	ErrorMessage         string     `json:"error_message"`
+	DurationMs           int        `json:"duration_ms"`
+	CreatedAt            time.Time  `json:"created_at"`
+	CompletedAt          *time.Time `json:"completed_at,omitempty"`
+	// Retrying 这轮检测当前是否正有一次自动重试在进行（含退避等待期）。
+	// 只在一轮仍在执行期间可能为 true；前端据此把状态文字切成「重试中」。
+	Retrying bool                           `json:"retrying"`
+	Items    []modelDegradationItemResponse `json:"items,omitempty"`
 	// 共享历史：所有人的检测记录都在同一个池子里，因此需要标出「是谁跑的」。
 	// 邮箱一律脱敏，只保留首字符与域名。
 	OwnerEmail string `json:"owner_email"`
@@ -347,6 +350,7 @@ func modelDegradationRunToResponse(run *service.ModelDegradationRun, viewerID in
 		DurationMs:           run.DurationMs,
 		CreatedAt:            run.CreatedAt,
 		CompletedAt:          run.CompletedAt,
+		Retrying:             run.Retrying,
 		OwnerEmail:           maskEmail(run.OwnerEmail),
 		GroupID:              run.GroupID,
 		GroupName:            run.GroupName,

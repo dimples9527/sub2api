@@ -88,6 +88,8 @@ export interface ModelDegradationRun {
   duration_ms: number
   created_at: string
   completed_at?: string
+  /** 这轮检测当前是否正有一次自动重试在进行（含退避等待期）；据此把状态文字切成「重试中」。 */
+  retrying: boolean
   items?: ModelDegradationItem[]
   /** 发起者邮箱（脱敏），共享历史里所有人都看得到。 */
   owner_email: string

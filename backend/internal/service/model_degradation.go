@@ -129,7 +129,10 @@ type ModelDegradationRun struct {
 	DurationMs           int
 	CreatedAt            time.Time
 	CompletedAt          *time.Time
-	Items                []ModelDegradationItem
+	// Retrying 这轮检测当前是否正有一次自动重试在进行（含退避等待期）。
+	// 只活在内存里：读取详情时由服务层补齐，不落库；重试结束即恢复 false。
+	Retrying bool
+	Items    []ModelDegradationItem
 }
 
 // ModelDegradationItem 单道题的检测明细。

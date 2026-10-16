@@ -39,7 +39,7 @@ const (
 	// modelDegradationMaxStreamResponseBytes 流式响应的读取上限。
 	//
 	// 流式比非流式大得多（16MB vs 256KB）：SSE 每个事件都带完整的事件名与 JSON 信封，
-	// 且生成题要吐一整个 HTML 文档，按 256KB 截断会把正常的长输出判成「响应不完整」。
+	// 且生成题要吐整份作品源码，按 256KB 截断会把正常的长输出判成「响应不完整」。
 	// 上限存在的意义是防止异常上游把内存拖垮，不是限制正常输出。
 	modelDegradationMaxStreamResponseBytes = 16 << 20
 )
@@ -354,13 +354,20 @@ func modelDegradationRetryable(err error) bool {
 // 「几秒内就失败」的错（502/524/连接被掐）。别指望它救「上游太慢」。
 //
 // 退避期间响应 ctx 取消：用户按「停止」时不必等完退避。
+//
+// runID 只用于上报「重试中」：从决定重试那一刻起（退避等待 + 下一次请求）
+// 在内存里把这轮标记为 retrying，函数返回（重试成功、彻底失败、被中止）时清除。
+// 前端每 3 秒轮询一次详情，据此显示「重试中」，成功后的下一次轮询即恢复。
 func (s *ModelDegradationService) callUpstreamWithRetry(
 	ctx context.Context,
+	runID int64,
 	input ModelDegradationInput,
 	prompt string,
 	timeout time.Duration,
 ) (string, error) {
 	deadline := time.Now().Add(timeout)
+
+	defer s.clearRunRetrying(runID)
 
 	var lastErr error
 	for attempt := 0; attempt <= modelDegradationRetryCount; attempt++ {
@@ -381,6 +388,8 @@ func (s *ModelDegradationService) callUpstreamWithRetry(
 			break
 		}
 
+		s.markRunRetrying(runID)
+
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
@@ -393,6 +402,26 @@ func (s *ModelDegradationService) callUpstreamWithRetry(
 		return "", &modelDegradationUpstreamError{Message: "上游响应超时，请稍后重试或检查接口服务状态", Retryable: true}
 	}
 	return "", lastErr
+}
+
+// markRunRetrying / clearRunRetrying 维护「这轮有题目正在自动重试」的内存标记。
+// 标记只在退避等待与重试请求期间存在；重试成功或不再重试都会立刻清除，
+// 前端下一次轮询就看不到「重试中」了。
+func (s *ModelDegradationService) markRunRetrying(runID int64) {
+	if runID > 0 {
+		s.retrying.Store(runID, struct{}{})
+	}
+}
+
+func (s *ModelDegradationService) clearRunRetrying(runID int64) {
+	if runID > 0 {
+		s.retrying.Delete(runID)
+	}
+}
+
+func (s *ModelDegradationService) isRunRetrying(runID int64) bool {
+	_, ok := s.retrying.Load(runID)
+	return ok
 }
 
 // extractModelDegradationResponsesStream 解析 responses 协议的 SSE 流。

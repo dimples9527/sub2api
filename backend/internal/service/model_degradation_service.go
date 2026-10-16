@@ -22,7 +22,7 @@ import (
 const (
 	// 逻辑题的单题超时。回答只有一句话，60s 足够。
 	modelDegradationPerTaskTimeout = 60 * time.Second
-	// 生成题的单题超时默认值。这题要吐一整个 HTML 文档（实测成品 10~14KB），
+	// 生成题的单题超时默认值。这题要吐整份作品源码（实测成品 10~14KB），
 	// 上游慢起来远超预期：生产实测同一道题在 codex 系路由上要 354.9s，
 	// 另两次直接撞满当时 6 分钟的上限被掐断；而同一模型在非 codex 分组
 	// 只要 83~118s —— 这是上游路由速度差异，不是故障。
@@ -63,6 +63,10 @@ const (
 	modelDegradationAnthropicVersion = "2023-06-01"
 	// Anthropic Messages 的 max_tokens 是必填项。检测题的回答都很短，给足即可。
 	modelDegradationAnthropicMaxTokens = 4096
+	// chat / responses 的输出上限（含推理 token）。对齐 manxue-ai 的默认值：
+	// 不封顶时推理模型会按模型自身极限思考生成（可达 128k），单题明显更慢、
+	// 更容易撞上超时；封顶后思考与生成的总量可控。
+	modelDegradationMaxOutputTokens = 16000
 	// 各协议在 Base URL 之后要拼的终端路径。
 	modelDegradationChatCompletionsPath = "/chat/completions"
 	modelDegradationResponsesPath       = "/responses"
@@ -176,6 +180,10 @@ type ModelDegradationService struct {
 	// 中止时既断掉正在发出的上游请求，也让 execute 的循环提前收尾；
 	// 直接改库状态是不够的 —— 协程不知道状态变了，还会把剩下的题继续跑完。
 	cancels sync.Map
+	// retrying 标记「这一轮检测当前有题目正在自动重试（含退避等待）」：runID → struct{}。
+	// 只活在内存里、由执行协程写入；读取详情时据此补 Retrying 字段，
+	// 让前端轮询时能显示「重试中」。进程重启后自然清空，与残留 running 行的处理一致。
+	retrying sync.Map
 }
 
 // NewModelDegradationService 创建降智检测服务。
@@ -248,6 +256,9 @@ func (s *ModelDegradationService) Get(ctx context.Context, runID int64) (*ModelD
 	if err != nil || run == nil {
 		return run, err
 	}
+
+	// 「重试中」是运行期状态、不在库里：从内存标记补上，供前端轮询展示。
+	run.Retrying = s.isRunRetrying(runID)
 
 	// 进程重启会让执行协程消失，这类记录会永远停在 running。
 	// 读取时兜底标记，避免前端一直转圈。
@@ -440,10 +451,10 @@ func (s *ModelDegradationService) execute(ctx context.Context, run *ModelDegrada
 			break
 		}
 		if question.TaskType == ModelDegradationTaskLogic {
-			record(s.runLogicTask(ctx, input, question))
+			record(s.runLogicTask(ctx, run.ID, input, question))
 			continue
 		}
-		record(s.runRenderTask(ctx, input, question))
+		record(s.runRenderTask(ctx, run.ID, input, question))
 	}
 
 	run.DurationMs = int(time.Since(started).Milliseconds())
@@ -491,7 +502,7 @@ func (s *ModelDegradationService) CancelRun(ctx context.Context, userID, runID i
 }
 
 // runLogicTask 跑一道逻辑题。
-func (s *ModelDegradationService) runLogicTask(ctx context.Context, input ModelDegradationInput, question ModelDegradationQuestion) ModelDegradationItem {
+func (s *ModelDegradationService) runLogicTask(ctx context.Context, runID int64, input ModelDegradationInput, question ModelDegradationQuestion) ModelDegradationItem {
 	item := ModelDegradationItem{
 		TaskType: ModelDegradationTaskLogic,
 		TaskKey:  question.Key,
@@ -502,7 +513,8 @@ func (s *ModelDegradationService) runLogicTask(ctx context.Context, input ModelD
 	started := time.Now()
 	// 走带重试的调用：上游瞬时失败（连接被掐断、网关 502/524）不该被算成这一轮的检测结果。
 	// 重试共用单题预算，不会把总耗时撑到整体上限（modelDegradationRunTotalTimeout）之外。
-	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, modelDegradationPerTaskTimeout)
+	// runID 用于重试期间上报「重试中」，前端轮询时展示。
+	response, err := s.callUpstreamWithRetry(ctx, runID, input, question.Prompt, modelDegradationPerTaskTimeout)
 	item.DurationMs = int(time.Since(started).Milliseconds())
 
 	if err != nil {
@@ -524,7 +536,7 @@ func (s *ModelDegradationService) runLogicTask(ctx context.Context, input ModelD
 }
 
 // runRenderTask 跑生成题，并对源码指纹做查重。
-func (s *ModelDegradationService) runRenderTask(ctx context.Context, input ModelDegradationInput, question ModelDegradationQuestion) ModelDegradationItem {
+func (s *ModelDegradationService) runRenderTask(ctx context.Context, runID int64, input ModelDegradationInput, question ModelDegradationQuestion) ModelDegradationItem {
 	item := ModelDegradationItem{
 		TaskType: ModelDegradationTaskRender,
 		TaskKey:  question.Key,
@@ -535,7 +547,7 @@ func (s *ModelDegradationService) runRenderTask(ctx context.Context, input Model
 	// 生成题最容易撞上「连接被 idle timeout 掐断」：单题预算长（默认 15 分钟、可调到 60 分钟）
 	// 且输出很长。responses 协议已改走流式（边生成边吐帧），这里再叠一层重试兜住偶发中断。
 	// ⚠️ 重试兜不住「上游就是慢到超时」：首次尝试就拿满全部预算，超时后没有剩余可重试。
-	response, err := s.callUpstreamWithRetry(ctx, input, question.Prompt, input.renderTimeout())
+	response, err := s.callUpstreamWithRetry(ctx, runID, input, question.Prompt, input.renderTimeout())
 	item.DurationMs = int(time.Since(started).Milliseconds())
 
 	if err != nil {
@@ -615,6 +627,9 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 			"model":  input.ModelID,
 			"input":  prompt,
 			"stream": true,
+			// 对齐 manxue-ai：给输出封顶（含推理 token），并声明不留存会话。
+			"max_output_tokens": modelDegradationMaxOutputTokens,
+			"store":             false,
 		}
 		if input.ReasoningEffort != "" {
 			payload["reasoning"] = map[string]string{"effort": input.ReasoningEffort}
@@ -630,6 +645,8 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 				{"role": "user", "content": prompt},
 			},
 			"stream": false,
+			// 对齐 manxue-ai：max_completion_tokens 给输出封顶（含推理 token）。
+			"max_completion_tokens": modelDegradationMaxOutputTokens,
 		}
 		// 未指定推理程度时不带该字段：上游未必接受这个参数，
 		// 无谓地传一个值只会把「上游不支持」变成一次莫名其妙的 400。
@@ -761,7 +778,7 @@ func (s *ModelDegradationService) requestModelDegradationUpstream(
 }
 
 // callUpstream 按所选协议向用户提交的上游发起一次调用。
-// timeout 是这道题的单题上限：生成题要吐一整个 HTML 文档，比逻辑题慢得多。
+// timeout 是这道题的单题上限：生成题要吐整份作品源码，比逻辑题慢得多。
 func (s *ModelDegradationService) callUpstream(ctx context.Context, input ModelDegradationInput, prompt string, timeout time.Duration) (string, error) {
 	call, err := buildModelDegradationUpstreamRequest(input, prompt)
 	if err != nil {
@@ -789,7 +806,7 @@ func (s *ModelDegradationService) callUpstream(ctx context.Context, input ModelD
 }
 
 // modelDegradationResponseLimit 本次调用的响应体读取上限。
-// 流式放宽到 16MB：SSE 每个事件都带信封开销，且生成题要吐一整个 HTML 文档。
+// 流式放宽到 16MB：SSE 每个事件都带信封开销，且生成题要吐整份作品源码。
 func modelDegradationResponseLimit(stream bool) int64 {
 	if stream {
 		return modelDegradationMaxStreamResponseBytes

@@ -342,7 +342,13 @@
                         state="thinking"
                       />
                     </span>
-                    <span class="ma-running-label">{{ t('modelDegradation.resultPanel.running') }}</span>
+                    <span class="ma-running-label" :class="{ 'is-retrying': currentRun?.retrying }">
+                      {{
+                        currentRun?.retrying
+                          ? t('modelDegradation.resultPanel.retrying')
+                          : t('modelDegradation.resultPanel.running')
+                      }}
+                    </span>
                     <span class="ma-running-count">{{ arrivedCount }}/{{ progressTotal }}</span>
                     <span class="ma-running-right">
                       <span class="ma-running-time">
@@ -667,6 +673,13 @@
             {{ t('modelDegradation.monitor.caption', { count: BAR_COUNT }) }}
           </span>
           <div class="ma-gallery-filter">
+            <span class="ma-label">{{ t('modelDegradation.history.typeFilterLabel') }}</span>
+            <Select
+              v-model="historyTypeFilter"
+              :options="historyTypeOptions"
+              :aria-label="t('modelDegradation.history.typeFilterLabel')"
+              :searchable="false"
+            />
             <span class="ma-label">{{ t('modelDegradation.history.filterLabel') }}</span>
             <Select
               v-model="historyFilter"
@@ -722,6 +735,7 @@
             :data-run-id="run.id"
             @mouseenter="timelineHoverId = run.id"
             @mouseleave="hideZoom(); timelineHoverId = null"
+            @focusout="handleCardFocusOut(run, $event)"
           >
             <!-- 卡片正上方的时间点：日期 + 时间，下面一条细线垂到卡片上沿。
                  点与卡一一对应、互相点亮；点节点直接打开那一轮详情。 -->
@@ -759,7 +773,6 @@
               @keydown.space.prevent="openRun(run.id)"
               @keydown.esc="hideZoom"
               @focus="showZoom(run)"
-              @focusout="handleCardFocusOut(run, $event)"
             >
               <span
                 class="ma-card-thumb"
@@ -809,8 +822,13 @@
             </div>
 
             <!-- 展开大卡：铺在卡片之上并向上探出标题行的高度，只在悬停/聚焦时显形。
-                 操作钮必须 .stop，否则点击会冒泡到卡片本体、把详情又开一遍。 -->
-            <div class="ma-hover-card" :aria-hidden="zoomId === run.id ? undefined : 'true'">
+                 整卡可点、点空白处与卡片本体一样打开详情；操作钮必须 .stop，
+                 否则按钮的点击会跟着触发打开详情。 -->
+            <div
+              class="ma-hover-card"
+              :aria-hidden="zoomId === run.id ? undefined : 'true'"
+              @click="openRun(run.id)"
+            >
               <div class="ma-more-head">
                 <div class="ma-more-title">
                   <span class="ma-more-name">{{ run.model_id }}</span>
@@ -1040,7 +1058,9 @@ const readLastSelection = (): {
 } => {
   const empty = {
     modelId: '',
-    reasoningEffort: '' as ModelDegradationReasoningEffort,
+    // 默认 medium（与 manxue-ai 一致）：检测时恒定带档位发出；
+    // 空串仅作为「不指定」选项保留，不再是默认值。
+    reasoningEffort: 'medium' as ModelDegradationReasoningEffort,
     renderTimeoutMinutes: String(MODEL_AUDIT_RENDER_TIMEOUT_DEFAULT_MINUTES)
   }
   try {
@@ -1053,13 +1073,13 @@ const readLastSelection = (): {
       reasoningEffort?: unknown
       renderTimeoutMinutes?: unknown
     }
-    // 档位必须仍在本版枚举里：旧版本存下的值直接丢掉，
+    // 档位必须仍在本版枚举里：旧版本存下的值（含空串）退回默认 medium，
     // 否则会把一个上游不认识的参数发出去，白白换回一次 400。
     const effort =
       typeof reasoningEffort === 'string' &&
       (MODEL_AUDIT_REASONING_EFFORTS as readonly string[]).includes(reasoningEffort)
         ? (reasoningEffort as ModelDegradationReasoningEffort)
-        : ''
+        : 'medium'
     return {
       modelId: typeof modelId === 'string' ? modelId : '',
       reasoningEffort: effort,
@@ -1076,10 +1096,12 @@ const lastSelection = readLastSelection()
 const form = reactive({
   baseUrl: '',
   apiKey: '',
-  // 默认 chat_completions：这是本功能在支持多协议之前的唯一行为。
-  protocol: 'chat_completions' as ModelDegradationProtocol,
+  // 默认 responses（与 manxue-ai 一致）：长生成走流式，连接全程有数据帧，
+  // 不会被网关 idle 超时（如 Cloudflare 100s）掐断；chat_completions 非流式，
+  // 生成期间零流量，慢路由上最容易被中间层截断而超时重试。
+  protocol: 'responses' as ModelDegradationProtocol,
   modelId: lastSelection.modelId,
-  // 空串 = 不指定，请求里不带 reasoning_effort。
+  // 默认 medium（与 manxue-ai 对齐）；空串 = 不指定，请求里不带 reasoning_effort。
   reasoningEffort: lastSelection.reasoningEffort,
   // 生成题单题超时（分钟）。存字符串而不是数字：下拉是 creatable 的，
   // 用户手输时输入框会经过 "1"、"15" 这类半成品，用数字存会把输入卡住。
@@ -1386,9 +1408,9 @@ const bars = computed(() => {
   return out
 })
 
-/* ---- 检测历史：判定筛选 + 分组筛选 + 翻页 ---- */
-// 三件事都在客户端做：列表接口只给了 limit，没有 offset / status / 分组参数，
-// 而历史一次最多 BAR_COUNT 条，本地过滤足够，不为此去动后端。
+/* ---- 检测历史：题型筛选 + 判定筛选 + 分组筛选 + 翻页 ---- */
+// 四件事都在客户端做：列表接口只给了 limit，没有 offset / status / 题型 / 分组
+// 参数，而历史一次最多 BAR_COUNT 条，本地过滤足够，不为此去动后端。
 
 const HISTORY_FILTERS = ['all', 'passed', 'degraded', 'unknown', 'failed'] as const
 type HistoryFilter = (typeof HISTORY_FILTERS)[number]
@@ -1434,6 +1456,19 @@ const historyGroupOptions = computed<SelectOption[]>(() => {
 const matchHistoryGroup = (run: ModelDegradationRun, filter: string) =>
   filter === 'all' || groupBucketOf(run).key === filter
 
+// 题型筛选：生成题认 render_verdict（跑过生成题才有这个判定），逻辑题认
+// logic_total。还在跑的记录要到收尾才结算这两个字段、题型未知 —— 任何题型下
+// 都保留它，否则刚发起的检测会立刻从墙上消失。默认生成题：近期的检测都以
+// 作品墙为主，逻辑题记录切过去看。
+const historyTypeFilter = ref<ModelDegradationTaskType>('render')
+
+const historyTypeOptions = computed<SelectOption[]>(() =>
+  (['render', 'logic'] as const).map((value) => ({ value, label: taskTypeLabel(value) }))
+)
+
+const matchHistoryType = (run: ModelDegradationRun, filter: ModelDegradationTaskType) =>
+  run.status === 'running' || (filter === 'render' ? run.render_verdict !== '' : run.logic_total > 0)
+
 // 「请求失败」在历史里不是一个独立的 status：整轮请求都打不通时，后端仍把这一轮
 // 记成 completed，只是整体 verdict 落成 unknown、逐题明细带上游失败前缀。
 // 所以按「completed + unknown + 生成题没有产出」认请求失败 —— 只跑生成题且跑通时
@@ -1470,7 +1505,10 @@ const matchHistoryFilter = (run: ModelDegradationRun, filter: HistoryFilter) => 
 
 const filteredHistory = computed(() =>
   history.value.filter(
-    (run) => matchHistoryFilter(run, historyFilter.value) && matchHistoryGroup(run, historyGroupFilter.value)
+    (run) =>
+      matchHistoryType(run, historyTypeFilter.value) &&
+      matchHistoryFilter(run, historyFilter.value) &&
+      matchHistoryGroup(run, historyGroupFilter.value)
   )
 )
 
@@ -1591,8 +1629,8 @@ onUnmounted(() => {
 })
 
 // 换筛选回到第 1 页：否则从「全部」第 3 页切到只有 1 页的筛选、再切回来，
-// 会莫名停在原来的第 3 页。两个筛选都要监听。
-watch([historyFilter, historyGroupFilter], () => {
+// 会莫名停在原来的第 3 页。三个筛选都要监听。
+watch([historyTypeFilter, historyFilter, historyGroupFilter], () => {
   historyPage.value = 1
 })
 
@@ -1652,7 +1690,7 @@ const lastMatchBefore = (regex: RegExp, text: string, limit: number) => {
 const extractArtworkHtml = (raw: string) => {
   if (!raw || !ARTWORK_CODE_REGEX.test(raw)) return ''
   const close = /<\/html\s*>/i.exec(raw)
-  // 文档标记只在 </html> 之前找：题面本身就带「以 <!DOCTYPE html> 开头」这个字面量，
+  // 文档标记只在 </html> 之前找：历史题面带「以 <!DOCTYPE html> 开头」的字面量，
   // 模型在前言里复述一遍的话，取第一处会把那段复述当成文档开头，前言又跟着进预览。
   const limit = close ? close.index : raw.length
   const doctype = lastMatchBefore(ARTWORK_DOCTYPE_REGEX, raw, limit)
@@ -1708,12 +1746,63 @@ const SCROLLBAR_HIDE_STYLE =
   '<style>html,body{scrollbar-width:none!important;-ms-overflow-style:none!important}' +
   'html::-webkit-scrollbar,body::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}</style>'
 
-const artworkSrcdoc = (html: string) => (html ? `${html}${SCROLLBAR_HIDE_STYLE}` : '')
+// —— 裸 SVG / Canvas 片段的自适应包装 ——
+// 现版题面只要一个独立 SVG，截出来的是裸 <svg> 片段。直接当 srcdoc 时，浏览器
+// 按它自己的 width/height 在视口左上角原尺寸画 —— 比 1280x800 小的作品右侧、
+// 下方就是一大片白。包一层铺满逻辑视口的文档：
+//   - 带 viewBox 的 SVG 按 preserveAspectRatio 等比居中缩进整屏，观感与
+//     manxue-ai 用 <img object-fit:contain> 一致；
+//   - 缺 viewBox 只有像素宽高时按宽高补一个 viewBox，否则拉大元素也不会缩放
+//     （没有 viewBox 就没有缩放基准）。
+// 整页 HTML（旧题面）保持原样，由作品自己的版式铺满视口。
+const ARTWORK_FRAGMENT_DOC_STYLE =
+  '<style>html,body{margin:0;width:100%;height:100%;overflow:hidden}' +
+  'body>svg{display:block;width:100%!important;height:100%!important}' +
+  'body>canvas{display:block;width:100%;height:100%}</style>'
+
+const ARTWORK_SVG_OPEN_TAG_REGEX = /^<svg\b[^>]*>/i
+const ARTWORK_SVG_VIEWBOX_REGEX = /\bviewBox\s*=/i
+
+// 只认纯数字（可带 px）：百分数或带别的单位的尺寸补出的 viewBox 不合法，宁可不补。
+const readArtworkSvgPixelSize = (openTag: string) => {
+  const readAttr = (name: string) => {
+    const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(openTag)
+    const value = (match?.[1] ?? match?.[2] ?? '').trim()
+    if (!/^\d+(?:\.\d+)?(?:px)?$/i.test(value)) return ''
+    return value.replace(/px$/i, '')
+  }
+  const width = readAttr('width')
+  const height = readAttr('height')
+  return width && height ? `0 0 ${width} ${height}` : ''
+}
+
+const wrapArtworkFragment = (fragment: string) => {
+  const openTag = ARTWORK_SVG_OPEN_TAG_REGEX.exec(fragment)?.[0] ?? ''
+  let artwork = fragment
+  if (openTag && !ARTWORK_SVG_VIEWBOX_REGEX.test(openTag)) {
+    const viewBox = readArtworkSvgPixelSize(openTag)
+    if (viewBox) {
+      artwork = openTag.replace(/^(<svg)\b/i, `$1 viewBox="${viewBox}"`) + fragment.slice(openTag.length)
+    }
+  }
+  return (
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    `${ARTWORK_FRAGMENT_DOC_STYLE}</head><body>${artwork}</body></html>`
+  )
+}
+
+// 裸片段包成铺满视口的文档；整页 HTML 原样。藏滚动条样式两者都追加。
+const artworkSrcdoc = (html: string) => {
+  if (!html) return ''
+  const source = html.trimStart()
+  const document = /^<(?:svg|canvas)\b/i.test(source) ? wrapArtworkFragment(source) : html
+  return `${document}${SCROLLBAR_HIDE_STYLE}`
+}
 
 // —— 作品预览的等比缩放 ——
-// 生成页几乎都是「桌面上一屏」的版式（min-height:100vh + 居中场景，实测两个真实
-// 样例都是）。直接把 iframe 塞进小缩略图时，它的内部视口就是框的大小（可能只有
-// 240px 宽），页面按小视口重排、内容比视口高，结果只能看到一角。所以预览里的
+// 整页作品（旧题面的 HTML）几乎都是「桌面上一屏」的版式（min-height:100vh + 居中
+// 场景，实测两个真实样例都是）。直接把 iframe 塞进小缩略图时，它的内部视口就是
+// 框的大小（可能只有 240px 宽），页面按小视口重排、内容比视口高，结果只能看到一角。所以预览里的
 // iframe 统一按 1280px 宽的逻辑视口排版，外层 SVG（viewBox + foreignObject）
 // 把整页等比缩进预览框 —— 卡片封面、悬停大卡、详情预览三处一个形制。
 //
@@ -1802,7 +1891,7 @@ const prefetchTileDetails = async () => {
 // 翻页 / 换筛选后要为这一页新露面的卡片补明细：封面（作品源码、判定概览的
 // 补充说明）都要 items 才画得出来，而列表接口不带 items。
 // 首屏那一次由 loadHistory 直接调，这里的 watch 只管后续翻页。
-watch([historyPageSafe, historyFilter, historyGroupFilter], () => {
+watch([historyPageSafe, historyTypeFilter, historyFilter, historyGroupFilter], () => {
   void prefetchTileDetails()
 })
 
@@ -2000,12 +2089,13 @@ const hideZoom = () => {
   zoomId.value = null
 }
 
-// 焦点在卡片内部挪动（点到展开层里的操作钮）不算离开：
-// button 获得焦点时卡片自己也会 blur，直接收掉的话钮就点不着了。
+// 焦点在这一块里挪动（卡片 → 展开层里的操作钮）不算离开：button 获得焦点时
+// 卡片自己也会 blur；展开层与卡片是 tile 下的兄弟节点，所以判据挂在 tile 上，
+// 用它的 contains 把两者都圈进来 —— 只按卡片自己算的话，一点操作钮展开层就收掉。
 const handleCardFocusOut = (run: ModelDegradationRun, event: FocusEvent) => {
-  const card = event.currentTarget
+  const tile = event.currentTarget
   const next = event.relatedTarget
-  if (next instanceof Node && card instanceof Node && card.contains(next)) return
+  if (next instanceof Node && tile instanceof Node && tile.contains(next)) return
   if (zoomId.value === run.id) hideZoom()
 }
 
@@ -2161,11 +2251,16 @@ const elapsedSeconds = computed(() => {
   if (startedAtMs.value === null) return 0
   return Math.max(0, Math.floor((nowTick.value - startedAtMs.value) / 1000))
 })
-const elapsedLabel = computed(() =>
-  elapsedSeconds.value < 60
-    ? t('modelDegradation.resultPanel.seconds', { count: elapsedSeconds.value })
-    : t('modelDegradation.resultPanel.minutes', { count: Math.floor(elapsedSeconds.value / 60) })
-)
+const elapsedLabel = computed(() => {
+  const total = elapsedSeconds.value
+  if (total < 60) {
+    return t('modelDegradation.resultPanel.seconds', { count: total })
+  }
+  return t('modelDegradation.resultPanel.minutesSeconds', {
+    minutes: Math.floor(total / 60),
+    seconds: total % 60
+  })
+})
 
 // 第二行的「模型 · 思考等级」。运行刚开始时 currentRun 还是 null，
 // 用表单里的值顶上，避免那一行空一下。
@@ -2741,7 +2836,7 @@ onUnmounted(() => {
 
 .ma-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   border: 1px solid var(--ma-border-soft);
   border-radius: 12px;
   background: var(--ma-panel);
@@ -3230,22 +3325,24 @@ onUnmounted(() => {
   text-align: center;
 }
 
-/* 运行中：一行「转圈 + 进行中 + 秒表 + 停止」，下面一行模型与思考等级。
-   不做题目清单 —— 单轮最长 10 分钟，用户要看的是「还要等多久、能不能停」。 */
+/* 运行中：一行「吉祥物 + 进行中 + 秒表 + 停止」，下面一行模型与思考等级。
+   不做题目清单 —— 单轮最长 1 小时，用户要看的是「还要等多久、能不能停」。 */
 .ma-running {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
+  justify-content: center;
+  gap: 14px;
+  min-height: 220px;
+  padding: 22px;
   border: 1px solid var(--ma-border-soft);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--ma-panel);
 }
 
 .ma-running-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -3269,15 +3366,25 @@ onUnmounted(() => {
 .ma-running-label {
   flex: none;
   color: var(--ma-title);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
+}
+
+/* 有题目正在自动重试（含退避等待）时状态字切成琥珀色「重试中」；
+   重试成功或彻底结束后的下一次轮询就恢复「进行中」。 */
+.ma-running-label.is-retrying {
+  color: #947112;
+}
+
+.dark .ma-running-label.is-retrying {
+  color: #e0c580;
 }
 
 .ma-running-count {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--ma-faint);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3292,9 +3399,9 @@ onUnmounted(() => {
 .ma-running-time {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   color: var(--ma-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3304,11 +3411,11 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid var(--ma-input-border);
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -3325,8 +3432,8 @@ onUnmounted(() => {
 }
 
 .ma-running-stop-box {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 1px;
   background: var(--ma-control-fg);
 }
@@ -3339,7 +3446,7 @@ onUnmounted(() => {
   margin: 0;
   overflow: hidden;
   color: var(--ma-muted);
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3854,6 +3961,8 @@ onUnmounted(() => {
   color: var(--ma-text);
   font-size: 12.5px;
   line-height: 1.6;
+  /* 题面可能带 Markdown 表格（糖果题的统计表），保留换行免得表格被折成一行。 */
+  white-space: pre-wrap;
 }
 
 /* 期望答案 / 模型回答：标签压暗，值保持正文色，一行一项。 */
@@ -4424,18 +4533,28 @@ onUnmounted(() => {
   border-radius: 18px;
   background: var(--ma-tile-bg);
   box-shadow: 0 18px 44px rgba(18, 38, 32, 0.24);
+  /* 展开层整卡可点（空白处点开详情，与卡片本体一致）：它盖住卡片后，
+     不在这里声明 pointer 的话，光标会从小手掉回箭头，像突然不可点了。 */
+  cursor: pointer;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(5px);
+  /* 收起方向：比展开略快，鼠标划走要利落收掉，不拖残影。 */
+  transform: translateY(10px) scale(0.97);
   pointer-events: none;
-  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+  transition: opacity 0.18s ease-in, transform 0.18s ease-in, visibility 0.18s;
 }
 
 .ma-tile.is-zoom .ma-hover-card {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0);
+  /* 展开方向：从缩略图上方 10px、97% 大小「长」到原位。曲线是加强版的
+     ease-out（先快后慢），收尾不带机械的匀速感，放大过程更像浮起来。 */
+  transform: translateY(0) scale(1);
   pointer-events: auto;
+  transition:
+    opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0.24s;
 }
 
 /* 高度写死 48px：作品框要落在静止时缩略图的位置上，这个值直接进 .ma-hover-card 的
@@ -4645,8 +4764,8 @@ onUnmounted(() => {
 
 .ma-running-mascot {
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 52px;
+  height: 52px;
 }
 
 /* ============ 动态底纹 ============

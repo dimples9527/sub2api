@@ -718,8 +718,9 @@ export default {
       title: '我的检测',
       waiting: '等待检测结果',
       running: '进行中',
+      retrying: '重试中',
       seconds: '{count} 秒',
-      minutes: '{count} 分钟',
+      minutesSeconds: '{minutes}分{seconds}秒',
       stop: '中止检测',
       cancelled: '已中止',
       cancelledHint: '这一轮是你手动停掉的，已经跑完的题目结果仍然有效。',
@@ -860,6 +861,8 @@ export default {
         running: '检测中',
         generated: '已生成'
       },
+      // 题型筛选：按这轮跑的题分生成题 / 逻辑题两档，默认生成题（作品墙）。
+      typeFilterLabel: '题型',
       // 判定筛选：历史是共享池子，一屏铺不下全部记录，故按判定筛 + 分页翻。
       filterLabel: '判定',
       filter: {
