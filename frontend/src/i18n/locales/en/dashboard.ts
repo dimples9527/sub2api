@@ -881,6 +881,11 @@ export default {
       // Row scroll buttons (shown at a group head when that one row overflows).
       scrollPrev: 'Scroll left',
       scrollNext: 'Scroll right',
+      // Admin-only: this group is hidden in the model degradation visibility settings,
+      // so regular users cannot see this section.
+      hiddenBadge: 'Hidden',
+      hiddenHint:
+        'This group is hidden for regular users in the model degradation visibility settings; admins can still see it.',
       // Horizontal timeline: each node is one run from the filtered set and opens
       // its detail on click; Today / Yesterday read naturally, older days show a date.
       timeline: {

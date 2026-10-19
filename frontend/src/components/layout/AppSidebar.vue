@@ -966,6 +966,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/model-monitor/platform-overrides', label: '分组平台配置', icon: CogIcon },
         { path: '/admin/model-monitor/group-health', label: '分组健康趋势', icon: SignalIcon },
         { path: '/admin/model-monitor/custom-platforms', label: '自定义平台', icon: CogIcon },
+        { path: '/admin/model-degradation/history-visibility', label: '降智检测可见性', icon: ShieldIcon },
       ],
     },
     { path: '/admin/model-square/config', label: '模型广场配置', icon: ServerIcon, hideInSimpleMode: true },

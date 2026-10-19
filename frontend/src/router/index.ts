@@ -804,6 +804,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-degradation/history-visibility',
+    name: 'AdminModelDegradationHistoryVisibility',
+    component: () => import('@/views/admin/model-degradation/HistoryVisibilityView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: '降智检测历史可见性'
+    }
+  },
+  {
     path: '/admin/model-square/config',
     name: 'AdminModelSquareConfig',
     component: () => import('@/views/admin/model-square/ModelSquareConfigView.vue'),

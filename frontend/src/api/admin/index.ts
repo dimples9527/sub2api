@@ -50,6 +50,7 @@ import modelSquareAPI from './modelSquare'
 import modelSquareConfigAPI from './modelSquareConfig'
 import modelMonitorAPI from './modelMonitor'
 import modelMonitorGroupHealthAPI from './modelMonitorGroupHealth'
+import modelDegradationAPI from './modelDegradation'
 import customPlatformsAPI from './customPlatforms'
 
 /**
@@ -103,6 +104,7 @@ export const adminAPI = {
   modelSquareConfig: modelSquareConfigAPI,
   modelMonitor: modelMonitorAPI,
   modelMonitorGroupHealth: modelMonitorGroupHealthAPI,
+  modelDegradation: modelDegradationAPI,
   customPlatforms: customPlatformsAPI,
 }
 
@@ -154,6 +156,7 @@ export {
   modelSquareConfigAPI,
   modelMonitorAPI,
   modelMonitorGroupHealthAPI,
+  modelDegradationAPI,
   customPlatformsAPI,
 }
 

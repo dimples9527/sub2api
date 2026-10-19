@@ -711,7 +711,14 @@
                主机名归节（与缎带同一口径）。 -->
           <template v-for="group in historyGroups" :key="group.key">
             <div class="ma-group-head">
-              <h3 class="ma-group-name">{{ group.label }}</h3>
+              <h3 class="ma-group-name" :class="{ 'ma-group-name-hidden': group.hidden }">{{ group.label }}</h3>
+              <span
+                v-if="group.hidden"
+                class="ma-group-hidden"
+                :title="t('modelDegradation.history.hiddenHint')"
+              >
+                {{ t('modelDegradation.history.hiddenBadge') }}
+              </span>
               <span class="ma-group-count">{{ group.runs.length }}</span>
               <span class="ma-group-rule" aria-hidden="true"></span>
               <div v-show="rowScroll[group.key]?.overflow" class="ma-group-nav">
@@ -1018,6 +1025,7 @@ import modelDegradationAPI, {
   type ModelDegradationTaskBank,
   type ModelDegradationTaskType
 } from '@/api/modelDegradation'
+import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
@@ -1461,6 +1469,44 @@ const groupBucketOf = (run: ModelDegradationRun): { key: string; label: string }
   return { key: GROUP_BUCKET_NONE, label: t('modelDegradation.history.groupFilter.none') }
 }
 
+// 与后端 hidden host 的匹配口径一致：小写，去 scheme、路径、端口。
+const normalizedHostOf = (baseUrl: string): string => {
+  let host = baseUrl.trim().toLowerCase()
+  const scheme = host.indexOf('://')
+  if (scheme >= 0) host = host.slice(scheme + 3)
+  host = host.split(/[/?#]/)[0]
+  const port = host.indexOf(':')
+  if (port >= 0) host = host.slice(0, port)
+  return host
+}
+
+// 管理员视角的「已隐藏」标记：普通用户的列表由后端过滤掉这些分组 / 上游主机，
+// 管理员看到的仍是全量数据 —— 这里读一次管理端配置，在对应分节上标出来。
+// 配置只用于标记，读取失败不影响历史墙本身。
+const hiddenHistoryGroupIds = ref<Set<number>>(new Set())
+const hiddenHistoryHosts = ref<Set<string>>(new Set())
+
+const loadHiddenHistoryConfig = async () => {
+  if (!authStore.isAdmin) return
+  try {
+    const config = await adminAPI.modelDegradation.getModelDegradationHistoryVisibility()
+    hiddenHistoryGroupIds.value = new Set(config.hidden_group_ids ?? [])
+    hiddenHistoryHosts.value = new Set((config.hidden_hosts ?? []).map(normalizedHostOf))
+  } catch (error) {
+    console.error('Failed to load model audit visibility config:', error)
+  }
+}
+
+const isHiddenHistoryBucket = (runs: ModelDegradationRun[]) => {
+  if (!authStore.isAdmin) return false
+  if (!hiddenHistoryGroupIds.value.size && !hiddenHistoryHosts.value.size) return false
+  return runs.some((run) =>
+    run.group_id != null
+      ? hiddenHistoryGroupIds.value.has(run.group_id)
+      : hiddenHistoryHosts.value.has(normalizedHostOf(run.base_url))
+  )
+}
+
 const historyGroupFilter = ref('all')
 
 // 选项从已加载的历史现算：按记录条数倒序，最常测的分组排最上面。
@@ -1654,6 +1700,7 @@ const historyGroups = computed(() => {
     key: string
     label: string
     runs: ModelDegradationRun[]
+    hidden: boolean
     nodes: { tone: string; latest: boolean; label: string; title: string }[]
   }[] = []
   const index = new Map<string, (typeof sections)[number]>()
@@ -1661,7 +1708,7 @@ const historyGroups = computed(() => {
     const bucket = groupBucketOf(run)
     let section = index.get(bucket.key)
     if (!section) {
-      section = { key: bucket.key, label: bucket.label, runs: [], nodes: [] }
+      section = { key: bucket.key, label: bucket.label, runs: [], hidden: false, nodes: [] }
       index.set(bucket.key, section)
       sections.push(section)
     }
@@ -1673,6 +1720,8 @@ const historyGroups = computed(() => {
       title: `${formatDateTimeToMinute(run.created_at)} · ${run.model_id} · ${groupBucketOf(run).label}`
     })
   }
+  // 标记只看整组：配置按分组 ID / 主机名隐藏，同一节里若混入同名的其它分组也一并提示。
+  for (const section of sections) section.hidden = isHiddenHistoryBucket(section.runs)
   return sections
 })
 
@@ -2604,6 +2653,8 @@ const openRun = async (id: number, options: { scroll?: boolean } = {}) => {
 onMounted(() => {
   void loadHistory()
   void loadTaskBank()
+  // 管理员才需要「已隐藏」标记；普通用户的列表后端已经过滤，读配置没有意义。
+  void loadHiddenHistoryConfig()
 })
 
 onUnmounted(() => {
@@ -4308,6 +4359,42 @@ onUnmounted(() => {
   color: var(--ma-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 管理员专属标记：这一节已在「降智检测可见性」里隐藏，普通用户看不到；
+   管理员仍能看到全量记录。实心琥珀胶囊 + 标题删除线，扫一眼就能认出来。 */
+.ma-group-hidden {
+  padding: 2px 9px;
+  border: 1px solid #d3a52f;
+  border-radius: 999px;
+  background: #f3c94f;
+  color: #392a04;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(160, 118, 12, 0.35);
+}
+
+.dark .ma-group-hidden {
+  border-color: #f0d27a;
+  background: #e4bc50;
+  color: #241a02;
+  box-shadow: 0 0 0 1px rgba(228, 188, 80, 0.25), 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+/* 隐藏分节的标题直接划掉并降成灰色：与胶囊配合，但不会盖住记录本身。 */
+.ma-group-name-hidden {
+  color: var(--ma-muted);
+  text-decoration: line-through;
+  text-decoration-color: rgba(184, 134, 11, 0.8);
+  text-decoration-thickness: 2px;
+}
+
+.dark .ma-group-name-hidden {
+  color: var(--ma-faint);
+  text-decoration-color: rgba(228, 188, 80, 0.75);
 }
 
 /* 细线：把节头剩余宽度补满，充当分节的分隔线。 */
