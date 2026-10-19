@@ -48,6 +48,10 @@ func (r *supplierProviderHandlerRepoStub) ListBalanceSummaryDays(_ context.Conte
 	return []service.SupplierProviderBalanceSummaryDay{}, nil
 }
 
+func (r *supplierProviderHandlerRepoStub) ListLocalCostsForDay(_ context.Context, _ time.Time) (float64, bool, error) {
+	return 0, false, nil
+}
+
 func (r *supplierProviderHandlerRepoStub) ListBalanceCosts(_ context.Context, _, _ time.Time, _ int64) ([]service.SupplierProviderBalanceCostDay, error) {
 	return []service.SupplierProviderBalanceCostDay{}, nil
 }

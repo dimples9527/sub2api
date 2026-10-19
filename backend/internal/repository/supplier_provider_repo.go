@@ -378,12 +378,14 @@ ORDER BY p.sort_order ASC, p.id ASC`
 }
 
 // ListBalanceSummaryDays 按统计日汇总全部供应商的余额与成本快照。
-// upstream_cost 取上游原始上报成本，缺失时回退生效成本（与同表 cost 口径一致的做法见 ListCostTrends）。
+// effective_cost 取生效成本（today_cost），upstream_cost 取上游原始上报成本、
+// 缺失时回退生效成本（与 ListCostTrends 口径一致）。本地成本落在使用记录里，
+// 不在本查询内，由服务层按最近统计日单独汇总。
 func (r *supplierProviderRepository) ListBalanceSummaryDays(ctx context.Context) ([]service.SupplierProviderBalanceSummaryDay, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
        COALESCE(SUM(d.current_balance), 0) AS balance,
-       COALESCE(SUM(d.today_cost), 0) AS cost,
+       COALESCE(SUM(d.today_cost), 0) AS effective_cost,
        COALESCE(SUM(COALESCE(d.raw_upstream_cost, d.today_cost)), 0) AS upstream_cost
 FROM supplier_provider_daily_stats d
 JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
@@ -397,7 +399,7 @@ ORDER BY d.stat_date`)
 	days := make([]service.SupplierProviderBalanceSummaryDay, 0)
 	for rows.Next() {
 		var day service.SupplierProviderBalanceSummaryDay
-		if scanErr := rows.Scan(&day.Date, &day.Balance, &day.Cost, &day.UpstreamCost); scanErr != nil {
+		if scanErr := rows.Scan(&day.Date, &day.Balance, &day.EffectiveCost, &day.UpstreamCost); scanErr != nil {
 			return nil, fmt.Errorf("scan supplier provider balance summary day: %w", scanErr)
 		}
 		days = append(days, day)
@@ -406,6 +408,50 @@ ORDER BY d.stat_date`)
 		return nil, fmt.Errorf("iterate supplier provider balance summary days: %w", err)
 	}
 	return days, nil
+}
+
+// ListLocalCostsForDay 汇总指定统计日全部供应商的本地成本。
+// 本地成本取唯一匹配本地账号的用户扣费（usage_logs.actual_cost），
+// 账号唯一匹配规则与成本分析弹窗完全一致（见 ListCostBreakdowns 的 unique_account_matches），
+// 自然日窗口也按应用时区划分，与弹窗按 timezone.Name() 汇总的口径对齐，
+// 保证同一日期在卡片和弹窗里显示同一个数。
+// ok=false 表示当天没有任何匹配账号的用量记录。
+func (r *supplierProviderRepository) ListLocalCostsForDay(ctx context.Context, day time.Time) (float64, bool, error) {
+	start := timezone.StartOfDay(day)
+	end := start.AddDate(0, 0, 1)
+
+	var localCost float64
+	var usageCount int
+	err := r.db.QueryRowContext(ctx, `
+WITH provider_account_matches AS (
+  SELECT p.id AS provider_id, local_account.id AS local_account_id
+  FROM supplier_providers p
+  JOIN supplier_provider_accounts spa
+    ON spa.provider_id = p.id
+   AND spa.active = TRUE
+  JOIN accounts local_account
+    ON local_account.deleted_at IS NULL
+   AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
+     = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
+  WHERE p.deleted_at IS NULL
+  GROUP BY p.id, local_account.id
+),
+unique_account_matches AS (
+  SELECT MIN(provider_id) AS provider_id, local_account_id
+  FROM provider_account_matches
+  GROUP BY local_account_id
+  HAVING COUNT(*) = 1
+)
+SELECT COALESCE(SUM(ul.actual_cost), 0) AS local_cost,
+       COUNT(*) AS usage_count
+FROM usage_logs ul
+JOIN unique_account_matches matched ON matched.local_account_id = ul.account_id
+WHERE ul.created_at >= $1
+  AND ul.created_at < $2`, start, end).Scan(&localCost, &usageCount)
+	if err != nil {
+		return 0, false, fmt.Errorf("query supplier local costs for day: %w", err)
+	}
+	return localCost, usageCount > 0, nil
 }
 
 // ListBalanceCosts returns balance difference costs per day per provider for the date range.

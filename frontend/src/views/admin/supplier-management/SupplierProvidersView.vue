@@ -104,11 +104,11 @@
           </article>
           <article class="sp-balance-summary-card cost" data-test="supplier-cost-today">
             <span class="sp-balance-summary-label">今日总成本</span>
-            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.cost) }}</strong>
-            <small class="sp-balance-summary-foot">最近统计日 {{ balanceSummary.today.date || '—' }}</small>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.local_cost) }}</strong>
+            <small class="sp-balance-summary-foot">最近统计日 {{ balanceSummary.today.date || '—' }} · 本地成本（用户扣费口径，同成本分析弹窗）</small>
           </article>
-          <!-- 与「今日总成本」并列而不是替代：前者是本地生效成本（含成本核对的人工结论），
-               这张是上游自己记的原始成本，两者不等时说明有审批修正或上游口径偏差。 -->
+          <!-- 与「今日总成本」并列而不是替代：前者是本地用户扣费口径的成本，
+               这张是上游自己记的原始成本，两者不等时说明上游口径偏差或本地定价差异。 -->
           <article class="sp-balance-summary-card upstream-cost" data-test="supplier-cost-upstream-today">
             <span class="sp-balance-summary-label">今日上游总成本</span>
             <strong class="sp-balance-summary-value">{{ currency(balanceSummary.today.upstream_cost) }}</strong>
@@ -121,8 +121,8 @@
           </article>
           <article class="sp-balance-summary-card history-cost" data-test="supplier-cost-history">
             <span class="sp-balance-summary-label">历史总成本</span>
-            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.previous?.cost) }}</strong>
-            <small class="sp-balance-summary-foot">上一统计日 {{ balanceSummary.previous?.date || '暂无' }} · 自 {{ balanceSummary.history.first_date || '—' }} 起累计 {{ currency(balanceSummary.history.total_cost) }}</small>
+            <strong class="sp-balance-summary-value">{{ currency(balanceSummary.previous?.local_cost) }}</strong>
+            <small class="sp-balance-summary-foot">上一统计日 {{ balanceSummary.previous?.date || '暂无' }}（与今日对比） · 自 {{ balanceSummary.history.first_date || '—' }} 起累计 {{ currency(balanceSummary.history.total_cost) }}</small>
           </article>
         </div>
         <div v-else class="sp-balance-summary-loading">暂无每日同步快照数据，待供应商同步任务写入后展示</div>

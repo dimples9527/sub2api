@@ -16,6 +16,9 @@ type supplierProviderRepoStub struct {
 	costBreakdowns               []SupplierProviderCostBreakdown
 	balanceSummaryDays           []SupplierProviderBalanceSummaryDay
 	balanceCosts                 []SupplierProviderBalanceCostDay
+	localCostValue               float64
+	localCostOK                  bool
+	localCostDays                []time.Time
 	costTrendCalls               int
 	disableAfterAuthFailureCalls int
 	disableMessages              []string
@@ -83,6 +86,11 @@ func (r *supplierProviderRepoStub) ListBalanceSummaryDays(_ context.Context) ([]
 		return r.balanceSummaryDays, nil
 	}
 	return []SupplierProviderBalanceSummaryDay{}, nil
+}
+
+func (r *supplierProviderRepoStub) ListLocalCostsForDay(_ context.Context, day time.Time) (float64, bool, error) {
+	r.localCostDays = append(r.localCostDays, day)
+	return r.localCostValue, r.localCostOK, nil
 }
 
 func (r *supplierProviderRepoStub) ListBalanceCosts(_ context.Context, _, _ time.Time, _ int64) ([]SupplierProviderBalanceCostDay, error) {
@@ -797,11 +805,15 @@ func TestSupplierProviderServiceListCostTrendsByDateRangeRejectsInvalid(t *testi
 }
 
 func TestSupplierProviderServiceGetBalanceSummary(t *testing.T) {
-	repo := &supplierProviderRepoStub{balanceSummaryDays: []SupplierProviderBalanceSummaryDay{
-		{Date: "2026-08-01", Balance: 100, Cost: 10},
-		{Date: "2026-08-02", Balance: 120, Cost: 12},
-		{Date: "2026-08-03", Balance: 90, Cost: 15},
-	}}
+	repo := &supplierProviderRepoStub{
+		balanceSummaryDays: []SupplierProviderBalanceSummaryDay{
+			{Date: "2026-08-01", Balance: 100, EffectiveCost: 10},
+			{Date: "2026-08-02", Balance: 120, EffectiveCost: 12},
+			{Date: "2026-08-03", Balance: 90, EffectiveCost: 15},
+		},
+		localCostValue: 8.5,
+		localCostOK:    true,
+	}
 	svc := NewSupplierProviderService(repo, supplierEncryptorStub{})
 
 	summary, err := svc.GetBalanceSummary(context.Background())
@@ -809,7 +821,13 @@ func TestSupplierProviderServiceGetBalanceSummary(t *testing.T) {
 	require.Equal(t, "2026-08-03", summary.LatestDate)
 	require.Equal(t, "2026-08-03", summary.Today.Date)
 	require.Equal(t, 90.0, summary.Today.Balance)
-	require.Equal(t, 15.0, summary.Today.Cost)
+	// 今日总成本取本地成本（唯一匹配本地账号的用户扣费），不是 daily_stats.today_cost。
+	require.Equal(t, 8.5, summary.Today.LocalCost)
+	// 历史卡是今日卡的同口径对比，上一统计日同样补本地成本。
+	require.Equal(t, 8.5, summary.Previous.LocalCost)
+	require.Len(t, repo.localCostDays, 2)
+	require.Equal(t, "2026-08-03", repo.localCostDays[0].Format("2006-01-02"))
+	require.Equal(t, "2026-08-02", repo.localCostDays[1].Format("2006-01-02"))
 	require.Equal(t, "2026-08-02", summary.Previous.Date)
 	require.Equal(t, 120.0, summary.Previous.Balance)
 	require.Equal(t, "2026-08-01", summary.History.FirstDate)

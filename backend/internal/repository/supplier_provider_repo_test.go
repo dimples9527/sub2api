@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -208,13 +209,13 @@ func TestSupplierProviderRepositoryListBalanceSummaryDaysScansUpstreamCost(t *te
 	mock.ExpectQuery(regexp.QuoteMeta(`
 SELECT TO_CHAR(d.stat_date, 'YYYY-MM-DD') AS date,
        COALESCE(SUM(d.current_balance), 0) AS balance,
-       COALESCE(SUM(d.today_cost), 0) AS cost,
+       COALESCE(SUM(d.today_cost), 0) AS effective_cost,
        COALESCE(SUM(COALESCE(d.raw_upstream_cost, d.today_cost)), 0) AS upstream_cost
 FROM supplier_provider_daily_stats d
 JOIN supplier_providers p ON p.id = d.provider_id AND p.deleted_at IS NULL
 GROUP BY d.stat_date
 ORDER BY d.stat_date`)).
-		WillReturnRows(sqlmock.NewRows([]string{"date", "balance", "cost", "upstream_cost"}).
+		WillReturnRows(sqlmock.NewRows([]string{"date", "balance", "effective_cost", "upstream_cost"}).
 			AddRow("2026-08-14", 170.0, 60.0, 72.5))
 
 	days, err := repo.ListBalanceSummaryDays(context.Background())
@@ -223,7 +224,29 @@ ORDER BY d.stat_date`)).
 	require.Len(t, days, 1)
 	require.Equal(t, "2026-08-14", days[0].Date)
 	require.Equal(t, 170.0, days[0].Balance)
-	require.Equal(t, 60.0, days[0].Cost)
+	require.Equal(t, 60.0, days[0].EffectiveCost)
 	require.Equal(t, 72.5, days[0].UpstreamCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 「今日总成本」卡要取本地成本口径（唯一匹配本地账号的用户扣费），
+// 与成本分析弹窗一致；这里钉住查询与日期边界，避免退化成 daily_stats 的生效成本。
+func TestSupplierProviderRepositoryListLocalCostsForDay(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewSupplierProviderRepository(db)
+
+	day := time.Date(2026, 8, 14, 0, 0, 0, 0, time.Local)
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(SUM\(ul\.actual_cost\), 0\) AS local_cost,\s+COUNT\(\*\) AS usage_count\s+FROM usage_logs ul`).
+		WithArgs(timezone.StartOfDay(day), timezone.StartOfDay(day).AddDate(0, 0, 1)).
+		WillReturnRows(sqlmock.NewRows([]string{"local_cost", "usage_count"}).AddRow(52.2, 7))
+
+	localCost, ok, err := repo.ListLocalCostsForDay(context.Background(), day)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 52.2, localCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

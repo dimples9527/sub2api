@@ -275,9 +275,9 @@ export interface SupplierProviderCostTrendResult {
 export interface SupplierProviderBalanceSummaryDay {
   date: string
   balance: number
-  /** 生效成本合计（已含成本核对页的人工审批结论）。 */
-  cost: number
-  /** 上游原始上报成本合计，缺失时回退生效成本；口径与 cost 不同。 */
+  /** 本地成本合计：唯一匹配本地账号的用户扣费（usage_logs.actual_cost），与成本分析弹窗本地成本同口径。 */
+  local_cost: number
+  /** 上游原始上报成本合计，缺失时回退生效成本；口径与成本分析弹窗上游成本一致。 */
   upstream_cost: number
 }
 

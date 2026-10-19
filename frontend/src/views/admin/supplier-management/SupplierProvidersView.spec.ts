@@ -313,8 +313,8 @@ describe('SupplierProvidersView payload normalization', () => {
     providerViewMocks.updateCostDeviationSettings.mockResolvedValue({ threshold: 0.5 })
     providerViewMocks.getBalanceSummary.mockResolvedValue({
       latest_date: '2026-08-14',
-      today: { date: '2026-08-14', balance: 170, cost: 60, upstream_cost: 72.5 },
-      previous: { date: '2026-08-13', balance: 140, cost: 55, upstream_cost: 58 },
+      today: { date: '2026-08-14', balance: 170, local_cost: 52.2, upstream_cost: 72.5 },
+      previous: { date: '2026-08-13', balance: 140, local_cost: 48, upstream_cost: 58 },
       history: { first_date: '2026-08-01', days: 14, total_balance: 2400, total_cost: 620 },
     })
     providerViewMocks.listProviders.mockResolvedValue({
@@ -1198,14 +1198,16 @@ describe('SupplierProvidersView payload normalization', () => {
     expect(wrapper.get('[data-test="supplier-balance-today"]').text()).toContain('今日总余额')
     expect(wrapper.get('[data-test="supplier-balance-today"]').text()).toContain('170')
     expect(wrapper.get('[data-test="supplier-cost-today"]').text()).toContain('今日总成本')
-    // 上游原始成本与生效成本是两个口径，卡上必须各显各的数（都取 today 的对应字段）
+    // 今日总成本取本地成本（用户扣费口径，与成本分析弹窗一致），不是 daily_stats 的生效成本。
+    expect(wrapper.get('[data-test="supplier-cost-today"]').text()).toContain('52.2')
+    // 上游原始成本与本地成本是两个口径，卡上必须各显各的数（都取 today 的对应字段）
     expect(wrapper.get('[data-test="supplier-cost-upstream-today"]').text()).toContain('今日上游总成本')
     expect(wrapper.get('[data-test="supplier-cost-upstream-today"]').text()).toContain('72.5')
     expect(wrapper.get('[data-test="supplier-balance-previous"]').text()).toContain('历史总余额')
     expect(wrapper.get('[data-test="supplier-balance-previous"]').text()).toContain('140')
     expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('历史总成本')
-    // 历史总成本按上一统计日对比口径展示，脚注保留累计成本。
-    expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('55')
+    // 历史卡是今日卡的同口径对比：上一统计日的本地成本，脚注保留区间累计成本。
+    expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('48')
     expect(wrapper.get('[data-test="supplier-cost-history"]').text()).toContain('620')
     expect(supplierProvidersSource).toContain('getBalanceSummary')
     expect(supplierProvidersSource).toContain('loadBalanceSummary')
