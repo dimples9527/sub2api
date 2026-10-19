@@ -44,6 +44,7 @@ func RegisterAdminRoutes(
 		// 分组管理
 		registerGroupRoutes(admin, h)
 		registerModelMonitorRoutes(admin, h)
+		registerModelDegradationAdminRoutes(admin, h)
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)

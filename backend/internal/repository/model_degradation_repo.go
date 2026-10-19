@@ -199,7 +199,10 @@ func (r *modelDegradationRepository) GetRun(ctx context.Context, runID int64) (*
 }
 
 // ListRuns 读取共享的检测历史，按时间倒序。列表不返回明细，详情按需再查。
-func (r *modelDegradationRepository) ListRuns(ctx context.Context, limit int) ([]service.ModelDegradationRun, error) {
+//
+// includeHidden=false 时按管理端配置过滤掉隐藏的分组 / 第三方上游记录（普通用户视图），
+// 过滤放在 SQL 里而不是读出来再筛：LIMIT 的口径要保持一致，隐藏记录不能白占名额。
+func (r *modelDegradationRepository) ListRuns(ctx context.Context, limit int, includeHidden bool) ([]service.ModelDegradationRun, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("model audit repository database is not initialized")
 	}
@@ -207,8 +210,13 @@ func (r *modelDegradationRepository) ListRuns(ctx context.Context, limit int) ([
 		limit = 20
 	}
 
+	visibilityFilter := ""
+	if !includeHidden {
+		visibilityFilter = modelAuditHistoryVisibilityFilter
+	}
+
 	rows, err := r.db.QueryContext(ctx,
-		modelDegradationRunSelect+`
+		modelDegradationRunSelect+visibilityFilter+`
 ORDER BY r.created_at DESC, r.id DESC
 LIMIT $1`,
 		limit,

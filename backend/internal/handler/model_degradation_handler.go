@@ -259,6 +259,9 @@ func (h *ModelDegradationHandler) Cancel(c *gin.Context) {
 }
 
 // List 读取当前用户的检测历史。
+//
+// 管理端（管理员账号）不受「检测历史可见性」配置影响：同样这个接口，
+// 管理员拿到的是全量数据，普通用户拿到的会隐藏管理端配置的分组 / 第三方上游。
 // GET /api/v1/model-degradation/runs
 func (h *ModelDegradationHandler) List(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
@@ -274,7 +277,7 @@ func (h *ModelDegradationHandler) List(c *gin.Context) {
 		}
 	}
 
-	runs, err := h.auditService.List(c.Request.Context(), limit)
+	runs, err := h.auditService.List(c.Request.Context(), limit, modelDegradationViewerIsAdmin(c))
 	if err != nil {
 		response.InternalError(c, "读取检测历史失败")
 		return
@@ -285,6 +288,100 @@ func (h *ModelDegradationHandler) List(c *gin.Context) {
 		items = append(items, modelDegradationRunToResponse(&runs[i], subject.UserID, false))
 	}
 	response.Success(c, gin.H{"items": items})
+}
+
+// modelDegradationViewerIsAdmin 判断当前请求者是不是管理员。
+// 用户端路由的 JWT / API Key 中间件都会带上角色（ContextKeyUserRole）。
+func modelDegradationViewerIsAdmin(c *gin.Context) bool {
+	role, ok := middleware2.GetUserRoleFromContext(c)
+	return ok && role == service.RoleAdmin
+}
+
+// modelDegradationHistoryHostStatResponse 按主机归桶的上游记录数。
+type modelDegradationHistoryHostStatResponse struct {
+	Host     string `json:"host"`
+	RunCount int64  `json:"run_count"`
+}
+
+// modelDegradationHistoryVisibilityResponse 检测历史可见性配置（管理端）。
+type modelDegradationHistoryVisibilityResponse struct {
+	HiddenGroupIDs []int64                                   `json:"hidden_group_ids"`
+	HiddenHosts    []string                                  `json:"hidden_hosts"`
+	Hosts          []modelDegradationHistoryHostStatResponse `json:"hosts"`
+}
+
+// AdminGetHistoryVisibility 读取检测历史可见性配置（管理端）。
+// GET /api/v1/admin/model-degradation/history-visibility
+func (h *ModelDegradationHandler) AdminGetHistoryVisibility(c *gin.Context) {
+	config, err := h.auditService.HistoryVisibility(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "读取检测历史可见性配置失败")
+		return
+	}
+
+	resp := modelDegradationHistoryVisibilityResponse{
+		HiddenGroupIDs: config.HiddenGroupIDs,
+		HiddenHosts:    config.HiddenHosts,
+		Hosts:          make([]modelDegradationHistoryHostStatResponse, 0, len(config.Hosts)),
+	}
+	for _, stat := range config.Hosts {
+		resp.Hosts = append(resp.Hosts, modelDegradationHistoryHostStatResponse{
+			Host:     stat.Host,
+			RunCount: stat.RunCount,
+		})
+	}
+	response.Success(c, resp)
+}
+
+// AdminSetHistoryGroupVisibility 隐藏 / 恢复某个平台分组的检测历史展示（管理端）。
+// PUT /api/v1/admin/model-degradation/history-visibility/groups/:group_id
+func (h *ModelDegradationHandler) AdminSetHistoryGroupVisibility(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "分组 ID 无效")
+		return
+	}
+	var req struct {
+		Hidden *bool `json:"hidden" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Hidden == nil {
+		response.BadRequest(c, "hidden is required")
+		return
+	}
+
+	if err := h.auditService.SetHistoryGroupHidden(c.Request.Context(), groupID, *req.Hidden); err != nil {
+		if errors.Is(err, service.ErrModelDegradationHistoryGroupInvalid) {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.InternalError(c, "保存检测历史可见性配置失败")
+		return
+	}
+	response.Success(c, gin.H{"hidden": *req.Hidden})
+}
+
+// AdminSetHistoryHostVisibility 隐藏 / 恢复某个第三方上游主机的检测历史展示（管理端）。
+// 主机名允许直接粘贴完整地址，由服务层归一化（去 scheme / 路径 / 端口，统一小写）。
+// PUT /api/v1/admin/model-degradation/history-visibility/hosts
+func (h *ModelDegradationHandler) AdminSetHistoryHostVisibility(c *gin.Context) {
+	var req struct {
+		Host   string `json:"host" binding:"required"`
+		Hidden *bool  `json:"hidden" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Hidden == nil {
+		response.BadRequest(c, "host and hidden are required")
+		return
+	}
+
+	if err := h.auditService.SetHistoryHostHidden(c.Request.Context(), req.Host, *req.Hidden); err != nil {
+		if errors.Is(err, service.ErrModelDegradationHistoryHostInvalid) {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.InternalError(c, "保存检测历史可见性配置失败")
+		return
+	}
+	response.Success(c, gin.H{"hidden": *req.Hidden})
 }
 
 // maskBaseURL 只保留 scheme + host，路径与查询串一律抹掉。

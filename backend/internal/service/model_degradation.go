@@ -31,6 +31,12 @@ var ErrModelDegradationRunInProgress = errors.New("已有一轮检测正在进�
 // 已完结或已被中止过一次的行不会被二次更新。
 var ErrModelDegradationRunNotCancellable = errors.New("该检测已结束，无需中止")
 
+// ErrModelDegradationHistoryHostInvalid 要隐藏 / 恢复的上游主机名格式不合法。
+var ErrModelDegradationHistoryHostInvalid = errors.New("上游主机名格式无效")
+
+// ErrModelDegradationHistoryGroupInvalid 要隐藏 / 恢复的分组 ID 不合法。
+var ErrModelDegradationHistoryGroupInvalid = errors.New("分组 ID 无效")
+
 // ModelDegradationCancelledMessage 中止原因。仓储的条件更新与 execute 收尾都写
 // 这一句，两处指向同一个常量，避免前端看到两种说法。
 const ModelDegradationCancelledMessage = "已手动中止"
@@ -211,8 +217,11 @@ type ModelDegradationRepository interface {
 	FinishRun(ctx context.Context, run *ModelDegradationRun) error
 	// GetRun / ListRuns 是共享历史：不带 user_id 过滤，任何人都能读到全部检测记录。
 	// 读取放开、写入不放开 —— 中止仍由 MarkRunCancelled 的 user_id 过滤拦着。
+	//
+	// ListRuns 的 includeHidden=false 表示「普通用户视图」：按管理端配置屏蔽
+	// 隐藏的分组 / 第三方上游记录；true 表示管理端视图，返回全量数据。
 	GetRun(ctx context.Context, runID int64) (*ModelDegradationRun, error)
-	ListRuns(ctx context.Context, limit int) ([]ModelDegradationRun, error)
+	ListRuns(ctx context.Context, limit int, includeHidden bool) ([]ModelDegradationRun, error)
 	// CountSourceHash 统计该源码指纹在历史记录中已出现的次数，用于识别
 	// 「多次检测返回同一份源码」。返回 0 表示这是首次出现。
 	CountSourceHash(ctx context.Context, hash string) (int, error)
@@ -242,6 +251,32 @@ type ModelDegradationRepository interface {
 	// DeleteRunsBeyondKeep 只保留最新的 keep 条，超出的按时间倒序物理删除，
 	// 单次最多 batchSize 条。天数闸之外的条数兜底。
 	DeleteRunsBeyondKeep(ctx context.Context, keep, batchSize int) (int64, error)
+	// ListHiddenHistoryTargets 读取检测历史的隐藏清单：分组 ID 与上游主机。
+	ListHiddenHistoryTargets(ctx context.Context) ([]int64, []string, error)
+	// SetHiddenHistoryGroup / SetHiddenHistoryHost 追加或移除一个隐藏目标，幂等；
+	// host 由 service 归一化后传入。
+	SetHiddenHistoryGroup(ctx context.Context, groupID int64, hidden bool) error
+	SetHiddenHistoryHost(ctx context.Context, host string, hidden bool) error
+	// ListHistoryHostStats 按主机统计没命中分组的记录数（历史墙的「上游主机」桶
+	// 清单），供管理端挑选要隐藏的第三方上游。
+	ListHistoryHostStats(ctx context.Context, limit int) ([]ModelDegradationHistoryHostStat, error)
+}
+
+// ModelDegradationHistoryHostStat 是检测历史里按主机归桶的第三方上游记录数。
+type ModelDegradationHistoryHostStat struct {
+	Host     string
+	RunCount int64
+}
+
+// ModelDegradationHistoryVisibility 是检测历史的可见性配置（管理端使用）。
+//
+// 只影响普通用户读取历史时的列表结果；管理员不受影响，仍能看到全量数据。
+type ModelDegradationHistoryVisibility struct {
+	// HiddenGroupIDs / HiddenHosts 当前被隐藏的分组与上游主机。
+	HiddenGroupIDs []int64
+	HiddenHosts    []string
+	// Hosts 历史里实际出现过的、按主机归桶的上游（含记录数），供管理端挑选。
+	Hosts []ModelDegradationHistoryHostStat
 }
 
 // ModelDegradationHistoryMaintainer 是每日运维清理任务需要的检测历史清理能力。

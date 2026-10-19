@@ -48,6 +48,9 @@ const (
 	// 列表查询默认与最大条数。
 	modelDegradationDefaultListLimit = 20
 	modelDegradationMaxListLimit     = 100
+	// 管理端「上游主机」候选清单的条数上限。它只是给管理员挑选的选项列表，
+	// 不需要覆盖全部历史主机。
+	modelDegradationHistoryHostStatLimit = 100
 	// 检测历史的保留窗口与条数上限（两道闸，见 PruneHistory）。
 	// 体积几乎全在 model_audit_items.response（单条最多 modelDegradationMaxResponseBytes），
 	// 一轮最多 2 道题 ⇒ 条数闸才是磁盘占用的硬顶：500 条 × 2 × 256KB ≈ 256MB。
@@ -275,14 +278,100 @@ func (s *ModelDegradationService) Get(ctx context.Context, runID int64) (*ModelD
 }
 
 // List 读取共享的检测历史（所有人的记录）。
-func (s *ModelDegradationService) List(ctx context.Context, limit int) ([]ModelDegradationRun, error) {
+//
+// includeHidden=false 是普通用户视图：按管理端配置隐藏指定分组 / 第三方上游的记录；
+// true 是管理端视图，返回全量数据（配置只约束普通用户）。
+func (s *ModelDegradationService) List(ctx context.Context, limit int, includeHidden bool) ([]ModelDegradationRun, error) {
 	if limit <= 0 {
 		limit = modelDegradationDefaultListLimit
 	}
 	if limit > modelDegradationMaxListLimit {
 		limit = modelDegradationMaxListLimit
 	}
-	return s.repo.ListRuns(ctx, limit)
+	return s.repo.ListRuns(ctx, limit, includeHidden)
+}
+
+// HistoryVisibility 读取管理端「检测历史可见性」配置：
+// 隐藏的分组 / 主机清单（普通用户看不到对应记录），以及历史里实际出现过的
+// 按主机归桶的第三方上游清单（供管理端挑选，带记录数）。
+func (s *ModelDegradationService) HistoryVisibility(ctx context.Context) (*ModelDegradationHistoryVisibility, error) {
+	groupIDs, hosts, err := s.repo.ListHiddenHistoryTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := s.repo.ListHistoryHostStats(ctx, modelDegradationHistoryHostStatLimit)
+	if err != nil {
+		return nil, err
+	}
+	if groupIDs == nil {
+		groupIDs = []int64{}
+	}
+	if hosts == nil {
+		hosts = []string{}
+	}
+	if stats == nil {
+		stats = []ModelDegradationHistoryHostStat{}
+	}
+	return &ModelDegradationHistoryVisibility{
+		HiddenGroupIDs: groupIDs,
+		HiddenHosts:    hosts,
+		Hosts:          stats,
+	}, nil
+}
+
+// SetHistoryGroupHidden 隐藏 / 恢复某个平台分组在检测历史里的展示。
+// 不做存在性校验：历史记录里的 group_id 是发起时的快照，分组可能已被改名或删除，
+// 隐藏配置要能继续覆盖这些历史记录（表结构也没有外键，见迁移 254）。
+func (s *ModelDegradationService) SetHistoryGroupHidden(ctx context.Context, groupID int64, hidden bool) error {
+	if groupID <= 0 {
+		return ErrModelDegradationHistoryGroupInvalid
+	}
+	return s.repo.SetHiddenHistoryGroup(ctx, groupID, hidden)
+}
+
+// SetHistoryHostHidden 隐藏 / 恢复某个第三方上游主机在检测历史里的展示。
+// 主机名先归一化（允许直接粘贴完整地址），再落库。
+func (s *ModelDegradationService) SetHistoryHostHidden(ctx context.Context, host string, hidden bool) error {
+	normalized, ok := normalizeHistoryHost(host)
+	if !ok {
+		return ErrModelDegradationHistoryHostInvalid
+	}
+	return s.repo.SetHiddenHistoryHost(ctx, normalized, hidden)
+}
+
+// normalizeHistoryHost 归一化上游主机名：允许管理员直接粘贴完整地址
+// （自动去掉 scheme、路径、查询串与端口），统一小写。
+//
+// 为什么端口不参与匹配：历史过滤按「主机名」比对（见仓储里的 SQL 口径），
+// 同一主机换端口仍然是同一上游；把端口算进去只会让管理员配置两次。
+// 只接受字母 / 数字 / '.' / '-' / '_'：这是 host 的合法字符集，
+// scheme、路径、空格等漏网字符直接判不合法，而不是存进去当摆设。
+func normalizeHistoryHost(raw string) (string, bool) {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" {
+		return "", false
+	}
+	// 泛化地剥掉 scheme（'://' 之后才是主机）：只认 http(s) 会漏掉粘贴进来的
+	// 其它形式（例如带端口的内部网关），那类值会整串留着然后被字符集拦掉。
+	if idx := strings.Index(host, "://"); idx >= 0 {
+		host = host[idx+3:]
+	}
+	if idx := strings.IndexAny(host, "/?#"); idx >= 0 {
+		host = host[:idx]
+	}
+	if base, _, found := strings.Cut(host, ":"); found {
+		host = base
+	}
+	if host == "" || len(host) > 253 {
+		return "", false
+	}
+	for _, r := range host {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
+			continue
+		}
+		return "", false
+	}
+	return host, true
 }
 
 // PruneHistory 按「保留天数 + 最多条数」双闸清理检测历史。
