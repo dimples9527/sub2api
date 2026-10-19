@@ -878,6 +878,9 @@ export default {
         all: 'All groups',
         none: 'Ungrouped'
       },
+      // Row scroll buttons (shown at a group head when that one row overflows).
+      scrollPrev: 'Scroll left',
+      scrollNext: 'Scroll right',
       // Horizontal timeline: each node is one run from the filtered set and opens
       // its detail on click; Today / Yesterday read naturally, older days show a date.
       timeline: {

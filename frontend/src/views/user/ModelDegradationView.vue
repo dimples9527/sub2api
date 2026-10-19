@@ -706,233 +706,258 @@
         </p>
         <div v-else ref="historyWallRef" class="ma-groups">
           <!-- 分组归类：同一分组的记录聚成一节，节头是分组名 + 条数 + 细线。
-               节头用 grid-column: 1 / -1 整行铺开，所以自己占一行、不抢瓦片的格子；
-               没命中分组的按上游主机名归节（与缎带同一口径）。 -->
+               节头下方整组卡片铺成一行、不换行；一行放不下时由节头右端的
+               ‹ › 按钮横向滚动（行本身是滚动容器）。没命中分组的按上游
+               主机名归节（与缎带同一口径）。 -->
           <template v-for="group in historyGroups" :key="group.key">
             <div class="ma-group-head">
               <h3 class="ma-group-name">{{ group.label }}</h3>
               <span class="ma-group-count">{{ group.runs.length }}</span>
               <span class="ma-group-rule" aria-hidden="true"></span>
+              <div v-show="rowScroll[group.key]?.overflow" class="ma-group-nav">
+                <button
+                  type="button"
+                  class="ma-wall-nav"
+                  :disabled="!rowScroll[group.key]?.left"
+                  :aria-label="t('modelDegradation.history.scrollPrev')"
+                  @click="scrollGroupRow(group.key, -1)"
+                >
+                  <Icon name="chevronLeft" size="sm" />
+                </button>
+                <button
+                  type="button"
+                  class="ma-wall-nav"
+                  :disabled="!rowScroll[group.key]?.right"
+                  :aria-label="t('modelDegradation.history.scrollNext')"
+                  @click="scrollGroupRow(group.key, 1)"
+                >
+                  <Icon name="chevronRight" size="sm" />
+                </button>
+              </div>
             </div>
-          <!-- 每张卡片是一个 .ma-tile：预览居中铺在卡面里，右上斜角勋章。
-               静止时卡面上只有预览与勋章 —— 模型 / 耗时 / 判定不铺在卡上，
-               它们留在展开层里（源站的墙就是这么干净的）。
-               卡片本体用 role=button 的 div 而不是 <button>：预览里要放 <iframe>，
-               按钮里嵌 iframe 不是合法 HTML。键盘走 enter / space，与题目卡片一致。
-               移入时另起一张「大卡」浮层（.ma-hover-card）：标题行 + 预览 + 指标页脚，
-               形制照源站那张访客详情卡。浮层 absolute 定位、比卡片高，所以网格不会重排；
-               预览是浮层自己的一份 iframe，只在悬停的那一张上创建。 -->
-          <div
-            v-for="(run, runIndex) in group.runs"
-            :key="run.id"
-            class="ma-tile"
-            :class="{
-              'is-zoom': zoomId === run.id,
-              'is-bound': timelineHoverId === run.id,
-              'is-chain-left': chainLeftIds.has(run.id),
-              'is-chain-right': chainRightIds.has(run.id)
-            }"
-            :data-run-id="run.id"
-            @mouseenter="timelineHoverId = run.id"
-            @mouseleave="hideZoom(); timelineHoverId = null"
-            @focusout="handleCardFocusOut(run, $event)"
-          >
-            <!-- 卡片正上方的时间点：日期 + 时间，下面一条细线垂到卡片上沿。
-                 点与卡一一对应、互相点亮；点节点直接打开那一轮详情。 -->
-            <div class="ma-tile-cap">
-              <button
-                type="button"
-                class="ma-group-node"
-                :class="[
-                  group.nodes[runIndex].tone,
-                  {
-                    'is-latest': group.nodes[runIndex].latest,
-                    'is-bound': timelineHoverId === run.id
-                  }
-                ]"
-                :title="group.nodes[runIndex].title"
-                :aria-label="group.nodes[runIndex].title"
-                @click="openRun(run.id)"
+            <div class="ma-group-row" :data-group-row="group.key">
+              <!-- 每张卡片是一个 .ma-tile：预览居中铺在卡面里，右上斜角勋章。
+                   静止时卡面上只有预览与勋章 —— 模型 / 耗时 / 判定不铺在卡上，
+                   它们留在展开层里（源站的墙就是这么干净的）。
+                   卡片本体用 role=button 的 div 而不是 <button>：预览里要放 <iframe>，
+                   按钮里嵌 iframe 不是合法 HTML。键盘走 enter / space，与题目卡片一致。
+                   移入时另起一张「大卡」浮层（.ma-hover-card）：标题行 + 预览 + 指标页脚，
+                   形制照源站那张访客详情卡。浮层 fixed 定位、比卡片高：行是滚动容器，
+                   绝对定位会被裁掉，fixed 才能整个探出来；位置在悬停时按卡片量出。
+                   预览是浮层自己的一份 iframe，只在悬停的那一张上创建。 -->
+              <div
+                v-for="(run, runIndex) in group.runs"
+                :key="run.id"
+                class="ma-tile"
+                :class="{
+                  'is-zoom': zoomId === run.id,
+                  'is-bound': timelineHoverId === run.id,
+                  'is-chain-left': runIndex > 0,
+                  'is-chain-right': runIndex < group.runs.length - 1
+                }"
+                :data-run-id="run.id"
                 @mouseenter="timelineHoverId = run.id"
-                @mouseleave="timelineHoverId = null"
-                @focus="timelineHoverId = run.id"
-                @blur="timelineHoverId = null"
+                @mouseleave="hideZoom(); timelineHoverId = null"
+                @focusout="handleCardFocusOut(run, $event)"
               >
-                <span class="ma-group-node-time">{{ group.nodes[runIndex].label }}</span>
-                <span class="ma-group-node-dot"></span>
-              </button>
-            </div>
-            <div
-              class="ma-card"
-              role="button"
-              tabindex="0"
-              :aria-label="t('modelDegradation.history.open')"
-              @mouseenter="showZoom(run); timelineHoverId = run.id"
-              @click="openRun(run.id)"
-              @keydown.enter.prevent="openRun(run.id)"
-              @keydown.space.prevent="openRun(run.id)"
-              @keydown.esc="hideZoom"
-              @focus="showZoom(run)"
-            >
-              <span
-                class="ma-card-thumb"
-                :class="[thumbTone(run), { 'is-render': !!renderHtmlOf(run) }]"
-              >
-                <!-- 跑过生成题就有产物：整页按 1280px 逻辑视口渲染，
-                     外层 SVG 把作品等比缩进封面框（见 .ma-artview 注释）。 -->
-                <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
-                <span v-if="renderHtmlOf(run)" class="ma-card-cover">
-                  <svg
-                    class="ma-artview"
-                    :viewBox="artworkViewBox(renderHtmlOf(run))"
-                    preserveAspectRatio="xMidYMid meet"
-                    aria-hidden="true"
+                <!-- 卡片正上方的时间点：日期 + 时间，下面一条细线垂到卡片上沿。
+                     点与卡一一对应、互相点亮；点节点直接打开那一轮详情。 -->
+                <div class="ma-tile-cap">
+                  <button
+                    type="button"
+                    class="ma-group-node"
+                    :class="[
+                      group.nodes[runIndex].tone,
+                      {
+                        'is-latest': group.nodes[runIndex].latest,
+                        'is-bound': timelineHoverId === run.id
+                      }
+                    ]"
+                    :title="group.nodes[runIndex].title"
+                    :aria-label="group.nodes[runIndex].title"
+                    @click="openRun(run.id)"
+                    @mouseenter="timelineHoverId = run.id"
+                    @mouseleave="timelineHoverId = null"
+                    @focus="timelineHoverId = run.id"
+                    @blur="timelineHoverId = null"
                   >
-                    <foreignObject
-                      x="0"
-                      y="0"
-                      width="1280"
-                      :height="artworkViewHeight(renderHtmlOf(run))"
-                    >
-                      <iframe
-                        :srcdoc="artworkSrcdoc(renderHtmlOf(run))"
-                        sandbox=""
-                        class="ma-card-frame"
-                        :title="t('modelDegradation.item.preview')"
-                      ></iframe>
-                    </foreignObject>
-                  </svg>
-                </span>
-                <!-- 纯逻辑题没有可预览的产物，用判定概览顶一张同形制的封面 -->
-                <template v-else>
-                  <Icon
-                    :name="tileIcon(run)"
-                    size="lg"
-                    class="ma-card-glyph"
-                    :class="run.status === 'running' ? 'animate-spin' : ''"
-                  />
-                  <span class="ma-card-glyph-text">{{ tileSummary(run) }}</span>
-                  <span v-if="tileReason(run)" class="ma-card-glyph-note">{{ tileReason(run) }}</span>
-                </template>
-                <!-- 勋章压的是「预览」的角：源站那张详情卡里，标题行在上面、
-                     缎带从作品框的右上角斜插下来，被作品框的圆角裁断。
-                     放在 thumb 里两种形态（静止 / 展开）才对得上。 -->
-                <span class="ma-ribbon" :class="ribbonClass(run)">{{ ribbonLabel(run) }}</span>
-              </span>
-            </div>
-
-            <!-- 展开大卡：铺在卡片之上并向上探出标题行的高度，只在悬停/聚焦时显形。
-                 整卡可点、点空白处与卡片本体一样打开详情；操作钮必须 .stop，
-                 否则按钮的点击会跟着触发打开详情。 -->
-            <div
-              class="ma-hover-card"
-              :aria-hidden="zoomId === run.id ? undefined : 'true'"
-              @click="openRun(run.id)"
-            >
-              <div class="ma-more-head">
-                <div class="ma-more-title">
-                  <span class="ma-more-name">{{ run.model_id }}</span>
-                  <span class="ma-more-time">{{ formatDateTime(run.created_at) }}</span>
-                  <span class="ma-more-owner">
-                    {{ ownerLabel(run) }}
-                    <span v-if="run.is_owner" class="ma-owner-tag">{{
-                      t('modelDegradation.history.ownerSelf')
-                    }}</span>
+                    <span class="ma-group-node-time">{{ group.nodes[runIndex].label }}</span>
+                    <span class="ma-group-node-dot"></span>
+                  </button>
+                </div>
+                <div
+                  class="ma-card"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="t('modelDegradation.history.open')"
+                  @mouseenter="showZoom(run); timelineHoverId = run.id"
+                  @click="openRun(run.id)"
+                  @keydown.enter.prevent="openRun(run.id)"
+                  @keydown.space.prevent="openRun(run.id)"
+                  @keydown.esc="hideZoom"
+                  @focus="showZoom(run)"
+                >
+                  <span
+                    class="ma-card-thumb"
+                    :class="[thumbTone(run), { 'is-render': !!renderHtmlOf(run) }]"
+                  >
+                    <!-- 跑过生成题就有产物：整页按 1280px 逻辑视口渲染，
+                         外层 SVG 把作品等比缩进封面框（见 .ma-artview 注释）。 -->
+                    <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
+                    <span v-if="renderHtmlOf(run)" class="ma-card-cover">
+                      <svg
+                        class="ma-artview"
+                        :viewBox="artworkViewBox(renderHtmlOf(run))"
+                        preserveAspectRatio="xMidYMid meet"
+                        aria-hidden="true"
+                      >
+                        <foreignObject
+                          x="0"
+                          y="0"
+                          width="1280"
+                          :height="artworkViewHeight(renderHtmlOf(run))"
+                        >
+                          <iframe
+                            :srcdoc="artworkSrcdoc(renderHtmlOf(run))"
+                            sandbox=""
+                            class="ma-card-frame"
+                            :title="t('modelDegradation.item.preview')"
+                          ></iframe>
+                        </foreignObject>
+                      </svg>
+                    </span>
+                    <!-- 纯逻辑题没有可预览的产物，用判定概览顶一张同形制的封面 -->
+                    <template v-else>
+                      <Icon
+                        :name="tileIcon(run)"
+                        size="lg"
+                        class="ma-card-glyph"
+                        :class="run.status === 'running' ? 'animate-spin' : ''"
+                      />
+                      <span class="ma-card-glyph-text">{{ tileSummary(run) }}</span>
+                      <span v-if="tileReason(run)" class="ma-card-glyph-note">{{ tileReason(run) }}</span>
+                    </template>
+                    <!-- 勋章压的是「预览」的角：源站那张详情卡里，标题行在上面、
+                         缎带从作品框的右上角斜插下来，被作品框的圆角裁断。
+                         放在 thumb 里两种形态（静止 / 展开）才对得上。 -->
+                    <span class="ma-ribbon" :class="ribbonClass(run)">{{ ribbonLabel(run) }}</span>
                   </span>
                 </div>
-                <div class="ma-more-actions">
-                  <button
-                    type="button"
-                    :title="t('modelDegradation.history.detail')"
-                    :aria-label="t('modelDegradation.history.detail')"
-                    @click.stop="openRun(run.id)"
-                  >
-                    <Icon name="eye" size="sm" />
-                  </button>
-                  <button
-                    type="button"
-                    :title="t('modelDegradation.history.copy')"
-                    :aria-label="t('modelDegradation.history.copy')"
-                    @click.stop="copyRunSummary(run)"
-                  >
-                    <Icon name="copy" size="sm" />
-                  </button>
-                  <button
-                    type="button"
-                    :title="t('modelDegradation.history.download')"
-                    :aria-label="t('modelDegradation.history.download')"
-                    @click.stop="downloadRunReport(run)"
-                  >
-                    <Icon name="download" size="sm" />
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="!renderHtmlOf(run)"
-                    :title="t('modelDegradation.result.downloadArtwork')"
-                    :aria-label="t('modelDegradation.result.downloadArtwork')"
-                    @click.stop="downloadArtwork(run)"
-                  >
-                    <Icon name="document" size="sm" />
-                  </button>
-                </div>
-              </div>
 
-              <span
-                class="ma-hover-stage"
-                :class="[thumbTone(run), { 'is-render': !!renderHtmlOf(run) }]"
-              >
-                <!-- 只在悬停这一张上建 iframe：铺满墙的话每张卡都要多一份文档 -->
-                <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
-                <span v-if="renderHtmlOf(run) && zoomId === run.id" class="ma-hover-cover">
-                  <svg
-                    class="ma-artview"
-                    :viewBox="artworkViewBox(renderHtmlOf(run))"
-                    preserveAspectRatio="xMidYMid meet"
-                    aria-hidden="true"
-                  >
-                    <foreignObject
-                      x="0"
-                      y="0"
-                      width="1280"
-                      :height="artworkViewHeight(renderHtmlOf(run))"
-                    >
-                      <iframe
-                        :srcdoc="artworkSrcdoc(renderHtmlOf(run))"
-                        sandbox=""
-                        class="ma-hover-frame"
-                        :title="t('modelDegradation.item.preview')"
-                      ></iframe>
-                    </foreignObject>
-                  </svg>
-                </span>
-                <template v-else>
-                  <Icon :name="tileIcon(run)" size="lg" class="ma-card-glyph" />
-                  <span class="ma-card-glyph-text">{{ tileSummary(run) }}</span>
-                  <span v-if="tileReason(run)" class="ma-card-glyph-note">{{ tileReason(run) }}</span>
-                </template>
-                <span class="ma-ribbon" :class="ribbonClass(run)">{{ ribbonLabel(run) }}</span>
-              </span>
+                <!-- 展开大卡：铺在卡片之上并向上探出标题行的高度，只在悬停/聚焦时显形。
+                     整卡可点、点空白处与卡片本体一样打开详情；操作钮必须 .stop，
+                     否则按钮的点击会跟着触发打开详情。 -->
+                <div
+                  class="ma-hover-card"
+                  :style="hoverCardStyleOf(run.id)"
+                  :aria-hidden="zoomId === run.id ? undefined : 'true'"
+                  @click="openRun(run.id)"
+                >
+                  <div class="ma-more-head">
+                    <div class="ma-more-title">
+                      <span class="ma-more-name">{{ run.model_id }}</span>
+                      <span class="ma-more-time">{{ formatDateTime(run.created_at) }}</span>
+                      <span class="ma-more-owner">
+                        {{ ownerLabel(run) }}
+                        <span v-if="run.is_owner" class="ma-owner-tag">{{
+                          t('modelDegradation.history.ownerSelf')
+                        }}</span>
+                      </span>
+                    </div>
+                    <div class="ma-more-actions">
+                      <button
+                        type="button"
+                        :title="t('modelDegradation.history.detail')"
+                        :aria-label="t('modelDegradation.history.detail')"
+                        @click.stop="openRun(run.id)"
+                      >
+                        <Icon name="eye" size="sm" />
+                      </button>
+                      <button
+                        type="button"
+                        :title="t('modelDegradation.history.copy')"
+                        :aria-label="t('modelDegradation.history.copy')"
+                        @click.stop="copyRunSummary(run)"
+                      >
+                        <Icon name="copy" size="sm" />
+                      </button>
+                      <button
+                        type="button"
+                        :title="t('modelDegradation.history.download')"
+                        :aria-label="t('modelDegradation.history.download')"
+                        @click.stop="downloadRunReport(run)"
+                      >
+                        <Icon name="download" size="sm" />
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="!renderHtmlOf(run)"
+                        :title="t('modelDegradation.result.downloadArtwork')"
+                        :aria-label="t('modelDegradation.result.downloadArtwork')"
+                        @click.stop="downloadArtwork(run)"
+                      >
+                        <Icon name="document" size="sm" />
+                      </button>
+                    </div>
+                  </div>
 
-              <div class="ma-more-foot">
-                <div class="ma-more-row">
-                  <span class="ma-more-chip">{{ effortLabel(run.reasoning_effort) }}</span>
-                  <span class="ma-more-dur">
-                    <Icon name="clock" size="sm" />{{ formatDuration(run.duration_ms) }}
+                  <span
+                    class="ma-hover-stage"
+                    :class="[thumbTone(run), { 'is-render': !!renderHtmlOf(run) }]"
+                  >
+                    <!-- 只在悬停这一张上建 iframe：铺满墙的话每张卡都要多一份文档 -->
+                    <ModelDegradationWave v-if="!renderHtmlOf(run)" :running="run.status === 'running'" />
+                    <span v-if="renderHtmlOf(run) && zoomId === run.id" class="ma-hover-cover">
+                      <svg
+                        class="ma-artview"
+                        :viewBox="artworkViewBox(renderHtmlOf(run))"
+                        preserveAspectRatio="xMidYMid meet"
+                        aria-hidden="true"
+                      >
+                        <foreignObject
+                          x="0"
+                          y="0"
+                          width="1280"
+                          :height="artworkViewHeight(renderHtmlOf(run))"
+                        >
+                          <iframe
+                            :srcdoc="artworkSrcdoc(renderHtmlOf(run))"
+                            sandbox=""
+                            class="ma-hover-frame"
+                            :title="t('modelDegradation.item.preview')"
+                          ></iframe>
+                        </foreignObject>
+                      </svg>
+                    </span>
+                    <template v-else>
+                      <Icon :name="tileIcon(run)" size="lg" class="ma-card-glyph" />
+                      <span class="ma-card-glyph-text">{{ tileSummary(run) }}</span>
+                      <span v-if="tileReason(run)" class="ma-card-glyph-note">{{ tileReason(run) }}</span>
+                    </template>
+                    <span class="ma-ribbon" :class="ribbonClass(run)">{{ ribbonLabel(run) }}</span>
                   </span>
+
+                  <div class="ma-more-foot">
+                    <div class="ma-more-row">
+                      <span class="ma-more-chip">{{ effortLabel(run.reasoning_effort) }}</span>
+                      <span class="ma-more-dur">
+                        <Icon name="clock" size="sm" />{{ formatDuration(run.duration_ms) }}
+                      </span>
+                    </div>
+                    <dl class="ma-more-stats">
+                      <div>
+                        <dt>{{ t('modelDegradation.metrics.logic') }}</dt>
+                        <dd>{{ run.logic_passed }}/{{ run.logic_total }}</dd>
+                      </div>
+                      <div>
+                        <dt>{{ t('modelDegradation.metrics.render') }}</dt>
+                        <dd>{{ renderVerdictLabel(run.render_verdict) }}</dd>
+                      </div>
+                    </dl>
+                  </div>
                 </div>
-                <dl class="ma-more-stats">
-                  <div>
-                    <dt>{{ t('modelDegradation.metrics.logic') }}</dt>
-                    <dd>{{ run.logic_passed }}/{{ run.logic_total }}</dd>
-                  </div>
-                  <div>
-                    <dt>{{ t('modelDegradation.metrics.render') }}</dt>
-                    <dd>{{ renderVerdictLabel(run.render_verdict) }}</dd>
-                  </div>
-                </dl>
               </div>
             </div>
-          </div>
           </template>
         </div>
         <!-- 翻页器：历史一次最多 BAR_COUNT 条，分页是纯客户端的（列表接口只给
@@ -1512,7 +1537,7 @@ const filteredHistory = computed(() =>
   )
 )
 
-/* ---- 检测历史：卡片时间点与行内连线 ---- */
+/* ---- 检测历史：卡片时间点与单行横向滚动 ---- */
 // 时间戳 → 节点上的「月-日 时:分」：每个节点都带完整日期，隔天不用回看上下文。
 // 日期走 i18n（zh 是 10-13，en 是 10/13），时间走 Intl 的 hour / minute 拆分。
 const timelineDateTimeLabel = (value: string) => {
@@ -1527,42 +1552,80 @@ const timelineDateTimeLabel = (value: string) => {
 // 时间线悬停联动：节点与卡片是同一份记录的两端，悬停任一端另一端点亮。
 const timelineHoverId = ref<number | null>(null)
 
-// 行内连线：同一行相邻卡片之间的横线段由 JS 量行决定 —— 列数随宽度变化，
-// CSS 选不出「行首 / 行尾」。集合里存 run.id，模板里按 id 挂类名。
-const chainLeftIds = ref(new Set<number>())
-const chainRightIds = ref(new Set<number>())
+// 鼠标移入（或键盘聚焦）时展开的那张卡，只记 id；浮卡坐标见 hoverCardStyleOf。
+const zoomId = ref<number | null>(null)
+
+// 分组行是横向滚动容器：整组卡片铺成一行、不换行，铺不下就左右滚（按钮在节头）。
+// 每行的滚动余量现量现用，按钮据此显隐、置灰。
+const rowScroll = ref<Record<string, { left: boolean; right: boolean; overflow: boolean }>>({})
 const historyWallRef = ref<HTMLElement | null>(null)
 
-const sameIdSet = (a: Set<number>, b: Set<number>) => a.size === b.size && [...a].every((id) => b.has(id))
-
-const markTileChains = () => {
+const updateRowScroll = () => {
   const wall = historyWallRef.value
   if (!wall) return
   // 卡墙会被 v-if 摘下又挂回，观察目标要跟着最新的元素走（对同一元素重复 observe 是幂等的）。
   wallResizeObserver.observe(wall)
-  const tiles = [...wall.querySelectorAll<HTMLElement>('.ma-tile[data-run-id]')]
-  const left = new Set<number>()
-  const right = new Set<number>()
-  let prev: HTMLElement | null = null
-  for (const tile of tiles) {
-    if (prev && prev.offsetTop === tile.offsetTop) {
-      right.add(Number(prev.dataset.runId))
-      left.add(Number(tile.dataset.runId))
+  const next: typeof rowScroll.value = {}
+  for (const row of wall.querySelectorAll<HTMLElement>('.ma-group-row')) {
+    const key = row.dataset.groupRow
+    if (!key) continue
+    next[key] = {
+      left: row.scrollLeft > 1,
+      right: row.scrollLeft + row.clientWidth < row.scrollWidth - 1,
+      overflow: row.scrollWidth > row.clientWidth + 1
     }
-    prev = tile
   }
-  // 值没变就不写回：ResizeObserver → rAF → 赋值 → 重渲染 的回路要能自己静下来。
-  if (!sameIdSet(chainLeftIds.value, left)) chainLeftIds.value = left
-  if (!sameIdSet(chainRightIds.value, right)) chainRightIds.value = right
+  // 值没变就不写回：滚动事件与 ResizeObserver 都在调它，别引出多余的渲染回路。
+  const keys = Object.keys(next)
+  const unchanged =
+    keys.length === Object.keys(rowScroll.value).length &&
+    keys.every((key) => {
+      const a = rowScroll.value[key]
+      const b = next[key]
+      return !!a && !!b && a.left === b.left && a.right === b.right && a.overflow === b.overflow
+    })
+  if (!unchanged) rowScroll.value = next
 }
 
-let chainFrame = 0
-const scheduleTileChains = () => {
-  cancelAnimationFrame(chainFrame)
-  chainFrame = requestAnimationFrame(markTileChains)
+const scrollGroupRow = (key: string, dir: -1 | 1) => {
+  const rows = historyWallRef.value?.querySelectorAll<HTMLElement>('.ma-group-row') ?? []
+  const row = [...rows].find((el) => el.dataset.groupRow === key)
+  if (!row) return
+  row.scrollBy({ left: dir * Math.round(row.clientWidth * 0.8), behavior: 'smooth' })
 }
 
-const wallResizeObserver = new ResizeObserver(scheduleTileChains)
+// 悬停浮卡：所在行是滚动容器，绝对定位会被行裁掉，所以浮卡用 fixed 定位逃出裁剪。
+// 每张卡片的浮层坐标按「它上次展开时」记在表里 —— 收起的淡出要停在原处，
+// 不能弹回静态位置；页面 / 行滚动时由 scheduleScrollSync 跟着刷新。
+const zoomPositions = reactive(new Map<number, { left: number; top: number; width: number }>())
+
+const hoverCardStyleOf = (id: number) => {
+  const pos = zoomPositions.get(id)
+  if (!pos) return undefined
+  return { left: `${pos.left}px`, top: `${pos.top}px`, width: `${pos.width}px` }
+}
+
+const positionZoomCard = () => {
+  const id = zoomId.value
+  const tile =
+    id == null ? null : historyWallRef.value?.querySelector<HTMLElement>(`.ma-tile[data-run-id="${id}"]`)
+  if (!tile || id == null) return
+  const rect = tile.getBoundingClientRect()
+  // 上沿沿用老校准值：浮卡顶端探到瓦片顶点之上 22px，正好盖住 cap 里的
+  // 时间标签与圆点（老绝对定位是 top: cap 高 38 - 60 = -22）。
+  zoomPositions.set(id, { left: rect.left, top: rect.top - 22, width: rect.width })
+}
+
+let scrollFrame = 0
+const scheduleScrollSync = () => {
+  cancelAnimationFrame(scrollFrame)
+  scrollFrame = requestAnimationFrame(() => {
+    updateRowScroll()
+    if (zoomId.value != null) positionZoomCard()
+  })
+}
+
+const wallResizeObserver = new ResizeObserver(scheduleScrollSync)
 
 const historyPage = ref(1)
 const historyPageCount = computed(() =>
@@ -1613,19 +1676,23 @@ const historyGroups = computed(() => {
   return sections
 })
 
-// 渲染之后量一次行：卡片换页 / 筛选 / 容器宽度变化都要重新量。
+// 渲染之后对一次账：换页 / 筛选 / 容器宽度变化都会改行的滚动余量，
+// 浮卡开着的话坐标也要跟着新布局走。
 watch(historyGroups, () => {
-  nextTick(scheduleTileChains)
+  nextTick(scheduleScrollSync)
 })
 
 onMounted(() => {
   if (historyWallRef.value) wallResizeObserver.observe(historyWallRef.value)
-  scheduleTileChains()
+  // 滚动不冒泡：挂捕获态监听才能同时收到页面滚动与行内横向滚动。
+  window.addEventListener('scroll', scheduleScrollSync, { capture: true, passive: true })
+  scheduleScrollSync()
 })
 
 onUnmounted(() => {
   wallResizeObserver.disconnect()
-  cancelAnimationFrame(chainFrame)
+  window.removeEventListener('scroll', scheduleScrollSync, { capture: true })
+  cancelAnimationFrame(scrollFrame)
 })
 
 // 换筛选回到第 1 页：否则从「全部」第 3 页切到只有 1 页的筛选、再切回来，
@@ -2074,13 +2141,10 @@ const ribbonLabel = (run: ModelDegradationRun) => {
 const ownerLabel = (run: ModelDegradationRun) =>
   run.owner_email || t('modelDegradation.history.ownerUnknown')
 
-// 鼠标移入（或键盘聚焦）时展开的那张卡，只记 id。
-// 展开态是 .ma-hover-card：相对 .ma-tile 绝对定位，比卡片高出一截，
-// 所以既不用 fixed 浮层去算坐标 / 翻转 / 贴视口钳位，也不会让网格重排。
-const zoomId = ref<number | null>(null)
-
 const showZoom = (run: ModelDegradationRun) => {
   zoomId.value = run.id
+  // 浮卡 fixed 定位，坐标按卡片当前的位置 / 宽度现量（量在展开之前）。
+  positionZoomCard()
   // 展开层的作品框要从明细里取源码；命中缓存时同步返回，不用等这个 promise。
   void loadRunDetail(run.id)
 }
@@ -4073,7 +4137,7 @@ onUnmounted(() => {
 /* ============ 卡片时间点：每张卡片正上方一个节点，连线垂到卡片 ============ */
 /* 节点定在卡片正上方（水平居中），一行内均匀分布；下面一条细线垂到卡片上沿，
    把「点」和「卡」扣在一起；同一行相邻节点之间再用横线连成一条轴。
-   行是渲染结果（列数随宽度变化），行首 / 行尾由脚本量出来（is-chain-left / right），
+   行不换行（超出由行横向滚动），行首 / 行尾直接按序号挂类名（is-chain-left / right），
    CSS 只负责画线。节点配色沿用顶部监控条的同一套（passed / incorrect / error / empty）。 */
 .ma-tile-cap {
   display: flex;
@@ -4189,15 +4253,15 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ma-primary) 22%, transparent);
 }
 
-/* 分组墙：瓦片照旧按卡宽流式铺（原 .ma-grid 的同一套网格），节头整行铺开
-   把不同分组的瓦片隔开 —— 节头 grid-column: 1 / -1，永远独占一行。
+/* 分组墙：每组一节，节头下面整组卡片铺成一行（.ma-group-row 横向滚动），
+   多组上下堆叠；节头里的细线把组名和右侧的滚动按钮隔开。
    --ma-cap-height / --ma-wall-gap 是量给时间点用的：cap 高决定垂线长度，
    槽距决定行内横线的探出量，几处计算共用一套值。 */
 .ma-groups {
   --ma-cap-height: 38px;
   --ma-wall-gap: 16px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  display: flex;
+  flex-direction: column;
   gap: var(--ma-wall-gap);
 }
 
@@ -4205,8 +4269,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  grid-column: 1 / -1;
-  /* 换组时多留一点：上一组最后一行与这一组的节头之间要有「分节」的呼吸感。 */
+  /* 换组时多留一点：上一组的卡片行与这一组的节头之间要有「分节」的呼吸感。 */
   margin-top: 6px;
 }
 
@@ -4254,14 +4317,67 @@ onUnmounted(() => {
   background: var(--ma-line);
 }
 
-.ma-tile {
-  position: relative;
+/* 行滚动按钮：只在整组一行铺不下时显现（v-show），按行左右滚一屏的 8 成。 */
+.ma-group-nav {
+  display: flex;
+  flex: none;
+  gap: 4px;
 }
 
-/* 放大中的卡片要盖住邻居：transform 不占布局，抬 z-index 才有层叠次序。
-   阴影同步加重，看着像「从墙面上浮起来」。 */
-.ma-tile.is-zoom {
-  z-index: 40;
+.ma-wall-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--ma-border-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ma-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.ma-wall-nav:hover:not(:disabled) {
+  border-color: var(--ma-input-border);
+  background: var(--ma-seg-bg);
+  color: var(--ma-primary);
+}
+
+.ma-wall-nav:focus-visible {
+  outline: 2px solid var(--ma-primary);
+  outline-offset: 2px;
+}
+
+.ma-wall-nav:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* 卡片行：整组单行铺开、不换行，铺不下就横向滚。滚动条藏掉 ——
+   左右导航交给节头的按钮，触控板横滑与滚轮仍照常可用。 */
+.ma-group-row {
+  display: flex;
+  gap: var(--ma-wall-gap);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.ma-group-row::-webkit-scrollbar {
+  display: none;
+}
+
+/* 行不换行后卡宽不再由网格列宽决定：给固定卡宽，超出留给行滚动。 */
+.ma-tile {
+  position: relative;
+  flex: 0 0 auto;
+  width: 260px;
 }
 
 /* 卡面 = 浅灰绿底 + 内缩的预览 + 右上斜角勋章（源站作品墙同形制）。
@@ -4509,22 +4625,18 @@ onUnmounted(() => {
 
 /* ============ 悬停展开大卡 ============ */
 /* 移入时另起一张比卡片更高的卡：标题行 / 作品框 / 指标页脚，形制照源站那张详情卡。
-   absolute 定位所以网格不重排；top 取负值把标题行探到卡片上方，
-   让作品框正好落在静止时缩略图的位置上（卡片 padding 10 + 边框 1 = 11，
-   所以 -11 - 12 - 48 + 11 = -60：展开层上内边距 12 + 标题行 48 - 回补 11）。
+   行是横向滚动容器，会裁掉绝对定位的浮层，所以浮卡 fixed 定位逃出裁剪：
+   top / left / width 由脚本按卡片的位置量出（见 hoverCardStyleOf），
+   页面或行滚动时跟着刷新。上沿沿用老校准值：浮卡顶端探到瓦片顶点之上 22px
+   （老绝对定位 top: cap 高 38 - 60 = -22），正好盖住 cap 里的时间标签与圆点。
    底色必须不透明：它要整个盖住下面的卡片，半透明会让封面 iframe 从字底下透出来。
    不展开时 visibility + pointer-events 一起收掉，操作钮不会变成
    「看不见但能 Tab 到」的暗桩。 */
 .ma-hover-card {
-  position: absolute;
+  position: fixed;
   /* 必须压过 cap 里时间点的 z-index: 1：浮卡升起时要真正盖住
      它后面透出来的圆点 / 时间标签，而不是被它们穿过去。 */
-  z-index: 2;
-  /* 展开层要回到卡面上（而不是 tile 顶上）：tile 顶上是时间点的 cap，
-     扣掉 cap 高才是卡片上沿，-60 的老校准值保持相对卡片不变。 */
-  top: calc(var(--ma-cap-height, 38px) - 60px);
-  right: 0;
-  left: 0;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 10px;
