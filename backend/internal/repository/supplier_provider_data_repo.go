@@ -2200,11 +2200,12 @@ func supplierProviderNameOrKeySearchCondition(alias string, placeholder int) str
 // supplierProviderAccountLocalNameSearchCondition 让搜索框也能按列表里那一列「本地账号」过滤
 // （用户输入的是自己在页面上看得见的本地账号名，例如「皓悦-福利-Codex高并发」里的「皓悦」）。
 //
-// 这里要求「恰好匹配到一个本地账号」，与列表 local_account_match_status 的口径一致：
-// 匹配冲突（命中多个）时那一列本来就是空白，若不加这个限制，会出现
-// 「搜到了名字、结果行里却什么都不显示」的怪现象。
-// 复用 supplierProviderLocalAccountMatchCondition 而不是直接 ILIKE 原始名，
-// 是为了和列表列的判定完全同源 —— 否则会出现「列显示 matched、按这个名字却搜不到」。
+// 判据与列表那一列同源：优先用持久化绑定 a.local_account_id，绑定账号被软删时才退回
+// 「按上游当前名唯一匹配」。只按名字匹配的话，上游改名、本地名还没对齐的那段时间里，
+// 这一行会从所有按名字的搜索里消失 —— 而列表上它明明显示「已匹配」。
+//
+// 不再额外要求「恰好匹配到一个本地账号」：这条约束已经内建在判据里（绑定只指向一个账号，
+// 退回名字匹配时也要求 COUNT(*) = 1），外层再判一次会让「绑定存在但名字同时命中多个」的行搜不到。
 func supplierProviderAccountLocalNameSearchCondition(placeholder int) string {
 	return fmt.Sprintf(`EXISTS (
   SELECT 1
@@ -2212,16 +2213,9 @@ func supplierProviderAccountLocalNameSearchCondition(placeholder int) string {
   WHERE local_account.deleted_at IS NULL
     AND %s
     AND local_account.name ILIKE $%d
-    AND (
-      SELECT COUNT(*)
-      FROM accounts candidate
-      WHERE candidate.deleted_at IS NULL
-        AND %s
-    ) = 1
 )`,
-		supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"),
-		placeholder,
-		supplierProviderLocalAccountMatchCondition("candidate.name", "a.name"))
+		supplierProviderAccountBoundLocalAccountCondition("local_account", "a"),
+		placeholder)
 }
 
 // normalizeSupplierAccountStatusFilter 仅允许统一后的上游密钥状态，非法值视为不筛选。
@@ -2254,6 +2248,9 @@ func supplierProviderAccountWhere(params service.SupplierProviderDataListParams)
 	}
 	if params.GroupID > 0 {
 		args = append(args, params.GroupID)
+		// 分组筛选必须和列表「本地账号」列同源：优先用持久化绑定 a.local_account_id。
+		// 名字匹配判据全部由上游当前名派生，上游一改名（如 JUHE365 把「Kiro 90缓」改成
+		// 「Kiro 有缓」）整行就会从按名字的筛选里消失，而列表上它仍显示「已匹配」。
 		conditions = append(conditions, fmt.Sprintf(`EXISTS (
 SELECT 1
 FROM accounts local_account
@@ -2264,17 +2261,14 @@ JOIN groups local_group
   ON local_group.id = account_group.group_id
  AND local_group.deleted_at IS NULL
 WHERE local_account.deleted_at IS NULL
-  AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
-  AND (
-    SELECT COUNT(*)
-    FROM accounts candidate
-    WHERE candidate.deleted_at IS NULL
-      AND `+supplierProviderLocalAccountMatchCondition("candidate.name", "a.name")+`
-  ) = 1
-)`, len(args)))
+  AND %s
+)`, len(args), supplierProviderAccountBoundLocalAccountCondition("local_account", "a")))
 	}
 	if platform := strings.TrimSpace(params.Platform); platform != "" {
 		args = append(args, platform)
+		// 平台同样优先取持久化绑定的本地账号：上游改名后名字判据失效，
+		// 只按名字匹配会让这一行的平台退化成「分组映射」（往往为空），
+		// 于是列表上明明显示 anthropic、按平台却筛不到。
 		conditions = append(conditions, fmt.Sprintf(`COALESCE(
 (
   SELECT CASE
@@ -2284,7 +2278,7 @@ WHERE local_account.deleted_at IS NULL
   LEFT JOIN supplier_local_account_platform_overrides platform_override
     ON platform_override.local_account_id = local_account.id
   WHERE local_account.deleted_at IS NULL
-    AND `+supplierProviderLocalAccountMatchCondition("local_account.name", "a.name")+`
+    AND %s
 ), (
   SELECT local_group.platform
   FROM supplier_provider_groups mapped_group
@@ -2292,7 +2286,7 @@ WHERE local_account.deleted_at IS NULL
   WHERE mapped_group.provider_id = a.provider_id
     AND mapped_group.upstream_group_key = a.group_key
   LIMIT 1
-), '') = $%d`, len(args)))
+), '') = $%d`, supplierProviderAccountBoundLocalAccountCondition("local_account", "a"), len(args)))
 	}
 	if len(params.Models) > 0 {
 		args = append(args, pq.Array(params.Models))
@@ -2862,6 +2856,35 @@ SELECT EXISTS (
 		return false, fmt.Errorf("check supplier local account match: %w", err)
 	}
 	return matched, nil
+}
+
+// supplierProviderAccountBoundLocalAccountCondition 生成「这一行对应哪个本地账号」的判据，
+// 与列表里 matched_account 的取值完全同源：优先用持久化绑定 a.local_account_id
+// （由同步后的 ReconcileAccountLocalMappings 写入，上游改名不会失效），只有绑定的本地账号
+// 已被软删时才退回「按上游当前名唯一匹配」。
+//
+// 存在的意义：分组这类筛选原先只按名字匹配，而名字判据全部由上游「当前名」派生 ——
+// 上游一改名，整行就会从筛选结果里消失，页面上却仍显示「已匹配某个本地账号」。
+//
+// localAccountAlias 是调用方子查询里本地账号的别名，upstreamAlias 是 supplier_provider_accounts 的别名。
+func supplierProviderAccountBoundLocalAccountCondition(localAccountAlias, upstreamAlias string) string {
+	return fmt.Sprintf(`(%s.id = %s.local_account_id OR (
+  NOT EXISTS (
+    SELECT 1 FROM accounts bound_probe
+    WHERE bound_probe.id = %s.local_account_id
+      AND bound_probe.deleted_at IS NULL
+  )
+  AND %s
+  AND (
+    SELECT COUNT(*)
+    FROM accounts candidate
+    WHERE candidate.deleted_at IS NULL
+      AND %s
+  ) = 1
+))`,
+		localAccountAlias, upstreamAlias, upstreamAlias,
+		supplierProviderLocalAccountMatchCondition(localAccountAlias+".name", upstreamAlias+".name"),
+		supplierProviderLocalAccountMatchCondition("candidate.name", upstreamAlias+".name"))
 }
 
 func supplierProviderLocalAccountMatchCondition(localAccountNameSQL, upstreamAccountNameSQL string) string {

@@ -961,10 +961,8 @@ func TestSupplierProviderDataRepositoryListAccountsPaginates(t *testing.T) {
 	// 匹配条件本身有独立用例覆盖，这里只按字面写死结构、把匹配条件插值进来。
 	searchWhere := "p.deleted_at IS NULL AND a.provider_id = $1 AND a.active = $2 AND (" +
 		"(a.name ILIKE $3 OR a.upstream_account_key ILIKE $3) OR EXISTS ( SELECT 1 FROM accounts local_account " +
-		"WHERE local_account.deleted_at IS NULL AND " + supplierProviderLocalAccountMatchCondition("local_account.name", "a.name") +
-		" AND local_account.name ILIKE $3 AND ( SELECT COUNT(*) FROM accounts candidate " +
-		"WHERE candidate.deleted_at IS NULL AND " + supplierProviderLocalAccountMatchCondition("candidate.name", "a.name") +
-		" ) = 1 ))"
+		"WHERE local_account.deleted_at IS NULL AND " + supplierProviderAccountBoundLocalAccountCondition("local_account", "a") +
+		" AND local_account.name ILIKE $3 ))"
 	mock.ExpectQuery(supplierProviderAccountListQueryContractPattern(searchWhere, "$4", "$5")).
 		WithArgs(int64(42), active, "%pri%", 20, 20).
 		WillReturnRows(sqlmock.NewRows(supplierProviderAccountListColumns).AddRow(
@@ -1395,6 +1393,10 @@ func TestSupplierProviderAccountWhereIncludesMappedGroupPlatform(t *testing.T) {
 	require.Contains(t, where, "COALESCE(NULLIF(platform_override.platform, ''), local_account.platform)")
 	require.Contains(t, where, "COALESCE(")
 	require.Contains(t, where, ") = $4")
+	// 平台同样优先取持久化绑定：上游改名后名字判据失效，只按名字匹配会让平台退化成
+	// 「分组映射」（通常为空），出现「列表显示 anthropic、按平台却筛不到」。
+	require.Contains(t, where, "local_account.id = a.local_account_id")
+	require.Contains(t, where, "FROM accounts bound_probe")
 	require.Contains(t, where, "lower(COALESCE(p.account_name_prefix, '') || a.name)")
 	require.Equal(t, []any{int64(42), active, "%primary%", "openai"}, args)
 }
@@ -1409,9 +1411,11 @@ func TestSupplierProviderAccountWhereSearchCoversLocalAccountName(t *testing.T) 
 
 	require.Contains(t, where, "(a.name ILIKE $1 OR a.upstream_account_key ILIKE $1)")
 	require.Contains(t, where, "local_account.name ILIKE $1")
-	// 与列表列同源：走同一套归一化匹配，且要求「恰好匹配到一个本地账号」。
-	// 直接用 ILIKE 原始名会出现「列里显示 matched、按这个名字却搜不到」；
-	// 去掉「恰好一个」的限制又会出现「搜到了名字、结果行那一列却是空白」（匹配冲突）。
+	// 与列表列同源：优先用持久化绑定，绑定账号被软删时才退回「按上游当前名唯一匹配」。
+	// 上游改名、本地名还没对齐的那段时间，只按名字匹配会让这一行从搜索结果里消失，
+	// 而列表上它明明显示「已匹配」。
+	require.Contains(t, where, "local_account.id = a.local_account_id")
+	require.Contains(t, where, "FROM accounts bound_probe")
 	require.Contains(t, where, supplierProviderLocalAccountMatchCondition("local_account.name", "a.name"))
 	require.Contains(t, where, supplierProviderLocalAccountMatchCondition("candidate.name", "a.name"))
 	require.Contains(t, where, ") = 1")
@@ -1429,6 +1433,12 @@ func TestSupplierProviderAccountWhereIncludesLocalGroup(t *testing.T) {
 	require.Contains(t, where, "JOIN account_groups account_group")
 	require.Contains(t, where, "account_group.group_id = $2")
 	require.Contains(t, where, "local_group.deleted_at IS NULL")
+	// 优先用持久化绑定：上游改名后名字判据（全部由上游当前名派生）整体失效，
+	// 若分组筛选只按名字匹配，列表里显示「已匹配」的行会从筛选结果里消失。
+	require.Contains(t, where, "local_account.id = a.local_account_id")
+	require.Contains(t, where, "FROM accounts bound_probe")
+	require.Contains(t, where, "bound_probe.deleted_at IS NULL")
+	// 绑定账号被软删时退回「按上游当前名唯一匹配」，与列表 matched_account 的取值同源。
 	require.Contains(t, where, "lower(COALESCE(p.account_name_prefix, '') || a.name)")
 	require.Contains(t, where, ") = 1")
 	require.NotContains(t, where, "mapped_group.local_group_id = $2")
