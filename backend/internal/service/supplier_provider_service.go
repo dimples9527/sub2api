@@ -236,8 +236,8 @@ type SupplierProviderBalanceSummaryDay struct {
 	Balance float64 `json:"balance"`
 	// EffectiveCost 是入库时生效成本合计（today_cost），保留给历史累计口径使用。
 	EffectiveCost float64 `json:"-"`
-	// LocalCost 是本地成本：唯一匹配本地账号的用户扣费合计（usage_logs.actual_cost），
-	// 口径与成本分析弹窗的「本地成本」一致；服务层为今日与上一统计日补齐，无匹配用量时为 0。
+	// LocalCost 是本地成本：当日全站用户扣费合计（usage_logs.actual_cost），
+	// 口径与成本分析弹窗的「本地成本」一致；服务层为今日与上一统计日补齐，当天无用量时为 0。
 	LocalCost float64 `json:"local_cost"`
 	// UpstreamCost 是上游原始上报成本合计（raw_upstream_cost 缺失时回退生效成本），
 	// 口径与成本分析弹窗的「上游成本」一致，不经过本地审批修正。
@@ -266,7 +266,7 @@ type SupplierProviderRepository interface {
 	ListCostTrends(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostTrendPoint, error)
 	ListCostBreakdowns(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderCostBreakdown, error)
 	ListBalanceSummaryDays(ctx context.Context) ([]SupplierProviderBalanceSummaryDay, error)
-	// ListLocalCostsForDay 汇总指定统计日的本地成本（唯一匹配本地账号的用户扣费）。
+	// ListLocalCostsForDay 汇总指定统计日的本地成本（当日全站用户扣费）。
 	ListLocalCostsForDay(ctx context.Context, day time.Time) (float64, bool, error)
 	// ListBalanceCosts returns balance difference costs per day per provider for date range.
 	ListBalanceCosts(ctx context.Context, start, end time.Time, providerID int64) ([]SupplierProviderBalanceCostDay, error)
@@ -626,7 +626,7 @@ func (s *SupplierProviderService) Get(ctx context.Context, id int64) (*SupplierP
 
 // GetBalanceSummary 汇总供应商每日快照的余额与成本，用于页面统计卡。
 // today 为最近一个统计日，previous 为最近一个非当日统计日，history 为累计口径。
-// 「今日总成本」取本地成本（唯一匹配本地账号的用户扣费），与成本分析弹窗的本地成本一致，
+// 「今日总成本」取本地成本（当日全站用户扣费，usage_logs.actual_cost），与成本分析弹窗的本地成本一致，
 // 不走 daily_stats.today_cost（那是生效成本口径，会把两处数字显示成不同结果）。
 func (s *SupplierProviderService) GetBalanceSummary(ctx context.Context) (SupplierProviderBalanceSummary, error) {
 	days, err := s.repo.ListBalanceSummaryDays(ctx)

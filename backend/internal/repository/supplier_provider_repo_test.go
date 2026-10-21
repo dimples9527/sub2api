@@ -229,8 +229,9 @@ ORDER BY d.stat_date`)).
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-// 「今日总成本」卡要取本地成本口径（唯一匹配本地账号的用户扣费），
-// 与成本分析弹窗一致；这里钉住查询与日期边界，避免退化成 daily_stats 的生效成本。
+// 「今日总成本」卡要取本地成本口径（当日全站用户扣费），与成本分析弹窗一致；
+// 这里钉住查询与日期边界，避免退化成 daily_stats 的生效成本，
+// 也避免又退回按供应商账号唯一匹配（账号后录入会让历史段漏计）。
 func TestSupplierProviderRepositoryListLocalCostsForDay(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -239,7 +240,7 @@ func TestSupplierProviderRepositoryListLocalCostsForDay(t *testing.T) {
 	repo := NewSupplierProviderRepository(db)
 
 	day := time.Date(2026, 8, 14, 0, 0, 0, 0, time.Local)
-	mock.ExpectQuery(`(?s)SELECT COALESCE\(SUM\(ul\.actual_cost\), 0\) AS local_cost,\s+COUNT\(\*\) AS usage_count\s+FROM usage_logs ul`).
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(SUM\(actual_cost\), 0\) AS local_cost,\s+COUNT\(\*\) AS usage_count\s+FROM usage_logs\s+WHERE created_at >= \$1\s+AND created_at < \$2`).
 		WithArgs(timezone.StartOfDay(day), timezone.StartOfDay(day).AddDate(0, 0, 1)).
 		WillReturnRows(sqlmock.NewRows([]string{"local_cost", "usage_count"}).AddRow(52.2, 7))
 

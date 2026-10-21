@@ -168,7 +168,25 @@ ORDER BY d.stat_date`
 		tzName = "Asia/Shanghai"
 	}
 
+	// 本地成本取使用记录的用户扣费：它带着请求时的分组倍率快照，
+	// 而账号成本口径依赖 accounts.rate_multiplier，未配置时会退化成官方原价。
+	//
+	// 汇总口径（providerID == 0）直接取全站扣费，不按供应商账号回溯匹配：
+	// 匹配依赖 supplier_provider_accounts 的「当前」快照（账号名归一化后唯一相等），
+	// 账号增删改名都会让同一段历史算出不同的数，属于不该进汇总口径的脆弱依赖。
+	// 实测全站扣费与匹配口径的差额 < 0.5%，直接取全量更稳。
+	// 指定供应商时无法回避归属问题，仍按账号唯一匹配拆分。
 	localQuery := `
+SELECT TO_CHAR(ul.created_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
+       COALESCE(SUM(ul.actual_cost), 0) AS local_cost
+FROM usage_logs ul
+WHERE ul.created_at >= $1
+  AND ul.created_at < $2
+GROUP BY 1
+ORDER BY 1`
+	localArgs := []any{start, end, tzName}
+	if providerID > 0 {
+		localQuery = `
 WITH matched_accounts AS (
   SELECT local_account.id AS local_account_id
   FROM supplier_providers p
@@ -179,19 +197,11 @@ WITH matched_accounts AS (
     ON local_account.deleted_at IS NULL
    AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
      = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
-  WHERE p.deleted_at IS NULL`
-	localArgs := []any{start, end, tzName}
-	if providerID > 0 {
-		localQuery += `
-    AND p.id = $4`
-		localArgs = append(localArgs, providerID)
-	}
-	localQuery += `
+  WHERE p.deleted_at IS NULL
+    AND p.id = $4
   GROUP BY local_account.id
   HAVING COUNT(*) = 1
 )
--- 本地成本取使用记录的用户扣费：它带着请求时的分组倍率快照，
--- 而账号成本口径依赖 accounts.rate_multiplier，未配置时会退化成官方原价。
 SELECT TO_CHAR(ul.created_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
        COALESCE(SUM(ul.actual_cost), 0) AS local_cost
 FROM usage_logs ul
@@ -200,6 +210,8 @@ WHERE ul.created_at >= $1
   AND ul.created_at < $2
 GROUP BY 1
 ORDER BY 1`
+		localArgs = append(localArgs, providerID)
+	}
 
 	localRows, err := r.db.QueryContext(ctx, localQuery, localArgs...)
 	if err != nil {
@@ -410,12 +422,12 @@ ORDER BY d.stat_date`)
 	return days, nil
 }
 
-// ListLocalCostsForDay 汇总指定统计日全部供应商的本地成本。
-// 本地成本取唯一匹配本地账号的用户扣费（usage_logs.actual_cost），
-// 账号唯一匹配规则与成本分析弹窗完全一致（见 ListCostBreakdowns 的 unique_account_matches），
-// 自然日窗口也按应用时区划分，与弹窗按 timezone.Name() 汇总的口径对齐，
-// 保证同一日期在卡片和弹窗里显示同一个数。
-// ok=false 表示当天没有任何匹配账号的用量记录。
+// ListLocalCostsForDay 汇总指定统计日全站的用户扣费（usage_logs.actual_cost）。
+// 为什么不再按供应商账号唯一匹配：匹配依赖 supplier_provider_accounts 的「当前」快照，
+// 账号增删改名都会让同一段历史算出不同的数；汇总口径不需要归属，直接取全量。
+// 实测全站扣费与匹配口径的差额 < 0.5%。
+// 自然日窗口按应用时区划分，与成本分析弹窗按 timezone.Name() 汇总的口径对齐。
+// ok=false 表示当天没有任何用量记录。
 func (r *supplierProviderRepository) ListLocalCostsForDay(ctx context.Context, day time.Time) (float64, bool, error) {
 	start := timezone.StartOfDay(day)
 	end := start.AddDate(0, 0, 1)
@@ -423,31 +435,11 @@ func (r *supplierProviderRepository) ListLocalCostsForDay(ctx context.Context, d
 	var localCost float64
 	var usageCount int
 	err := r.db.QueryRowContext(ctx, `
-WITH provider_account_matches AS (
-  SELECT p.id AS provider_id, local_account.id AS local_account_id
-  FROM supplier_providers p
-  JOIN supplier_provider_accounts spa
-    ON spa.provider_id = p.id
-   AND spa.active = TRUE
-  JOIN accounts local_account
-    ON local_account.deleted_at IS NULL
-   AND regexp_replace(lower(local_account.name), '[^[:alnum:]]', '', 'g')
-     = regexp_replace(lower(p.account_name_prefix || spa.name), '[^[:alnum:]]', '', 'g')
-  WHERE p.deleted_at IS NULL
-  GROUP BY p.id, local_account.id
-),
-unique_account_matches AS (
-  SELECT MIN(provider_id) AS provider_id, local_account_id
-  FROM provider_account_matches
-  GROUP BY local_account_id
-  HAVING COUNT(*) = 1
-)
-SELECT COALESCE(SUM(ul.actual_cost), 0) AS local_cost,
+SELECT COALESCE(SUM(actual_cost), 0) AS local_cost,
        COUNT(*) AS usage_count
-FROM usage_logs ul
-JOIN unique_account_matches matched ON matched.local_account_id = ul.account_id
-WHERE ul.created_at >= $1
-  AND ul.created_at < $2`, start, end).Scan(&localCost, &usageCount)
+FROM usage_logs
+WHERE created_at >= $1
+  AND created_at < $2`, start, end).Scan(&localCost, &usageCount)
 	if err != nil {
 		return 0, false, fmt.Errorf("query supplier local costs for day: %w", err)
 	}

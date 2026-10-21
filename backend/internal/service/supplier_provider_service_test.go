@@ -821,7 +821,7 @@ func TestSupplierProviderServiceGetBalanceSummary(t *testing.T) {
 	require.Equal(t, "2026-08-03", summary.LatestDate)
 	require.Equal(t, "2026-08-03", summary.Today.Date)
 	require.Equal(t, 90.0, summary.Today.Balance)
-	// 今日总成本取本地成本（唯一匹配本地账号的用户扣费），不是 daily_stats.today_cost。
+	// 今日总成本取本地成本（当日全站用户扣费），不是 daily_stats.today_cost。
 	require.Equal(t, 8.5, summary.Today.LocalCost)
 	// 历史卡是今日卡的同口径对比，上一统计日同样补本地成本。
 	require.Equal(t, 8.5, summary.Previous.LocalCost)

@@ -34,7 +34,8 @@ ORDER BY d.stat_date`)).
 			AddRow("2026-07-28", 12.5, 10.0, "上游成本 12.50 与计算成本 11.00 偏差 12%，生效成本已取计算成本").
 			AddRow("2026-07-29", 7, 7, ""))
 
-	mock.ExpectQuery(`(?s)matched_accounts.*SUM\(ul\.actual_cost\)`).
+	// 汇总口径（providerID == 0）直接取全站扣费，不再按供应商账号匹配。
+	mock.ExpectQuery(`(?s)SELECT TO_CHAR\(ul\.created_at AT TIME ZONE \$3, 'YYYY-MM-DD'\) AS date,\s+COALESCE\(SUM\(ul\.actual_cost\), 0\) AS local_cost\s+FROM usage_logs ul\s+WHERE ul\.created_at >= \$1`).
 		WithArgs(start, end, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "local_cost"}).
 			AddRow("2026-07-28", 10.0).
