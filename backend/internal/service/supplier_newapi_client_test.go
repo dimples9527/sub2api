@@ -1205,8 +1205,8 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 			require.Equal(t, "42", r.Header.Get("New-Api-User"))
 			require.Contains(t, r.Header.Get("Cookie"), "session=abc")
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[
-				{"name":"key-1","group":"VIP","status":1,"key":"sk-secret-must-not-return"},
-				{"name":"key-2","group":"trial","status":2}
+				{"id":101,"name":"key-1","group":"VIP","status":1,"key":"sk-secret-must-not-return"},
+				{"id":102,"name":"key-2","group":"trial","status":2}
 			]}}`))
 		case "/api/group/":
 			groupCalls++
@@ -1251,8 +1251,9 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 
 	accounts, err := client.FetchAccounts(context.Background(), provider, "secret")
 	require.NoError(t, err)
+	// Key 取上游 token id（改名不变），Name 才是可改的密钥名。
 	require.Equal(t, []SupplierProviderRemoteAccount{{
-		Key:            "key-1",
+		Key:            "101",
 		Name:           "key-1",
 		Status:         "active",
 		GroupKey:       "7",
@@ -1260,7 +1261,7 @@ func TestSupplierNewAPIClientFetchesAndParsesProviderData(t *testing.T) {
 		RateMultiplier: 3.25,
 		RawStatus:      "1",
 	}, {
-		Key:            "key-2",
+		Key:            "102",
 		Name:           "key-2",
 		Status:         "disabled",
 		GroupKey:       "8",

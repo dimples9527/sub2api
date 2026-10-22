@@ -711,6 +711,14 @@ func TestSupplierProviderDataRepositoryReplaceAccountsUpsertsAndDeactivatesMissi
 	seenAt := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT id, upstream_account_key, name, COALESCE(group_key, ''), COALESCE(rate_multiplier, 0),
+       local_account_id, active
+FROM supplier_provider_accounts
+WHERE provider_id = $1
+FOR UPDATE`)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "upstream_account_key", "name", "group_key", "rate_multiplier", "local_account_id", "active"}))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_accounts")).
 		WithArgs(int64(42), "account-1", "Primary", "active", "group-1", "VIP", 2.5, "active", seenAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -734,6 +742,214 @@ func TestSupplierProviderDataRepositoryReplaceAccountsUpsertsAndDeactivatesMissi
 	require.Equal(t, 2, counts.CheckedCount)
 	require.Equal(t, 3, counts.SkippedCount)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 上游把密钥名改了、key 跟着变（北鲲这类供应商的 key 就是名字）时，
+// 旧行必须原地接管新 key，而不是「旧行标记已删除 + 新行未匹配」。
+func TestSupplierProviderDataRepositoryReplaceAccountsRenamesInPlace(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	seenAt := time.Date(2026, 10, 22, 8, 34, 40, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT id, upstream_account_key, name, COALESCE(group_key, ''), COALESCE(rate_multiplier, 0),
+       local_account_id, active
+FROM supplier_provider_accounts
+WHERE provider_id = $1
+FOR UPDATE`)).
+		WithArgs(int64(15)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "upstream_account_key", "name", "group_key", "rate_multiplier", "local_account_id", "active"}).
+			AddRow(int64(1342270), "claude_kiro_99", "claude_kiro_99", "claude", 0.09, int64(477), true))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_accounts")).
+		WithArgs(int64(15), "claude", "claude", "active", "claude", "claude", 0.09, "1", seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM supplier_provider_accounts")).
+		WithArgs(int64(15), "claude").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET upstream_account_key = $2")).
+		WithArgs(int64(1342270), "claude", "claude", "active", "claude", "claude", 0.09, "1", seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET active = FALSE, status = 'deleted', raw_status = 'deleted'")).
+		WithArgs(int64(15), sqlmock.AnyArg(), seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats")).
+		WithArgs(int64(15), 1, 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	counts, err := repo.ReplaceAccounts(context.Background(), 15, []service.SupplierProviderRemoteAccount{
+		{Key: "claude", Name: "claude", Status: "active", GroupKey: "claude", GroupName: "claude", RateMultiplier: 0.09, RawStatus: "1"},
+	}, seenAt)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, counts.CheckedCount)
+	require.Equal(t, 1, counts.UpdatedCount)
+	// 被接管的旧行不再走「标记缺失」，所以不会计入跳过数。
+	require.Equal(t, 0, counts.SkippedCount)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// newapi 供应商的存量行 key 是账号名，解析层改取上游 token id 之后，
+// 同步必须把老行的 key 原地换成 id，否则一次升级就会把整家供应商的行全部打成「已删除 + 新增」。
+func TestSupplierProviderDataRepositoryReplaceAccountsMigratesLegacyNameKey(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	seenAt := time.Date(2026, 10, 22, 9, 30, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT id, upstream_account_key, name, COALESCE(group_key, ''), COALESCE(rate_multiplier, 0),
+       local_account_id, active
+FROM supplier_provider_accounts
+WHERE provider_id = $1
+FOR UPDATE`)).
+		WithArgs(int64(15)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "upstream_account_key", "name", "group_key", "rate_multiplier", "local_account_id", "active"}).
+			AddRow(int64(1342270), "claude_kiro_99", "claude_kiro_99", "claude", 0.09, int64(477), true))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET upstream_account_key = $2, updated_at = NOW()")).
+		WithArgs(int64(1342270), "1001").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_accounts")).
+		WithArgs(int64(15), "1001", "claude_kiro_99", "active", "claude", "claude", 0.09, "1", seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET active = FALSE, status = 'deleted', raw_status = 'deleted'")).
+		WithArgs(int64(15), sqlmock.AnyArg(), seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats")).
+		WithArgs(int64(15), 1, 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	counts, err := repo.ReplaceAccounts(context.Background(), 15, []service.SupplierProviderRemoteAccount{
+		{Key: "1001", Name: "claude_kiro_99", Status: "active", GroupKey: "claude", GroupName: "claude", RateMultiplier: 0.09, RawStatus: "1"},
+	}, seenAt)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, counts.UpdatedCount)
+	// 迁移后 key 与 items 一致，不会被当成「旧行消失」，所以没有额外的跳过。
+	require.Equal(t, 0, counts.SkippedCount)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 上游出现同名 token 时无法确定该把哪一条老行换成 id，宁可跳过迁移也不能乱改。
+func TestSupplierProviderDataRepositoryReplaceAccountsSkipsKeyMigrationWhenNameAmbiguous(t *testing.T) {
+	repo, mock := newSupplierProviderDataRepoMock(t)
+	seenAt := time.Date(2026, 10, 22, 9, 30, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT id, upstream_account_key, name, COALESCE(group_key, ''), COALESCE(rate_multiplier, 0),
+       local_account_id, active
+FROM supplier_provider_accounts
+WHERE provider_id = $1
+FOR UPDATE`)).
+		WithArgs(int64(15)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "upstream_account_key", "name", "group_key", "rate_multiplier", "local_account_id", "active"}).
+			AddRow(int64(1342270), "claude", "claude", "claude", 0.09, int64(477), true))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_accounts")).
+		WithArgs(int64(15), "1001", "claude", "active", "claude", "claude", 0.09, "1", seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO supplier_provider_accounts")).
+		WithArgs(int64(15), "1002", "claude", "active", "claude", "claude", 0.09, "1", seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_accounts SET active = FALSE, status = 'deleted', raw_status = 'deleted'")).
+		WithArgs(int64(15), sqlmock.AnyArg(), seenAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE supplier_provider_runtime_stats")).
+		WithArgs(int64(15), 2, 2).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	_, err := repo.ReplaceAccounts(context.Background(), 15, []service.SupplierProviderRemoteAccount{
+		{Key: "1001", Name: "claude", Status: "active", GroupKey: "claude", GroupName: "claude", RateMultiplier: 0.09, RawStatus: "1"},
+		{Key: "1002", Name: "claude", Status: "active", GroupKey: "claude", GroupName: "claude", RateMultiplier: 0.09, RawStatus: "1"},
+	}, seenAt)
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPlanSupplierAccountRenames(t *testing.T) {
+	bound := sql.NullInt64{Int64: 477, Valid: true}
+	basePrevious := func() []supplierPreviousAccount {
+		return []supplierPreviousAccount{
+			{id: 1, key: "claude_kiro_99", name: "claude_kiro_99", groupKey: "claude", rateMultiplier: 0.09, localAccountID: bound, active: true},
+		}
+	}
+
+	t.Run("同组一对一、倍率一致、名字相似时配对", func(t *testing.T) {
+		renames := planSupplierAccountRenames(basePrevious(), []service.SupplierProviderRemoteAccount{
+			{Key: "claude", Name: "claude", GroupKey: "claude", RateMultiplier: 0.09},
+		}, map[string]struct{}{"claude_kiro_99": {}})
+		require.Len(t, renames, 1)
+		require.Equal(t, int64(1), renames[0].previousID)
+		require.Equal(t, "claude", supplierRemoteAccountKey(renames[0].item))
+	})
+
+	t.Run("倍率不同不配对", func(t *testing.T) {
+		renames := planSupplierAccountRenames(basePrevious(), []service.SupplierProviderRemoteAccount{
+			{Key: "claude", Name: "claude", GroupKey: "claude", RateMultiplier: 0.12},
+		}, map[string]struct{}{"claude_kiro_99": {}})
+		require.Empty(t, renames)
+	})
+
+	t.Run("名字不相似不配对", func(t *testing.T) {
+		renames := planSupplierAccountRenames(basePrevious(), []service.SupplierProviderRemoteAccount{
+			{Key: "codex_plus", Name: "codex_plus", GroupKey: "claude", RateMultiplier: 0.09},
+		}, map[string]struct{}{"claude_kiro_99": {}})
+		require.Empty(t, renames)
+	})
+
+	t.Run("旧行没有绑定本地账号不配对", func(t *testing.T) {
+		previous := basePrevious()
+		previous[0].localAccountID = sql.NullInt64{}
+		renames := planSupplierAccountRenames(previous, []service.SupplierProviderRemoteAccount{
+			{Key: "claude", Name: "claude", GroupKey: "claude", RateMultiplier: 0.09},
+		}, map[string]struct{}{"claude_kiro_99": {}})
+		require.Empty(t, renames)
+	})
+
+	t.Run("同组出现多个新增时不配对", func(t *testing.T) {
+		renames := planSupplierAccountRenames(basePrevious(), []service.SupplierProviderRemoteAccount{
+			{Key: "claude", Name: "claude", GroupKey: "claude", RateMultiplier: 0.09},
+			{Key: "claude_2", Name: "claude_2", GroupKey: "claude", RateMultiplier: 0.09},
+		}, map[string]struct{}{"claude_kiro_99": {}})
+		require.Empty(t, renames)
+	})
+
+	t.Run("key 本来就在库里不算新增", func(t *testing.T) {
+		renames := planSupplierAccountRenames(basePrevious(), []service.SupplierProviderRemoteAccount{
+			{Key: "claude", Name: "claude", GroupKey: "claude", RateMultiplier: 0.09},
+		}, map[string]struct{}{"claude_kiro_99": {}, "claude": {}})
+		require.Empty(t, renames)
+	})
+
+	t.Run("缺少分组 key 时不配对", func(t *testing.T) {
+		previous := basePrevious()
+		previous[0].groupKey = ""
+		renames := planSupplierAccountRenames(previous, []service.SupplierProviderRemoteAccount{
+			{Key: "claude", Name: "claude", RateMultiplier: 0.09},
+		}, map[string]struct{}{"claude_kiro_99": {}})
+		require.Empty(t, renames)
+	})
+}
+
+func TestSupplierAccountNamesLookRenamed(t *testing.T) {
+	cases := []struct {
+		previous string
+		current  string
+		want     bool
+	}{
+		{previous: "claude_kiro_99", current: "claude", want: true},
+		{previous: "claude_max_官转", current: "claude_max", want: true},
+		{previous: "Kiro-特价", current: "Kiro-特价-新版", want: true},
+		{previous: "Kiro-特价", current: "Kiro Claude-特价", want: true},
+		{previous: "Codex_pro", current: "Codex_plus", want: false},
+		{previous: "", current: "claude", want: false},
+		{previous: "claude", current: "", want: false},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, supplierAccountNamesLookRenamed(tc.previous, tc.current), "%s -> %s", tc.previous, tc.current)
+	}
 }
 
 func TestSupplierProviderDataRepositoryReplaceGroupsUpsertsAndDeactivatesMissing(t *testing.T) {

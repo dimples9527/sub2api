@@ -1513,6 +1513,7 @@ func parseSupplierNewAPIAccounts(keysPayload, groupsPayload []byte) ([]SupplierP
 		Message string `json:"message"`
 		Data    struct {
 			Items []struct {
+				ID     any    `json:"id"`
 				Name   string `json:"name"`
 				Group  string `json:"group"`
 				Status any    `json:"status"`
@@ -1545,8 +1546,12 @@ func parseSupplierNewAPIAccounts(keysPayload, groupsPayload []byte) ([]SupplierP
 		}
 		rawStatus := jsonString(item.Status)
 		status := normalizeSupplierNewAPIKeyStatus(item.Status)
+		// 身份键优先用上游 token id：New API 的 token 名可以随时改，id 不会变。
+		// 过去这里直接拿 name 当 key，上游一改名行就被判成「已删除 + 新增」，
+		// 绑定的本地账号随即断链（存量行由 ReplaceAccounts 的 key 迁移换成 id）。
+		key := firstSupplierSub2APIString(jsonString(item.ID), name)
 		out = append(out, SupplierProviderRemoteAccount{
-			Key:            name,
+			Key:            key,
 			Name:           name,
 			Status:         status,
 			GroupKey:       group.Key,

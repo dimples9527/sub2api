@@ -1781,16 +1781,28 @@ func (r *supplierProviderDataRepository) ReplaceAccounts(ctx context.Context, pr
 	defer func() { _ = tx.Rollback() }()
 
 	counts := service.SupplierSyncCounts{CheckedCount: len(items)}
+	// 同步前的快照必须在 upsert 之前读：改名识别要对比「本轮消失了谁、新增了谁」，
+	// upsert 之后新 key 已经落库，就分不出来了。
+	previous, err := loadSupplierPreviousAccounts(ctx, tx, providerID)
+	if err != nil {
+		return service.SupplierSyncCounts{}, err
+	}
+	existingKeys := make(map[string]struct{}, len(previous))
+	for _, row := range previous {
+		existingKeys[row.key] = struct{}{}
+	}
+	// 存量行过去用账号名当 key，这里先换成上游稳定 id，后面 upsert 才会命中同一行。
+	if err := migrateSupplierAccountKeys(ctx, tx, providerID, previous, existingKeys, items); err != nil {
+		return service.SupplierSyncCounts{}, err
+	}
+
 	keys := make([]string, 0, len(items))
 	validCount := 0
 	schedulableCount := 0
 	for _, item := range items {
-		key := strings.TrimSpace(item.Key)
+		key := supplierRemoteAccountKey(item)
 		name := strings.TrimSpace(item.Name)
-		if key == "" && name != "" {
-			key = strings.ToLower(strings.Join(strings.Fields(name), " "))
-		}
-		if key == "" && name == "" {
+		if key == "" {
 			counts.SkippedCount++
 			continue
 		}
@@ -1814,6 +1826,30 @@ ON CONFLICT (provider_id, upstream_account_key) DO UPDATE SET
 			return service.SupplierSyncCounts{}, fmt.Errorf("upsert supplier account: %w", err)
 		}
 		counts.UpdatedCount++
+	}
+
+	// 改名接管必须在「标记缺失」之前：配对成功的旧行 key 会被改成新 key，之后那条
+	// NOT (upstream_account_key = ANY($2)) 就不会再把它判成上游已删除。
+	for _, rename := range planSupplierAccountRenames(previous, items, existingKeys) {
+		newKey := supplierRemoteAccountKey(rename.item)
+		// 先删掉本轮 upsert 插入的同名新行，否则改 key 会撞 (provider_id, upstream_account_key) 唯一约束。
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM supplier_provider_accounts
+WHERE provider_id = $1 AND upstream_account_key = $2`, providerID, newKey); err != nil {
+			return service.SupplierSyncCounts{}, fmt.Errorf("drop renamed supplier account duplicate: %w", err)
+		}
+		// 只换身份，不动 local_account_id / matched_upstream_name：
+		// 绑定必须跟着账号走，历史匹配名也要留着，列表才能算出「上游已改名」并开出口快捷改名。
+		if _, err := tx.ExecContext(ctx, `
+UPDATE supplier_provider_accounts
+SET upstream_account_key = $2, name = $3, status = $4, group_key = $5, group_name = $6,
+    rate_multiplier = $7, raw_status = $8, active = TRUE, last_seen_at = $9,
+    inactive_at = NULL, updated_at = $9
+WHERE id = $1`, rename.previousID, newKey, strings.TrimSpace(rename.item.Name), strings.TrimSpace(rename.item.Status),
+			strings.TrimSpace(rename.item.GroupKey), strings.TrimSpace(rename.item.GroupName),
+			rename.item.RateMultiplier, strings.TrimSpace(rename.item.RawStatus), seenAt); err != nil {
+			return service.SupplierSyncCounts{}, fmt.Errorf("rename supplier account in place: %w", err)
+		}
 	}
 
 	result, err := tx.ExecContext(ctx, `
