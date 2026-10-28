@@ -25,6 +25,8 @@ export interface HealthGuardAccountMapping {
   platform: string
   localGroupPlatforms: string[]
   available: boolean
+  /** 不可用时的一句话原因；可用时为空串。列表直接展示它，避免只显示「不可用」不给理由。 */
+  unavailableReason: string
   sources: SupplierProviderAccount[]
 }
 
@@ -146,6 +148,37 @@ export function isHealthGuardAccountAvailable(account: SupplierProviderAccount):
 }
 
 /**
+ * 不可用原因（一句话）；可用时返回空串。
+ *
+ * 判据必须与 isHealthGuardAccountAvailable 逐条对应：两边一旦分叉，就会出现
+ * 「标了不可用却说不出原因」或者「给了原因其实可用」—— 用户没法据此判断该修哪一头。
+ */
+export function healthGuardAccountUnavailableReason(account: SupplierProviderAccount): string {
+  if (!account.active) return '上游账号已停用'
+  if (account.local_account_match_status === 'conflict') return '匹配到多个本地账号'
+  if (account.local_account_match_status !== 'matched') return '未匹配本地账号'
+  const status = (account.local_account_status || '').trim()
+  // 状态为空是「本地账号已被删除」：查询侧按 deleted_at 过滤，删除后 join 不到行，只剩空串。
+  if (!status) return '本地账号已删除'
+  if (status === 'active') return ''
+  const detail = summarizeHealthGuardAccountError(account.local_account_last_test_error || '')
+  return detail ? `本地账号状态异常（${status}）：${detail}` : `本地账号状态异常（${status}）`
+}
+
+/**
+ * 上游错误常是一整段带 JSON 的文本（如 `API returned 403: {"code":"INSUFFICIENT_BALANCE",…}`），
+ * 塞进列表行只会被截断成无意义的开头。优先取 JSON 里的 message，其次砍掉 JSON 尾巴只留前半句。
+ */
+function summarizeHealthGuardAccountError(raw: string): string {
+  const text = raw.trim()
+  if (!text) return ''
+  const message = text.match(/"message"\s*:\s*"([^"]+)"/)
+  if (message) return message[1].trim()
+  const head = text.split('{')[0].trim().replace(/[:：]\s*$/, '')
+  return head || text
+}
+
+/**
  * 把上游账号列表聚合成「本地账号」维度的映射表。
  * 同一本地账号可能命中多个上游来源：只要有一个可用就算可用，平台以可用来源为准。
  */
@@ -167,8 +200,11 @@ export function buildHealthGuardAccountMappings(
       ]))
       if (available) {
         current.available = true
+        current.unavailableReason = ''
         current.platform = effectiveHealthGuardPlatform(account)
         current.localAccountName = account.local_account_name || current.localAccountName
+      } else if (!current.unavailableReason) {
+        current.unavailableReason = healthGuardAccountUnavailableReason(account)
       }
       continue
     }
@@ -179,6 +215,7 @@ export function buildHealthGuardAccountMappings(
       platform: effectiveHealthGuardPlatform(account),
       localGroupPlatforms: healthGuardLocalGroupPlatforms(account),
       available,
+      unavailableReason: available ? '' : healthGuardAccountUnavailableReason(account),
       sources: [account],
     })
   }
@@ -267,6 +304,8 @@ export function healthGuardSelectedRowsForConfig(
     platform: 'unknown',
     localGroupPlatforms: ['unknown'],
     available: false,
+    // 映射表里查不到有两种可能：本地账号已删除，或它没有任何上游账号绑定过来。
+    unavailableReason: '本地账号已删除或未绑定上游账号',
     sources: [],
   })
 }

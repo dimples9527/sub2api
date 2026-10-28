@@ -113,8 +113,24 @@
                 仅看未开启
                 <strong>{{ healthGuardUnselectedCount }}</strong>
               </button>
-              <!-- 分隔线右侧是「供应商是否开启」维度：与左边那两个正交、可以叠加
-                   （例如「未参与守护 + 供应商已关闭」一起看），但这一对内部互斥。 -->
+              <!-- 分隔线把三组正交维度隔开：左边是「是否参与守护」，中间是「账号当前是否可用」，
+                   右边是「供应商是否开启」。组与组之间可以叠加（例如「仅看不可用 + 供应商已关闭」），
+                   只有组内部互斥。 -->
+              <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
+              <!-- 不可用账号默认不进列表（它们不可配置），所以这个开关同时会切换列表的基准集合，
+                   否则「只看不可用」在一个只含可用账号的集合里永远筛不出东西。 -->
+              <button
+                class="sp-health-guard-selected-toggle unavailable"
+                :class="{ active: healthGuardUnavailableOnly }"
+                type="button"
+                :aria-pressed="healthGuardUnavailableOnly"
+                title="只显示当前不可用的账号（上游停用、匹配失效或本地账号状态异常）"
+                @click="toggleHealthGuardUnavailableOnly"
+              >
+                <span class="sp-health-guard-selected-toggle-mark" aria-hidden="true"></span>
+                仅看不可用
+                <strong>{{ healthGuardUnavailableCount }}</strong>
+              </button>
               <span class="sp-health-guard-batch-divider" aria-hidden="true"></span>
               <button
                 class="sp-health-guard-selected-toggle"
@@ -247,7 +263,7 @@
 
             <div
               class="sp-health-guard-account-choice"
-              :title="mapping.available ? healthGuardSourceSummary(mapping) : '账号已停用、删除或匹配失效，运行时将记录为不可用'"
+              :title="mapping.available ? healthGuardSourceSummary(mapping) : healthGuardUnavailableTitle(mapping)"
             >
               <span class="sp-health-guard-account-choice-copy">
                 <strong :class="platformTextClass(mapping.platform)">{{ mapping.localAccountName }}{{ healthGuardAccountMultiplierText(mapping) }}</strong>
@@ -262,7 +278,7 @@
                   class="sp-health-guard-account-source"
                   :class="{ unavailable: !mapping.available }"
                 >
-                  {{ mapping.available ? healthGuardSourceSummary(mapping) : '当前不可用' }}
+                  {{ mapping.available ? healthGuardSourceSummary(mapping) : healthGuardUnavailableText(mapping) }}
                 </span>
                 <span
                   v-if="healthGuardAccountIsSelected(mapping.localAccountID) && !mapping.available"
@@ -605,6 +621,8 @@ const healthGuardProviderClosedOnly = ref(false)
 
 const healthGuardProviderEnabledOnly = ref(false)
 
+const healthGuardUnavailableOnly = ref(false)
+
 const healthGuardBatchIntervalInput = ref<number | string>('')
 
 const healthGuardModelOptionsByPlatform = ref<Record<string, { id: string; display_name?: string }[]>>({})
@@ -671,7 +689,11 @@ const healthGuardPlatformScopedMappings = computed(() => {
 })
 
 const healthGuardWorkspaceAccounts = computed(() => {
-  const accounts = [...healthGuardAvailableAccountMappings.value]
+  // 「仅看不可用」是排查视角：不可用账号默认不进列表（它们不可配置），
+  // 若仍以「可用账号 + 已选」为基准，这个开关在绝大多数时候筛不出任何东西。
+  const accounts = [
+    ...(healthGuardUnavailableOnly.value ? mappings.value : healthGuardAvailableAccountMappings.value),
+  ]
   const includedAccountIDs = new Set(accounts.map(mapping => mapping.localAccountID))
   for (const mapping of healthGuardSelectedAccountRows.value) {
     if (includedAccountIDs.has(mapping.localAccountID)) continue
@@ -683,6 +705,7 @@ const healthGuardWorkspaceAccounts = computed(() => {
   const providerID = healthGuardAccountProviderFilter.value
   const keyword = healthGuardAccountSearch.value.trim().toLowerCase()
   const filtered = accounts.filter(mapping => {
+    if (healthGuardUnavailableOnly.value && mapping.available) return false
     if (healthGuardSelectedOnly.value && !healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
     if (healthGuardUnselectedOnly.value && healthGuardAccountIDs.value.includes(mapping.localAccountID)) return false
     if (healthGuardProviderClosedOnly.value && !healthGuardAccountProviderClosed(mapping)) return false
@@ -763,7 +786,14 @@ const healthGuardProviderEnabledCount = computed(() =>
   healthGuardAvailableAccountMappings.value.length - healthGuardProviderClosedCount.value
 )
 
+// 计数按「全部映射」算，与开关切过去的基准集合保持一致：只数可用账号里的异常项，
+// 会把「没参与守护、但本地账号已经挂了」的账号漏掉 —— 而那恰恰是最该被看到的一批。
+const healthGuardUnavailableCount = computed(() =>
+  mappings.value.filter(mapping => !mapping.available).length
+)
+
 const healthGuardEmptyHint = computed(() => {
+  if (healthGuardUnavailableOnly.value) return '当前筛选条件下没有不可用账号。'
   if (healthGuardSelectedOnly.value) return '当前筛选条件下没有已选账号。'
   if (healthGuardUnselectedOnly.value) return '当前筛选条件下没有未参与守护的账号。'
   if (healthGuardProviderClosedOnly.value) return '当前筛选条件下没有供应商已关闭的账号。'
@@ -791,11 +821,31 @@ function toggleHealthGuardProviderEnabledOnly() {
   if (healthGuardProviderEnabledOnly.value) healthGuardProviderClosedOnly.value = false
 }
 
+// 与其它三个开关都不互斥：可用性、是否参与守护、供应商状态是三个正交维度，
+// 允许「仅看不可用 + 仅看已选」这类叠加，正好用来定位「我选的账号里哪些坏了」。
+function toggleHealthGuardUnavailableOnly() {
+  healthGuardUnavailableOnly.value = !healthGuardUnavailableOnly.value
+}
+
 function healthGuardSourceSummary(mapping: HealthGuardAccountMapping): string {
   const sources = mapping.sources
     .map(source => `${source.provider_name || `供应商 ${source.provider_id}`} · ${source.name || source.upstream_account_key}`)
     .filter(Boolean)
   return sources.length ? sources.join('；') : '供应商来源不可用'
+}
+
+/** 不可用行直接把原因写在原「来源」那一列：只标「当前不可用」而不给理由，用户没法判断该修哪一头。 */
+function healthGuardUnavailableText(mapping: HealthGuardAccountMapping): string {
+  return `当前不可用 · ${mapping.unavailableReason || '原因未知'}`
+}
+
+function healthGuardUnavailableTitle(mapping: HealthGuardAccountMapping): string {
+  const base = `${healthGuardUnavailableText(mapping)}；运行时将记录为不可用`
+  // 行内只放摘要（会被截断），完整的上游报错挂在 title 上，排查时不用再去账号页翻。
+  const rawError = mapping.sources
+    .map(source => (source.local_account_last_test_error || '').trim())
+    .find(Boolean)
+  return rawError ? `${base}\n${rawError}` : base
 }
 
 function healthGuardAccountMultiplierText(mapping: HealthGuardAccountMapping): string {
@@ -1320,6 +1370,7 @@ async function onDialogOpen() {
   healthGuardUnselectedOnly.value = false
   healthGuardProviderClosedOnly.value = false
   healthGuardProviderEnabledOnly.value = false
+  healthGuardUnavailableOnly.value = false
   healthGuardBatchIntervalInput.value = ''
   // 勾选是「本次批量操作的选择」，每次打开都清空：否则上一次的勾选会静默参与下一次批量设置。
   healthGuardCheckedAccountIDs.value = []
@@ -1974,6 +2025,22 @@ watch(
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+
+/* 「仅看不可用」筛的是异常项，激活态用琥珀而不是统一的蓝色：
+   与行内「当前不可用」的琥珀文案呼应，一眼能看出当前列表是在排查异常账号。 */
+.sp-health-guard-selected-toggle.unavailable.active {
+  border-color: color-mix(in srgb, var(--sp-amber) 52%, var(--sp-line));
+  color: var(--sp-amber);
+  background: color-mix(in srgb, var(--sp-amber) 10%, var(--sp-panel));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--sp-amber) 20%, transparent);
+}
+
+
+.sp-health-guard-selected-toggle.unavailable.active .sp-health-guard-selected-toggle-mark {
+  background: var(--sp-amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sp-amber) 18%, transparent);
 }
 
 
