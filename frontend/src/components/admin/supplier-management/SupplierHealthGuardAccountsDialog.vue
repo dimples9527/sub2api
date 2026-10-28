@@ -894,8 +894,11 @@ async function loadHealthGuardModels() {
     healthGuardModelOptionsByPlatform.value = Object.fromEntries(
       platforms.map(platform => [platform, byPlatform[normalizeHealthGuardPlatform(platform)] || []])
     )
-  } catch {
+  } catch (err) {
     healthGuardModelOptionsByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, []]))
+    // 不能只把清单清空：那样下拉只剩「未配置」，和「该平台确实没配模型」完全同形，
+    // 用户只会看到「下拉没数据」。这里必须把失败原因抛到界面上。
+    appStore.showError(extractApiErrorMessage(err, '加载平台测试模型失败'))
   } finally {
     healthGuardModelLoadingByPlatform.value = Object.fromEntries(platforms.map(platform => [platform, false]))
   }
@@ -1320,23 +1323,37 @@ async function onDialogOpen() {
   healthGuardBatchIntervalInput.value = ''
   // 勾选是「本次批量操作的选择」，每次打开都清空：否则上一次的勾选会静默参与下一次批量设置。
   healthGuardCheckedAccountIDs.value = []
-  try {
-    await loadHealthGuardModels()
-  } catch (err) {
-    appStore.showError(extractApiErrorMessage(err, '加载健康守护账号失败'))
-  }
+  await loadHealthGuardModels()
 }
 
 function closeHealthGuardAccounts() {
   emit('close')
 }
 
-// 打开时重置本地筛选并拉取模型清单；账号数据由父组件在打开前准备好。
+// 打开时重置本地筛选并拉取模型清单。
+// ⚠️ 必须 immediate：上游账号页是用 v-if 挂载本弹窗的（挂载瞬间 show 已是 true），
+// 非 immediate 的 watcher 在挂载时不会触发，onDialogOpen 就永远不会跑，
+// 表现就是「平台默认测试模型」每个下拉都只剩「未配置」。
 watch(
   () => props.show,
   visible => {
     if (visible) void onDialogOpen()
-  }
+  },
+  { immediate: true }
+)
+
+// 平台集合是异步到位的（上游账号页先挂载弹窗、后拿到账号候选），只在打开瞬间拉一次
+// 会拿到空清单。这里按平台集合的「值」补拉：账号到位、平台增减都会重新对齐。
+// 已经覆盖全部平台时直接跳过，避免和 onDialogOpen 的强制刷新重复请求。
+watch(
+  () => healthGuardPlatformSummaries.value.map(summary => summary.platform).join(','),
+  platforms => {
+    if (!props.show || !platforms) return
+    const loaded = healthGuardModelOptionsByPlatform.value
+    if (platforms.split(',').every(platform => platform in loaded)) return
+    void loadHealthGuardModels()
+  },
+  { immediate: true }
 )
 
 </script>
