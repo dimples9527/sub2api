@@ -64,8 +64,16 @@ const (
 	modelDegradationModelsTimeout = 20 * time.Second
 	// Anthropic Messages 必须显式声明 API 版本，缺失会直接 400。
 	modelDegradationAnthropicVersion = "2023-06-01"
-	// Anthropic Messages 的 max_tokens 是必填项。检测题的回答都很短，给足即可。
-	modelDegradationAnthropicMaxTokens = 4096
+	// Anthropic Messages 的 max_tokens 是必填项。
+	//
+	// 取 8192 而不是跟 chat / responses 一样用 16000：Anthropic 各代模型的
+	// max_tokens 上限不一致（老 haiku 只有 4096/8192），传超了直接 400，
+	// 而 8192 是所有在用模型都能接受的最大公约数，约合 28KB 源码 ——
+	// 生成题的实测输出在 11~31KB，够用。
+	//
+	// 也不能沿用原先的 4096：那是按「回答很短」估的，只够 12~16KB，
+	// 稍长一点就会被 stop_reason=max_tokens 截成半截 SVG（见流式解析里的处理）。
+	modelDegradationAnthropicMaxTokens = 8192
 	// chat / responses 的输出上限（含推理 token）。对齐 manxue-ai 的默认值：
 	// 不封顶时推理模型会按模型自身极限思考生成（可达 128k），单题明显更慢、
 	// 更容易撞上超时；封顶后思考与生成的总量可控。
@@ -692,9 +700,16 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 		terminalPath = modelDegradationMessagesPath
 		headers["x-api-key"] = input.APIKey
 		headers["anthropic-version"] = modelDegradationAnthropicVersion
+		// messages 同样走流式，理由与 responses 一致：生成题要等几分钟才吐完整源码，
+		// 非流式期间连接零流量，链路上任何一层的「等待响应头」超时都会把它掐断。
+		// 生产实测（2026-10-29）：messages 的生成题 5/5 全部失败在 ~378s，
+		// 报「上游网关等待模型响应超时」，且源站没跑完、连用量都记不上；
+		// 同一道题在 responses（流式）上能跑到 600s 以上并成功。
+		headers["Accept"] = "text/event-stream"
 		payload = map[string]any{
 			"model":      input.ModelID,
 			"max_tokens": modelDegradationAnthropicMaxTokens,
+			"stream":     true,
 			"messages": []map[string]string{
 				{"role": "user", "content": prompt},
 			},
@@ -702,7 +717,7 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 		// Anthropic 没有 reasoning_effort：它用 thinking.budget_tokens 表达推理深度，
 		// 档位语义与 OpenAI 的 low/medium/high 不可换算；而且多传一个它不认识的字段
 		// 会直接 400（extra inputs are not permitted）。因此这里刻意不发该字段。
-		extract = extractModelDegradationMessagesContent
+		extract = extractModelDegradationMessagesStream
 
 	case ModelDegradationProtocolResponses:
 		terminalPath = modelDegradationResponsesPath
@@ -754,7 +769,9 @@ func buildModelDegradationUpstreamRequest(input ModelDegradationInput, prompt st
 		Paths:   modelDegradationEndpointPaths(input.BaseURL, terminalPath),
 		Headers: headers,
 		Body:    encoded,
-		Stream:  input.Protocol == ModelDegradationProtocolResponses,
+		// 只有 chat_completions 还是非流式：它是短回答的兼容路径，也是唯一一个
+		// 上游普遍不保证流式格式可解析的协议。
+		Stream:  input.Protocol != ModelDegradationProtocolChatCompletions,
 		Extract: extract,
 	}, nil
 }

@@ -496,6 +496,102 @@ func extractModelDegradationResponsesStream(raw []byte) (string, error) {
 	return extractModelDegradationResponsesOutput(completed)
 }
 
+// extractModelDegradationMessagesStream 解析 Anthropic Messages 协议的 SSE 流。
+//
+// 与 responses 改流式的原因完全相同（见 extractModelDegradationResponsesStream）：
+// 生成题要等几分钟才吐完整源码，非流式期间连接零流量，链路上任何一层的
+// 「等待响应头」超时都会把它掐断。生产实测（2026-10-29）messages 的生成题
+// 5/5 全部失败在 ~378s，报「上游网关等待模型响应超时」；而同一道题走 responses
+// （流式）能跑到 616s 并成功 —— 差异只在「等首字节」还是「边生成边收帧」。
+//
+// 只拼接 content_block_delta 里的 text_delta，忽略 thinking_delta 与
+// input_json_delta；只有收到 message_stop 才算这一轮完整，否则宁可明确失败，
+// 也不拿半截源码当作品展示。
+func extractModelDegradationMessagesStream(raw []byte) (string, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "", &modelDegradationUpstreamError{Message: "上游返回空响应，请检查接口服务状态", Retryable: true}
+	}
+
+	// 先按完整 JSON 解析：部分上游会忽略 stream 参数、仍然返回非流式响应。
+	// 不先试的话，这类上游会被误判成「流式响应缺少完整结果」——
+	// 明明拿到了完整答案，却报一个看起来像网络中断的错。
+	if strings.HasPrefix(trimmed, "{") {
+		return extractModelDegradationMessagesContent([]byte(trimmed))
+	}
+
+	// SSE 的分块分隔符在 CRLF 流上是 \r\n\r\n，只认 \n\n 会永远匹配不到。
+	normalized := strings.ReplaceAll(trimmed, "\r\n", "\n")
+
+	var (
+		builder strings.Builder
+		stopped bool
+	)
+
+	for _, block := range strings.Split(normalized, "\n\n") {
+		payload := modelDegradationSSEPayload(block)
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+
+		var event struct {
+			Type  string         `json:"type"`
+			Error map[string]any `json:"error"`
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+				// StopReason 只在 message_delta 事件里出现，用来识别输出被截断。
+				StopReason string `json:"stop_reason"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			// 单个事件解析失败不能直接判死：流里可能混着心跳或注释。
+			// 但整个流结束时仍没拿到 message_stop，下面会报「响应不完整」。
+			continue
+		}
+
+		kind := event.Type
+		if kind == "" {
+			kind = modelDegradationSSEEventName(block)
+		}
+
+		switch kind {
+		case "error":
+			return "", modelDegradationStreamFailure(event.Error, payload)
+		case "content_block_delta":
+			// 只认正文增量：thinking_delta 是推理过程，input_json_delta 是工具入参，
+			// 拼进来只会污染作品源码。
+			if event.Delta.Type == "" || event.Delta.Type == "text_delta" {
+				builder.WriteString(event.Delta.Text)
+			}
+		case "message_delta":
+			// 达到 max_tokens 时上游会正常收尾（有 message_stop），但内容是半截的。
+			// 本地参数决定的上限，重试只会再烧一次额度，所以不标记可重试。
+			if event.Delta.StopReason == "max_tokens" {
+				return "", &modelDegradationUpstreamError{
+					Message:   "上游输出达到 max_tokens 上限，作品可能不完整，请调高输出上限或换更短的题目",
+					Status:    200,
+					Retryable: false,
+				}
+			}
+		case "message_stop":
+			stopped = true
+		}
+	}
+
+	if !stopped {
+		return "", &modelDegradationUpstreamError{
+			Message: "上游流式响应缺少完整结果，可能已中断", Retryable: true,
+		}
+	}
+	if strings.TrimSpace(builder.String()) == "" {
+		return "", &modelDegradationUpstreamError{
+			Message: "上游响应中没有文本内容", Status: 200, Retryable: true,
+		}
+	}
+	return builder.String(), nil
+}
+
 // modelDegradationSSEPayload 从一个 SSE 块里取出 data 字段的正文。
 // 一个块里可能有多行 data:（部分实现会拆分长事件），按行拼接。
 func modelDegradationSSEPayload(block string) string {
