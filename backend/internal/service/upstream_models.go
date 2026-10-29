@@ -243,7 +243,41 @@ func notifyUpstreamModelSyncPhase(onPhase func(UpstreamModelSyncPhase), phase Up
 // snapshot. When no model is complete, the existing account snapshot is left
 // untouched.
 func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
-	models, body, err := s.fetchUpstreamModelList(ctx, account)
+	return s.syncUpstreamModelCatalog(ctx, account, nil)
+}
+
+// SyncUpstreamModelCatalogWithProgress 是 SyncUpstreamModelCatalog 的带阶段回调变体。
+//
+// 「请求上游模型列表」与「从 models.dev 补齐能力元数据」是同步过程中两段耗时的外部请求，
+// 批量编排需要据此在弹窗里逐账号推进进度条。这里只多一个回调，流程与原方法完全共用，
+// 不新增分支、不改任何既有调用方的行为。
+func (s *AccountTestService) SyncUpstreamModelCatalogWithProgress(
+	ctx context.Context,
+	account *Account,
+	onPhase func(UpstreamModelSyncPhase),
+) (*UpstreamModelCatalog, error) {
+	return s.syncUpstreamModelCatalog(ctx, account, onPhase)
+}
+
+func (s *AccountTestService) syncUpstreamModelCatalog(
+	ctx context.Context,
+	account *Account,
+	onPhase func(UpstreamModelSyncPhase),
+) (*UpstreamModelCatalog, error) {
+	notifyUpstreamModelSyncPhase(onPhase, UpstreamModelSyncPhaseFetching)
+	// Grok 目录观察需要请求本身（用于记录状态码/耗时），因此走带观测的抓取入口；
+	// 非 Grok 账号的 observation 恒为 nil，其余流程与只取模型列表完全一致。
+	fetched, err := s.fetchUpstreamModelListWithObservation(ctx, account)
+	var (
+		models          []string
+		body            []byte
+		grokObservation *GrokCatalogObservation
+	)
+	if fetched != nil {
+		models = fetched.Models
+		body = fetched.Body
+		grokObservation = fetched.GrokObservation
+	}
 	liveListAvailable := err == nil
 	if err != nil {
 		configuredModels := configuredUpstreamModelsForCapabilitySync(account)
