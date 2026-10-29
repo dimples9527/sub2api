@@ -759,7 +759,7 @@ export default {
       },
       protocolHint: {
         chat_completions:
-          '在 Base URL 后自动拼上 /v1/chat/completions（地址里已带版本段则不再补 /v1），用 Authorization: Bearer 认证；思考等级按 reasoning_effort 发送。',
+          '在 Base URL 后自动拼上 /v1/chat/completions（地址里已带版本段则不再补 /v1），用 Authorization: Bearer 认证；思考等级按 reasoning_effort 发送。该协议为非流式请求：生成题这类要跑几分钟的长输出，等待期间连接没有数据流动，容易被网关判成超时（表现为一直转圈、后台也查不到用量记录）。跑生成题建议改用 OpenAI Responses 或 Anthropic。',
         responses:
           '在 Base URL 后自动拼上 /v1/responses（地址里已带版本段则不再补 /v1），用 Authorization: Bearer 认证；思考等级按 reasoning.effort 发送。',
         messages:

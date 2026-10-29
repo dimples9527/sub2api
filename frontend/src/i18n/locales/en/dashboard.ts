@@ -755,7 +755,7 @@ export default {
       },
       protocolHint: {
         chat_completions:
-          'Resolves to Base URL + /v1/chat/completions (no extra /v1 when the address already carries a version segment) and authenticates with Authorization: Bearer; the thinking level is sent as reasoning_effort.',
+          'Resolves to Base URL + /v1/chat/completions (no extra /v1 when the address already carries a version segment) and authenticates with Authorization: Bearer; the thinking level is sent as reasoning_effort. This protocol is non-streaming: a long generation such as the render task keeps the connection silent while it runs, so gateways tend to cut it off as a timeout (it spins forever and leaves no usage record). Use OpenAI Responses or Anthropic for the render task.',
         responses:
           'Resolves to Base URL + /v1/responses (no extra /v1 when the address already carries a version segment) and authenticates with Authorization: Bearer; the thinking level is sent as reasoning.effort.',
         messages:
