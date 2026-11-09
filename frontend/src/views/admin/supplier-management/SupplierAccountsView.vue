@@ -636,6 +636,13 @@
                   @click.stop="openLocalAccountTest(account)"
                 >{{ testingAccountID === account.local_account_id ? '加载中…' : '测试账号' }}</button>
                 <button
+                  class="sp-button small sp-account-action-edit"
+                  type="button"
+                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+                  :data-test="`supplier-account-edit-${account.local_account_id}`"
+                  @click.stop="openLocalAccountEditor(account)"
+                >编辑</button>
+                <button
                   class="sp-button small sp-account-action-binding"
                   type="button"
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
@@ -645,7 +652,7 @@
               <!--
                 其余动作收进「更多」下拉。操作栏原本最多并排 12 个按钮，每一行都把列宽顶到需要横向滚动，
                 而「查看」「恢复状态」这类低频动作夹在中间，找起来比按分组展开更慢。
-                这里只留调度切换 / 测试 / 绑定三个高频动作，其余按需展开。
+                这里只留调度切换 / 测试 / 编辑 / 绑定四个高频动作，其余按需展开。
               -->
               <button
                 class="sp-button small ghost sp-account-more"
@@ -1916,7 +1923,7 @@
     </BaseDialog>
 
     <!--
-      「更多」下拉：操作栏只留调度切换 / 测试 / 绑定三个高频动作，其余在这里按需展开。
+      「更多」下拉：操作栏只留调度切换 / 测试 / 编辑 / 绑定四个高频动作，其余在这里按需展开。
       必须 Teleport 到 body —— 表格容器带 overflow，面板若留在单元格里会被裁掉，
       所以沿用分组管理页的做法：全屏遮罩 + fixed 定位 + 由点击位置换算坐标。
     -->
@@ -1975,17 +1982,8 @@
               <Icon name="refresh" size="sm" />
               <span>{{ recoveringAccountID === account.local_account_id ? '恢复中' : '恢复状态' }}</span>
             </button>
-            <button
-              type="button"
-              class="sp-account-action-item sp-account-action-edit"
-              :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-              @click="runAccountActionMenuAction(openLocalAccountEditor)"
-            >
-              <Icon name="edit" size="sm" />
-              <span>编辑</span>
-            </button>
           </template>
-          <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。紧跟「编辑」，
+          <!-- 快捷改名：一键把本地账号名改成「供应商名称-上游密钥名称」。紧跟「恢复状态」，
                和「手动改」形成「快捷 / 完整」的对照。目标名算不出来（缺供应商名或密钥名）时整条不显示。
                刻意留在 canManageLocalAccount 之外：上游改了密钥名导致断链时行会变成未匹配，
                而改名恰恰是唯一能把名字对齐回去的动作，不能跟着其它本地账号按钮一起消失。 -->
@@ -3973,7 +3971,8 @@ const accountActionMenuTargets = computed(() =>
 function openAccountActionMenu(account: SupplierProviderAccount, event: MouseEvent) {
   const menuWidth = 200
   // 估算值只用于「贴边时上翻」，多一个菜单项就多一行高度，估小了会让底部被视口裁掉。
-  const menuHeight = 445
+  // 当前最多 11 个菜单项（含删除类动作），按每行约 35px 加内边距估算。
+  const menuHeight = 410
   const viewportPadding = 8
   accountActionMenu.open = true
   accountActionMenu.account = account
@@ -6781,6 +6780,12 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-orange);
 }
 
+.sp-account-row-actions .sp-account-action-edit {
+  border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
+  background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
+  color: var(--sp-amber);
+}
+
 .sp-account-row-actions .sp-account-action-binding {
   border-color: color-mix(in srgb, var(--sp-green) 42%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-green) 9%, var(--sp-panel));
@@ -6789,6 +6794,7 @@ button.sp-guard-failure-hint:hover {
 
 .sp-account-row-actions .sp-account-action-test:hover,
 .sp-account-row-actions .sp-account-action-election-log:hover,
+.sp-account-row-actions .sp-account-action-edit:hover,
 .sp-account-row-actions .sp-account-action-binding:hover,
 .sp-account-row-actions .sp-account-more:hover {
   background: color-mix(in srgb, currentColor 14%, var(--sp-panel));
@@ -6896,15 +6902,11 @@ button.sp-guard-failure-hint:hover {
 /* 收进下拉的动作沿用原来的语义色：从描边按钮变成文字项后只保留文字颜色。
    快捷改名用玫红 #db2777 —— 不能用 --sp-cyan：本页里 --sp-cyan 的值是 #3b82f6（蓝），
    与「测试账号」的 --sp-blue #2563eb 几乎同色，而两者在面板里仍然相邻，
-   等于让新入口跟一个不相关的入口撞色。该入口在面板里的位置是「编辑」与「复制账号」之间，
-   取一个跟上下邻居都拉得开的色相；常见色相（蓝/琥珀/紫/橙/绿/红/青/靛）都已被其它入口占掉，
+   等于让新入口跟一个不相关的入口撞色。该入口在面板里的位置是「恢复状态」与「复制账号」之间，
+   取一个跟上下邻居都拉得开的色相；常见色相（蓝/琥珀/紫/橙/绿/红/青/靛）大多已被其它入口占掉，
    玫红是剩下的最优解。硬编码色值与本列 recover(#0d9488)、platform(#4f46e5) 的写法一致。 */
 .sp-account-action-menu .sp-account-action-recover {
   color: #0d9488;
-}
-
-.sp-account-action-menu .sp-account-action-edit {
-  color: var(--sp-amber);
 }
 
 .sp-account-action-menu .sp-account-action-rename {
@@ -6923,7 +6925,7 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-cyan);
 }
 
-/* 「分组默认账号」用绿：面板里已占掉 recover(teal)/edit(琥珀)/rename(玫红)/copy(紫)/
+/* 「分组默认账号」用绿：面板里已占掉 recover(teal)/rename(玫红)/copy(紫)/
    platform(靛)/health(青)/view(灰)/delete(红)，绿是剩下唯一没被占的色相；
    它落在「配置业务平台」(靛) 与「删除」(红) 之间，与上下邻居都拉得开。 */
 .sp-account-action-menu .sp-account-action-default {

@@ -9,6 +9,7 @@ import SupplierAccountsView from './SupplierAccountsView.vue'
 const supplierAccountMocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   listGroups: vi.fn(),
+  listProxies: vi.fn(),
   listAccounts: vi.fn(),
   listCustomPlatforms: vi.fn(),
   listAccountRateGuardUnbindLogs: vi.fn(),
@@ -32,6 +33,9 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: supplierAccountMocks.listGroups,
+    },
+    proxies: {
+      getAll: supplierAccountMocks.listProxies,
     },
   },
 }))
@@ -208,6 +212,22 @@ const AccountTestModalStub = defineComponent({
   setup(props) {
     return () => props.show
       ? h('section', { class: 'account-test-modal-stub' }, String(props.account?.name || ''))
+      : null
+  },
+})
+
+const EditAccountModalStub = defineComponent({
+  props: {
+    show: Boolean,
+    account: {
+      type: Object,
+      default: null,
+    },
+  },
+  emits: ['close', 'updated'],
+  setup(props) {
+    return () => props.show
+      ? h('section', { class: 'edit-account-modal-stub' }, String(props.account?.name || ''))
       : null
   },
 })
@@ -433,6 +453,7 @@ async function mountSupplierAccounts() {
         BaseDialog: BaseDialogStub,
         ConfirmDialog: ConfirmDialogStub,
         AccountTestModal: AccountTestModalStub,
+        EditAccountModal: EditAccountModalStub,
         DataTable: DataTableStub,
         Input: InputStub,
         Select: SelectStub,
@@ -465,6 +486,7 @@ describe('supplier local data views component usage', () => {
       { id: 201, name: '本地分组 A', platform: 'openai' },
       { id: 202, name: '本地分组 B', platform: 'anthropic' },
     ])
+    supplierAccountMocks.listProxies.mockResolvedValue([])
     supplierAccountMocks.listAccounts.mockResolvedValue({
       items: testAccounts,
       total: testAccounts.length,
@@ -1195,7 +1217,8 @@ describe('supplier local data views component usage', () => {
     expect(accountsSource).toContain('业务平台跟随接入平台')
     expect(accountsSource).toContain('setSupplierLocalAccountPlatformOverride')
     expect(accountsSource).toContain('clearSupplierLocalAccountPlatformOverride')
-    expect(accountsSource).toContain('runAccountActionMenuAction(openLocalAccountEditor)')
+    // 「编辑」已提到行内，不再走「更多」下拉的分发函数。
+    expect(accountsSource).toContain('@click.stop="openLocalAccountEditor(account)"')
     expect(supplierProviderDataSource).toContain('export async function setSupplierLocalAccountPlatformOverride')
     expect(supplierProviderDataSource).toContain('export async function clearSupplierLocalAccountPlatformOverride')
     expect(supplierProviderDataSource).toContain('`/admin/supplier-management/accounts/${localAccountID}/platform-override`')
@@ -1304,7 +1327,8 @@ describe('supplier local data views component usage', () => {
   it('provides edit, binding, and delete actions for matched local accounts', () => {
     expect(accountsSource).toContain("import { CreateAccountModal, EditAccountModal } from '@/components/account'")
     expect(accountsSource).toContain("import GroupSelector from '@/components/common/GroupSelector.vue'")
-    expect(accountsSource).toContain('@click="runAccountActionMenuAction(openLocalAccountEditor)"')
+    // 「编辑」是行内高频动作，直接调用，不再经过「更多」下拉。
+    expect(accountsSource).toContain('@click.stop="openLocalAccountEditor(account)"')
     expect(accountsSource).toContain('@click.stop="openAccountBindingEditor(account)"')
     expect(accountsSource).toContain('@click="runAccountActionMenuAction(requestDeleteLocalAccount)"')
     expect(accountsSource).toContain('<EditAccountModal')
@@ -1339,6 +1363,24 @@ describe('supplier local data views component usage', () => {
     expect(supplierAccountMocks.listAccounts).toHaveBeenCalledTimes(2)
     expect(accountsSource).toContain("import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'")
     expect(accountsSource).toContain('@test-result="handleAccountTestResult"')
+
+    wrapper.unmount()
+  })
+
+  it('opens the local-account editor from the row-level edit action', async () => {
+    const wrapper = await mountSupplierAccounts()
+
+    expect(wrapper.find('[data-test="supplier-account-edit-101"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="supplier-account-edit-105"]').exists()).toBe(true)
+    // 未匹配 / 匹配冲突的行没有可管理的本地账号，行内编辑也一并隐藏。
+    expect(wrapper.find('[data-test="supplier-account-edit-2"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="supplier-account-edit-3"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="supplier-account-edit-101"]').trigger('click')
+    await flushPromises()
+
+    expect(supplierAccountMocks.getAccountById).toHaveBeenCalledWith(101)
+    expect(wrapper.get('.edit-account-modal-stub').text()).toBe('本地账号 A')
 
     wrapper.unmount()
   })
@@ -1392,7 +1434,7 @@ describe('supplier local data views component usage', () => {
   })
 
   it('shows pending account rate guard log count on the toolbar button', () => {
-    expect(accountsSource).toContain("import { listAccountRateGuardUnbindLogs, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'")
+    expect(accountsSource).toContain("import { listAccountRateGuardUnbindLogs, listRuns, listTasks as listAutomationTasks } from '@/api/admin/supplierAutomation'")
     expect(accountsSource).toContain('const accountRateGuardPendingCount = ref(0)')
     expect(accountsSource).toContain('await loadAccountRateGuardPendingCount()')
     expect(accountsSource).toContain("result: 'unbound'")
