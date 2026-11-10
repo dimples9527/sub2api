@@ -321,9 +321,12 @@ describe('调度切换日志的两个入口', () => {
     expect(automationSource).not.toContain(':account-id=')
   })
 
-  it('上游账号页：工具栏看全部，行内锁定本账号', () => {
+  it('上游账号页：工具栏看全部，更多菜单锁定本账号', () => {
     expect(accountsSource).toContain('data-test="supplier-account-election-change-logs"')
     expect(accountsSource).toContain('本账号调度切换')
+    // 行内入口已收进「更多」菜单，点击后先关面板再打开日志弹窗。
+    expect(accountsSource).toContain('@click="runAccountActionMenuAction(openElectionChangeLogs)"')
+    expect(accountsSource).not.toContain('@click.stop="openElectionChangeLogs(account)"')
     expect(accountsSource).toContain('<SupplierGroupElectionChangeLogDialog')
     expect(accountsSource).toContain(':account-id="electionChangeLogAccountID"')
     expect(accountsSource).toContain(':account-label="electionChangeLogAccountLabel"')
@@ -333,12 +336,11 @@ describe('调度切换日志的两个入口', () => {
     expect(accountsSource).toContain('v-if="canManageLocalAccount(account)"')
   })
 
-  it('上游账号页的行内入口沿用该页既有按钮色板', () => {
-    // 行内按钮不是工具栏按钮：本页给行内动作统一用 `.sp-account-row-actions .sp-account-action-*`
-    // 前缀给色，并且 hover 用的是 currentColor 的公共规则 —— 漏了这两处按钮会变成默认灰。
-    expect(accountsSource).toContain('.sp-account-row-actions .sp-account-action-election-log {')
+  it('上游账号页的更多菜单入口沿用该页日志色板', () => {
+    // 菜单项不是行内描边按钮：沿用其它菜单项的写法，只保留文字颜色（橙）。
+    expect(accountsSource).toContain('.sp-account-action-menu .sp-account-action-election-log {')
     expect(accountsSource).toContain('color: var(--sp-orange)')
-    expect(accountsSource).toContain('.sp-account-row-actions .sp-account-action-election-log:hover,')
+    expect(accountsSource).not.toContain('.sp-account-row-actions .sp-account-action-election-log')
   })
 
   it('三处入口同色（橙），且与琥珀色的倍率日志按钮不相邻', () => {

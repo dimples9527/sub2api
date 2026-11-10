@@ -619,14 +619,7 @@
 
           <template #cell-actions="{ row: account }">
             <div class="sp-account-row-actions" @click.stop>
-              <!-- 未匹配到本地账号的行没有可用的 account_id，传上去会静默查不到数据，所以整条不显示。 -->
-              <button
-                v-if="canManageLocalAccount(account)"
-                class="sp-button small ghost sp-account-action-election-log"
-                type="button"
-                :data-test="'supplier-account-election-logs-' + account.local_account_id"
-                @click.stop="openElectionChangeLogs(account)"
-              >本账号调度切换</button>
+              <!-- 未匹配到本地账号的行没有可管理的本地账号，行内动作整组隐藏。 -->
               <template v-if="canManageLocalAccount(account)">
                 <button
                   class="sp-button small sp-account-action-test"
@@ -636,23 +629,23 @@
                   @click.stop="openLocalAccountTest(account)"
                 >{{ testingAccountID === account.local_account_id ? '加载中…' : '测试账号' }}</button>
                 <button
+                  class="sp-button small sp-account-action-binding"
+                  type="button"
+                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
+                  @click.stop="openAccountBindingEditor(account)"
+                >编辑绑定</button>
+                <button
                   class="sp-button small sp-account-action-edit"
                   type="button"
                   :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
                   :data-test="`supplier-account-edit-${account.local_account_id}`"
                   @click.stop="openLocalAccountEditor(account)"
                 >编辑</button>
-                <button
-                  class="sp-button small sp-account-action-binding"
-                  type="button"
-                  :disabled="accountActionLoadingID === account.local_account_id || testingAccountID === account.local_account_id || duplicatingAccountID === account.local_account_id"
-                  @click.stop="openAccountBindingEditor(account)"
-                >编辑绑定</button>
               </template>
               <!--
                 其余动作收进「更多」下拉。操作栏原本最多并排 12 个按钮，每一行都把列宽顶到需要横向滚动，
                 而「查看」「恢复状态」这类低频动作夹在中间，找起来比按分组展开更慢。
-                这里只留调度切换 / 测试 / 编辑 / 绑定四个高频动作，其余按需展开。
+                这里只留测试 / 绑定 / 编辑三个高频动作，其余按需展开。
               -->
               <button
                 class="sp-button small ghost sp-account-more"
@@ -1923,7 +1916,7 @@
     </BaseDialog>
 
     <!--
-      「更多」下拉：操作栏只留调度切换 / 测试 / 编辑 / 绑定四个高频动作，其余在这里按需展开。
+      「更多」下拉：操作栏只留测试 / 绑定 / 编辑三个高频动作，其余在这里按需展开。
       必须 Teleport 到 body —— 表格容器带 overflow，面板若留在单元格里会被裁掉，
       所以沿用分组管理页的做法：全屏遮罩 + fixed 定位 + 由点击位置换算坐标。
     -->
@@ -1971,6 +1964,17 @@
             <span>查看健康趋势</span>
           </button>
           <template v-if="canManageLocalAccount(account)">
+            <!-- 调度切换日志需要本地账号 ID，未匹配行不显示；与工具栏入口同色（橙）。 -->
+            <button
+              type="button"
+              class="sp-account-action-item sp-account-action-election-log"
+              :data-test="'supplier-account-election-logs-' + account.local_account_id"
+              title="查看本账号的调度切换记录"
+              @click="runAccountActionMenuAction(openElectionChangeLogs)"
+            >
+              <Icon name="clock" size="sm" />
+              <span>本账号调度切换</span>
+            </button>
             <button
               type="button"
               class="sp-account-action-item sp-account-action-recover"
@@ -3971,8 +3975,8 @@ const accountActionMenuTargets = computed(() =>
 function openAccountActionMenu(account: SupplierProviderAccount, event: MouseEvent) {
   const menuWidth = 200
   // 估算值只用于「贴边时上翻」，多一个菜单项就多一行高度，估小了会让底部被视口裁掉。
-  // 当前最多 11 个菜单项（含删除类动作），按每行约 35px 加内边距估算。
-  const menuHeight = 410
+  // 当前最多 12 个菜单项（含删除类动作），按每行约 35px 加内边距估算。
+  const menuHeight = 445
   const viewportPadding = 8
   accountActionMenu.open = true
   accountActionMenu.account = account
@@ -6773,13 +6777,6 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-blue);
 }
 
-/* 与工具栏、分组管理页、任务中心的同名入口同色（橙）。 */
-.sp-account-row-actions .sp-account-action-election-log {
-  border-color: color-mix(in srgb, var(--sp-orange) 42%, var(--sp-line));
-  background: color-mix(in srgb, var(--sp-orange) 9%, var(--sp-panel));
-  color: var(--sp-orange);
-}
-
 .sp-account-row-actions .sp-account-action-edit {
   border-color: color-mix(in srgb, var(--sp-amber) 42%, var(--sp-line));
   background: color-mix(in srgb, var(--sp-amber) 9%, var(--sp-panel));
@@ -6793,7 +6790,6 @@ button.sp-guard-failure-hint:hover {
 }
 
 .sp-account-row-actions .sp-account-action-test:hover,
-.sp-account-row-actions .sp-account-action-election-log:hover,
 .sp-account-row-actions .sp-account-action-edit:hover,
 .sp-account-row-actions .sp-account-action-binding:hover,
 .sp-account-row-actions .sp-account-more:hover {
@@ -6905,6 +6901,11 @@ button.sp-guard-failure-hint:hover {
    等于让新入口跟一个不相关的入口撞色。该入口在面板里的位置是「恢复状态」与「复制账号」之间，
    取一个跟上下邻居都拉得开的色相；常见色相（蓝/琥珀/紫/橙/绿/红/青/靛）大多已被其它入口占掉，
    玫红是剩下的最优解。硬编码色值与本列 recover(#0d9488)、platform(#4f46e5) 的写法一致。 */
+/* 与工具栏、分组管理页、任务中心的同名入口同色（橙）。 */
+.sp-account-action-menu .sp-account-action-election-log {
+  color: var(--sp-orange);
+}
+
 .sp-account-action-menu .sp-account-action-recover {
   color: #0d9488;
 }
@@ -6925,7 +6926,7 @@ button.sp-guard-failure-hint:hover {
   color: var(--sp-cyan);
 }
 
-/* 「分组默认账号」用绿：面板里已占掉 recover(teal)/rename(玫红)/copy(紫)/
+/* 「分组默认账号」用绿：面板里已占掉 election(橙)/recover(teal)/rename(玫红)/copy(紫)/
    platform(靛)/health(青)/view(灰)/delete(红)，绿是剩下唯一没被占的色相；
    它落在「配置业务平台」(靛) 与「删除」(红) 之间，与上下邻居都拉得开。 */
 .sp-account-action-menu .sp-account-action-default {
