@@ -865,7 +865,7 @@ export default {
       },
       // 题型筛选：按这轮跑的题分生成题 / 逻辑题两档，默认生成题（作品墙）。
       typeFilterLabel: '题型',
-      // 判定筛选：历史是共享池子，一屏铺不下全部记录，故按判定筛 + 分页翻。
+      // 判定筛选：历史是共享池子，一屏铺不下全部记录，故按判定筛。
       filterLabel: '判定',
       filter: {
         all: '全部记录',
@@ -895,10 +895,7 @@ export default {
         yesterday: '昨天',
         date: '{month}-{day}'
       },
-      filterEmpty: '没有符合该条件的检测记录。',
-      prevPage: '上一页',
-      nextPage: '下一页',
-      pageStatus: '第 {page} / {pages} 页 · 共 {total} 条'
+      filterEmpty: '没有符合该条件的检测记录。'
     },
     errors: {
       needBaseUrl: '请填写上游 Base URL',

@@ -706,9 +706,9 @@
         </p>
         <div v-else ref="historyWallRef" class="ma-groups">
           <!-- 分组归类：同一分组的记录聚成一节，节头是分组名 + 条数 + 细线。
-               节头下方整组卡片铺成一行、不换行；一行放不下时由节头右端的
-               ‹ › 按钮横向滚动（行本身是滚动容器）。没命中分组的按上游
-               主机名归节（与缎带同一口径）。 -->
+               所有分组都展示，不跨分组分页；节头下方整组卡片铺成一行、不换行，
+               一行放不下时由节头右端的 ‹ › 按钮横向滚动（行本身是滚动容器）。
+               没命中分组的按上游主机名归节（与缎带同一口径）。 -->
           <template v-for="group in historyGroups" :key="group.key">
             <div class="ma-group-head">
               <h3 class="ma-group-name" :class="{ 'ma-group-name-hidden': group.hidden }">{{ group.label }}</h3>
@@ -967,36 +967,6 @@
             </div>
           </template>
         </div>
-        <!-- 翻页器：历史一次最多 BAR_COUNT 条，分页是纯客户端的（列表接口只给
-             limit，没有 offset / status 参数），不为此动后端。页码用夹紧后的
-             historyPageSafe，筛掉大半记录时按钮的禁用态不会闪一下越界值。 -->
-        <nav v-if="filteredHistory.length" class="ma-pager" :aria-label="t('modelDegradation.history.title')">
-          <button
-            type="button"
-            class="ma-pager-btn"
-            :disabled="historyPageSafe <= 1"
-            @click="historyPage = historyPageSafe - 1"
-          >
-            {{ t('modelDegradation.history.prevPage') }}
-          </button>
-          <span class="ma-pager-status" role="status">
-            {{
-              t('modelDegradation.history.pageStatus', {
-                page: historyPageSafe,
-                pages: historyPageCount,
-                total: filteredHistory.length
-              })
-            }}
-          </span>
-          <button
-            type="button"
-            class="ma-pager-btn"
-            :disabled="historyPageSafe >= historyPageCount"
-            @click="historyPage = historyPageSafe + 1"
-          >
-            {{ t('modelDegradation.history.nextPage') }}
-          </button>
-        </nav>
       </section>
     </div>
   </AppLayout>
@@ -1044,10 +1014,8 @@ const { copyToClipboard } = useClipboard()
 const accountName = computed(() => authStore.user?.username || authStore.user?.email || '')
 const accountId = computed(() => authStore.user?.id ?? null)
 
-// 监控状态条展示的检测次数（与源站的展示容量一致）。
+// 监控状态条展示的检测次数（与源站的展示容量一致），历史列表也按这个上限拉取。
 const BAR_COUNT = 60
-// 历史区每页铺这些条（翻页的页大小），避免一屏太多把页面拉长。
-const HISTORY_CARD_COUNT = 20
 
 // 不让浏览器把「别处存的账号密码」填进这两个输入框。
 // 这两个框正好是一个 text + 一个 password，Chrome 会当成登录表单，
@@ -1441,8 +1409,8 @@ const bars = computed(() => {
   return out
 })
 
-/* ---- 检测历史：题型筛选 + 判定筛选 + 分组筛选 + 翻页 ---- */
-// 四件事都在客户端做：列表接口只给了 limit，没有 offset / status / 题型 / 分组
+/* ---- 检测历史：题型筛选 + 判定筛选 + 分组筛选 ---- */
+// 三件事都在客户端做：列表接口只给了 limit，没有 offset / status / 题型 / 分组
 // 参数，而历史一次最多 BAR_COUNT 条，本地过滤足够，不为此去动后端。
 
 const HISTORY_FILTERS = ['all', 'passed', 'degraded', 'unknown', 'failed'] as const
@@ -1673,26 +1641,8 @@ const scheduleScrollSync = () => {
 
 const wallResizeObserver = new ResizeObserver(scheduleScrollSync)
 
-const historyPage = ref(1)
-const historyPageCount = computed(() =>
-  Math.max(1, Math.ceil(filteredHistory.value.length / HISTORY_CARD_COUNT))
-)
-
-// 页码夹在有效区间内：切到条数更少的筛选后，原来停在第 3 页就越界了。
-// 用计算值而不是在 watch 里回写 ref —— 后者要多一轮渲染才收敛，
-// 且翻页按钮的 disabled 会先按越界的旧值算一次。
-const historyPageSafe = computed(() =>
-  Math.min(Math.max(1, historyPage.value), historyPageCount.value)
-)
-
-// 当前这一页的卡片。
-const historyCards = computed(() => {
-  const start = (historyPageSafe.value - 1) * HISTORY_CARD_COUNT
-  return filteredHistory.value.slice(start, start + HISTORY_CARD_COUNT)
-})
-
-// 当前这一页按分组聚成若干节：节内保持时间倒序，节与节按组在页内首次出现的
-// 顺序排（最近有动静的组排最前）。分组只做归类展示，不参与分页计数。
+// 按分组聚成若干节：节内保持时间倒序，节与节按组首次出现（即最近一次检测）
+// 的顺序排 —— 所有分组都展示，不在分组之间分页；组内条数多了由该行横向滚动。
 // nodes 与 runs 同序（新的在前）：每张卡片正上方挂一个时间点，悬停节点给
 // 「时间 · 模型 · 分组」整串信息，点节点打开那一轮详情。
 const historyGroups = computed(() => {
@@ -1704,7 +1654,7 @@ const historyGroups = computed(() => {
     nodes: { tone: string; latest: boolean; label: string; title: string }[]
   }[] = []
   const index = new Map<string, (typeof sections)[number]>()
-  for (const run of historyCards.value) {
+  for (const run of filteredHistory.value) {
     const bucket = groupBucketOf(run)
     let section = index.get(bucket.key)
     if (!section) {
@@ -1742,12 +1692,6 @@ onUnmounted(() => {
   wallResizeObserver.disconnect()
   window.removeEventListener('scroll', scheduleScrollSync, { capture: true })
   cancelAnimationFrame(scrollFrame)
-})
-
-// 换筛选回到第 1 页：否则从「全部」第 3 页切到只有 1 页的筛选、再切回来，
-// 会莫名停在原来的第 3 页。三个筛选都要监听。
-watch([historyTypeFilter, historyFilter, historyGroupFilter], () => {
-  historyPage.value = 1
 })
 
 /* ============ 检测历史：卡片封面与悬停详情 ============ */
@@ -1996,18 +1940,18 @@ const itemAnswerText = (item: ModelDegradationItem) =>
 const artworkPreviewHtml = computed(() => renderHtmlOf(currentRun.value))
 
 // 卡片封面要用明细：生成题取作品源码，纯逻辑题取「请求回了什么」的补充说明。
-// 串行而不是并发：一次铺开二十个请求会把接口拖慢，也会把限流打出来。
+// 串行而不是并发：一次铺开几十个请求会把接口拖慢，也会把限流打出来。
 const prefetchTileDetails = async () => {
-  for (const run of historyCards.value) {
+  for (const run of filteredHistory.value) {
     if (detailCache.has(run.id)) continue
     await loadRunDetail(run.id)
   }
 }
 
-// 翻页 / 换筛选后要为这一页新露面的卡片补明细：封面（作品源码、判定概览的
-// 补充说明）都要 items 才画得出来，而列表接口不带 items。
-// 首屏那一次由 loadHistory 直接调，这里的 watch 只管后续翻页。
-watch([historyPageSafe, historyTypeFilter, historyFilter, historyGroupFilter], () => {
+// 换筛选后要为重新露面的卡片补明细：封面（作品源码、判定概览的补充说明）
+// 都要 items 才画得出来，而列表接口不带 items。
+// 首屏那一次由 loadHistory 直接调，这里的 watch 只管后续筛选。
+watch([historyTypeFilter, historyFilter, historyGroupFilter], () => {
   void prefetchTileDetails()
 })
 
@@ -4130,61 +4074,6 @@ onUnmounted(() => {
   width: 190px;
 }
 
-/* 翻页器：居中一行，形制照源站的画廊分页。历史一次最多 BAR_COUNT 条，
-   分页是纯客户端的（列表接口只给 limit），所以这里只管画状态与两个按钮。 */
-.ma-pager {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 12px 16px;
-}
-
-/* 次级控件：与 .ma-ghost 同色系（描边 + 透明底），但比它矮半头，
-   免得在列表末尾抢眼。 */
-.ma-pager-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 32px;
-  padding: 0 14px;
-  border: 1px solid var(--ma-border-soft);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ma-control-fg);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    opacity 0.15s ease;
-}
-
-.ma-pager-btn:hover:not(:disabled) {
-  border-color: var(--ma-input-border);
-  background: var(--ma-seg-bg);
-}
-
-.ma-pager-btn:focus-visible {
-  outline: 2px solid var(--ma-primary);
-  outline-offset: 2px;
-}
-
-.ma-pager-btn:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-/* 页码状态：数字用等宽字形，翻页时宽度不跳。 */
-.ma-pager-status {
-  color: var(--ma-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 /* ============ 卡片时间点：每张卡片正上方一个节点，连线垂到卡片 ============ */
 /* 节点定在卡片正上方（水平居中），一行内均匀分布；下面一条细线垂到卡片上沿，
    把「点」和「卡」扣在一起；同一行相邻节点之间再用横线连成一条轴。
@@ -4351,7 +4240,7 @@ onUnmounted(() => {
   transform: translateY(-50%);
 }
 
-/* 条数：小圆角胶囊，数字用等宽字形，翻页时宽度不跳。 */
+/* 条数：小圆角胶囊，数字用等宽字形，筛选时宽度不跳。 */
 .ma-group-count {
   padding: 1px 7px;
   border-radius: 999px;

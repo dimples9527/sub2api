@@ -896,10 +896,7 @@ export default {
         yesterday: 'Yesterday',
         date: '{month}/{day}'
       },
-      filterEmpty: 'No detection records match this filter.',
-      prevPage: 'Previous',
-      nextPage: 'Next',
-      pageStatus: 'Page {page} / {pages} · {total} total'
+      filterEmpty: 'No detection records match this filter.'
     },
     errors: {
       needBaseUrl: 'Enter the upstream Base URL',
