@@ -200,6 +200,11 @@ func (r *modelDegradationRepository) GetRun(ctx context.Context, runID int64) (*
 
 // ListRuns 读取共享的检测历史，按时间倒序。列表不返回明细，详情按需再查。
 //
+// 取样按分组轮转：先按组取最新一条，再取每组第二新的一条，直到 limit 用完。
+// 不能直接取全局最新 limit 条 —— 一个高频分组就能把名额占满，其它分组整段消失
+// （分页时期表现为「第一页只有一个分组」）。分组口径与前端一致：优先 group_name，
+// 没命中分组时按上游主机名归桶。
+//
 // includeHidden=false 时按管理端配置过滤掉隐藏的分组 / 第三方上游记录（普通用户视图），
 // 过滤放在 SQL 里而不是读出来再筛：LIMIT 的口径要保持一致，隐藏记录不能白占名额。
 func (r *modelDegradationRepository) ListRuns(ctx context.Context, limit int, includeHidden bool) ([]service.ModelDegradationRun, error) {
@@ -216,9 +221,22 @@ func (r *modelDegradationRepository) ListRuns(ctx context.Context, limit int, in
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		modelDegradationRunSelect+visibilityFilter+`
-ORDER BY r.created_at DESC, r.id DESC
-LIMIT $1`,
+		`WITH ranked AS (
+    SELECT r.id, r.created_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY COALESCE(NULLIF(r.group_name, ''), 'h:' || `+modelAuditHistoryHostOfR+`)
+               ORDER BY r.created_at DESC, r.id DESC
+           ) AS group_rank
+    FROM model_audit_runs r`+visibilityFilter+`
+),
+picked AS (
+    SELECT id FROM ranked
+    ORDER BY group_rank ASC, created_at DESC, id DESC
+    LIMIT $1
+)
+`+modelDegradationRunSelect+`
+JOIN picked p ON p.id = r.id
+ORDER BY r.created_at DESC, r.id DESC`,
 		limit,
 	)
 	if err != nil {
