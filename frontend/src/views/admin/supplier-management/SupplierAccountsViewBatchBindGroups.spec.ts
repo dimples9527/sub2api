@@ -87,9 +87,9 @@ describe('SupplierAccountsView 批量绑定分组', () => {
     expect(apiSource).toContain('batchBindSupplierAccountGroups,')
   })
 
-  it('「按分组绑定账号」弹窗提供供应商筛选，复用列表页同一份供应商选项', () => {
+  it('「按分组绑定账号」弹窗提供供应商筛选，使用不受状态筛选影响的全量供应商选项', () => {
     expect(source).toContain('v-model="bindByGroupProviderFilter"')
-    // 不另造一份选项：与顶部主列表筛选共用 providerOptions，避免两处口径漂移
+    // 弹窗没有供应商状态筛选，必须保留全量供应商；顶部主列表则用 providerFilterOptions。
     expect(source).toContain(':options="providerOptions"')
     expect(source).toContain('const bindByGroupProviderFilter = ref(0)')
   })

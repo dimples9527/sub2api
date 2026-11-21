@@ -49,7 +49,7 @@
             <Select
               v-model="providerID"
               class="w-full"
-              :options="providerOptions"
+              :options="providerFilterOptions"
               :searchable="false"
             />
           </div>
@@ -3057,10 +3057,27 @@ const cnyFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 2,
 })
 
+// 弹窗里的供应商筛选仍用全量列表：它不受列表页「供应商状态」筛选影响。
 const providerOptions = computed<SelectOption[]>(() => [
   { value: 0, label: '全部供应商' },
   ...providers.value.map(provider => ({ value: provider.id, label: provider.name })),
 ])
+
+// 顶部供应商下拉跟随「供应商状态」：默认只看已启用时，已关闭供应商不该出现，
+// 否则选中后会被相邻的状态筛选整页过滤掉，看起来像该供应商没有账号。
+// 要单独查某个已关闭供应商，先把状态切到「已关闭供应商」或「全部供应商状态」。
+const providerFilterOptions = computed<SelectOption[]>(() => [
+  { value: 0, label: '全部供应商' },
+  ...providers.value
+    .filter(provider => providerMatchesStatusFilter(provider, providerStatusFilter.value))
+    .map(provider => ({ value: provider.id, label: provider.name })),
+])
+
+function providerMatchesStatusFilter(provider: SupplierProvider, filter: string): boolean {
+  if (filter === 'all') return true
+  return filter === 'enabled' ? provider.enabled !== false : provider.enabled === false
+}
+
 const providerStatusFilterOptions: SelectOption[] = [
   { value: 'all', label: '全部供应商状态' },
   { value: 'enabled', label: '已启用供应商' },
@@ -3416,6 +3433,15 @@ let accountFiltersInitialized = false
 
 watch([providerID, providerStatusFilter, groupID, activeFilter, upstreamStatusFilter], () => {
   if (!accountFiltersInitialized) return
+  // 状态筛选变化后，已选供应商可能不再属于当前状态（如已关闭被切到默认的已启用）。
+  // 先清空供应商选择，交给 providerID 的这一次变化去拉数据，避免保留一个看不见的筛选条件。
+  if (
+    providerID.value !== 0
+    && !providerFilterOptions.value.some(option => option.value === providerID.value)
+  ) {
+    providerID.value = 0
+    return
+  }
   resetPageAndLoad()
 })
 
@@ -3493,8 +3519,9 @@ function accountMatchesProviderStatusFilter(
 ): boolean {
   if (filter === 'all') return true
   const provider = providers.value.find(item => item.id === account.provider_id)
-  const isEnabled = provider?.enabled !== false
-  return filter === 'enabled' ? isEnabled : !isEnabled
+  // 供应商列表里找不到的账号按已启用处理，与筛选选项的兜底口径一致。
+  if (!provider) return filter === 'enabled'
+  return providerMatchesStatusFilter(provider, filter)
 }
 
 function applyAccountQuickFilterPage() {

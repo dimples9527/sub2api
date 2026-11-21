@@ -74,4 +74,11 @@ describe('供应商状态筛选', () => {
     expect(source).toContain('watch([providerID, providerStatusFilter, groupID')
     expect(source).toContain('applyAccountQuickFilterPage()')
   })
+
+  it('供应商下拉跟随状态筛选，避免选中已关闭供应商后列表恒为空', () => {
+    expect(source).toContain(':options="providerFilterOptions"')
+    expect(source).toContain('providerMatchesStatusFilter(provider, providerStatusFilter.value)')
+    // 状态切换后已选供应商被过滤掉时先清空，避免留下看不见的筛选条件。
+    expect(source).toContain('providerID.value = 0')
+  })
 })
