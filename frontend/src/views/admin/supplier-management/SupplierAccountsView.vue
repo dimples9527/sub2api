@@ -2946,16 +2946,20 @@ const automationConfigDialogKind = ref<'' | AutomationConfigDialogKind>('')
 const automationConfigDialogDraft = ref<SupplierAutomationConfig | null>(null)
 const automationConfigDialogBaseline = ref('')
 const automationConfigDialogSaving = ref(false)
-// 两个弹窗共用的候选数据，按需加载：不进这两个弹窗就一次也不请求。
+// 两个弹窗共用的候选数据：只在打开弹窗时拉取，并且每次打开都重新刷新。
 const dialogEligibleAccounts = ref<SupplierProviderAccount[]>([])
 const dialogDisabledProviderIds = ref<Set<number>>(new Set())
 const dialogLoadingAccounts = ref(false)
 const dialogAllGroups = ref<AdminGroup[]>([])
 const dialogLoadingGroups = ref(false)
 
+// 按需加载：不进弹窗不请求；但每次打开都重新取一份。
+// 账号可能在别处被停用、解绑或新增，复用上一次的列表会让弹窗一直展示过期数据。
 async function ensureDialogAccountsLoaded() {
-  if (dialogEligibleAccounts.value.length > 0) return
   dialogLoadingAccounts.value = true
+  // 先清空再拉：请求失败时不能继续展示上一次的旧列表，否则看起来像加载成功。
+  dialogEligibleAccounts.value = []
+  dialogDisabledProviderIds.value = new Set()
   try {
     // 供应商状态与账号列表并行取，别串行加一轮等待；供应商状态拿不到只影响标灰，不阻断。
     const providersPromise = fetchDisabledSupplierProviderIds()
@@ -2968,9 +2972,10 @@ async function ensureDialogAccountsLoaded() {
   }
 }
 
+// 与账号候选同理：分组启停状态也可能在弹窗关闭期间变化，不能复用旧列表。
 async function ensureDialogGroupsLoaded() {
-  if (dialogAllGroups.value.length > 0) return
   dialogLoadingGroups.value = true
+  dialogAllGroups.value = []
   try {
     // 含停用分组：已关闭择优的分组若此刻正被停用，仍要能看见它的开关状态。
     dialogAllGroups.value = await listAllGroupsIncludingInactive()
